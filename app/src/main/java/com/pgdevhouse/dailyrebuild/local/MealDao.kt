@@ -22,7 +22,7 @@ interface MealDao {
     @Insert
     suspend fun addIngredients(
         ingredients:
-        List<SavedMealIngredient>
+            List<SavedMealIngredient>
     )
 
     @Update
@@ -38,7 +38,7 @@ interface MealDao {
         """
     )
     suspend fun getAllMeals():
-            List<SavedMeal>
+        List<SavedMeal>
 
     @Transaction
     @Query(
@@ -49,7 +49,7 @@ interface MealDao {
         """
     )
     suspend fun getAllMealsWithIngredients():
-            List<SavedMealWithIngredients>
+        List<SavedMealWithIngredients>
 
     @Transaction
     @Query(
@@ -63,6 +63,16 @@ interface MealDao {
     suspend fun getMealWithIngredients(
         mealId: Long
     ): SavedMealWithIngredients?
+
+    @Query(
+        """
+        DELETE FROM saved_meal_ingredients
+        WHERE mealId = :mealId
+        """
+    )
+    suspend fun deleteIngredientsForMeal(
+        mealId: Long
+    )
 
     @Query(
         """

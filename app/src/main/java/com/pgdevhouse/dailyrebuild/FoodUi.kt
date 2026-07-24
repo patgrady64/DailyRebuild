@@ -22,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -63,9 +64,12 @@ fun FoodSection(
     lastScannedBarcode: String?,
     isScanningBarcode: Boolean,
     savedFoodCount: Int,
+    savedMealCount: Int,
     onScanFood: () -> Unit,
     onAddFoodManually: () -> Unit,
     onOpenSavedFoods: () -> Unit,
+    onBuildMeal: () -> Unit,
+    onOpenSavedMeals: () -> Unit,
     onDeleteEntry: (FoodLogEntry) -> Unit
 ) {
     val totalCalories =
@@ -208,6 +212,30 @@ fun FoodSection(
                     text = "Saved Foods ($savedFoodCount)"
                 )
             }
+
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
+
+            Button(
+                onClick = onBuildMeal,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Build Meal")
+            }
+
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
+
+            OutlinedButton(
+                onClick = onOpenSavedMeals,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Saved Meals ($savedMealCount)"
+                )
+            }
         }
     }
 }
@@ -261,6 +289,10 @@ private fun FoodEntryRow(
 @Composable
 fun ManualFoodDialog(
     initialFood: ScannedFoodPrefill? = null,
+    productOnlyMode: Boolean = false,
+    dialogTitle: String? = null,
+    isScanningBarcode: Boolean = false,
+    onScanBarcode: (() -> Unit)? = null,
     isSaving: Boolean,
     onDismiss: () -> Unit,
     onSave: (ManualFoodDraft) -> Unit
@@ -276,6 +308,14 @@ fun ManualFoodDialog(
             else ->
                 "new-manual-food"
         }
+
+    var barcodeText by rememberSaveable(
+        initialFoodKey
+    ) {
+        mutableStateOf(
+            initialFood?.barcode.orEmpty()
+        )
+    }
 
     var productName by rememberSaveable(
         initialFoodKey
@@ -417,6 +457,86 @@ fun ManualFoodDialog(
         )
     }
 
+    /*
+     * The food form may already be open when a barcode scan finishes.
+     * In that case, rememberSaveable can retain the blank values that
+     * existed before the scan. Explicitly copy every newly loaded
+     * product value into the visible form whenever initialFood changes.
+     */
+    LaunchedEffect(initialFood) {
+        barcodeText =
+            initialFood?.barcode.orEmpty()
+
+        productName =
+            initialFood?.name.orEmpty()
+
+        brand =
+            initialFood?.brand.orEmpty()
+
+        caloriesPerServingText =
+            initialFood
+                ?.caloriesPerServing
+                .toInitialFieldText()
+
+        proteinPerServingText =
+            initialFood
+                ?.proteinGramsPerServing
+                .toInitialFieldText()
+
+        carbohydratePerServingText =
+            initialFood
+                ?.carbohydrateGramsPerServing
+                .toInitialFieldText()
+
+        fatPerServingText =
+            initialFood
+                ?.fatGramsPerServing
+                .toInitialFieldText()
+
+        sodiumPerServingText =
+            initialFood
+                ?.sodiumMilligramsPerServing
+                .toInitialFieldText()
+
+        servingQuantityText =
+            initialFood
+                ?.servingQuantity
+                ?.toEditableFoodAmount()
+                ?: "1"
+
+        servingUnit =
+            initialFood
+                ?.servingUnit
+                ?.ifBlank {
+                    "serving"
+                }
+                ?: "piece"
+
+        packageQuantityText =
+            initialFood
+                ?.packageQuantity
+                ?.toEditableFoodAmount()
+                .orEmpty()
+
+        packageUnit =
+            initialFood
+                ?.packageUnit
+                .orEmpty()
+
+        saveAsFavorite =
+            initialFood?.isFavorite ?: false
+
+        enterAsLabelServings =
+            initialFood != null &&
+                initialFood.servingQuantity < 1.0
+
+        quantityEatenText = "1"
+
+        if (productOnlyMode) {
+            mealName = ""
+        }
+    }
+
     val caloriesPerServing =
         caloriesPerServingText.toDoubleOrNull() ?: 0.0
 
@@ -494,7 +614,10 @@ fun ManualFoodDialog(
         productName.isNotBlank() &&
                 servingUnit.isNotBlank() &&
                 servingQuantity > 0.0 &&
-                amountEntered > 0.0 &&
+                (
+                    productOnlyMode ||
+                        amountEntered > 0.0
+                    ) &&
                 caloriesPerServing >= 0.0 &&
                 proteinPerServing >= 0.0 &&
                 carbohydratePerServing >= 0.0 &&
@@ -524,10 +647,42 @@ fun ManualFoodDialog(
                     Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "Add Food Manually",
+                    text =
+                        dialogTitle
+                            ?: if (productOnlyMode) {
+                                "Create Saved Food"
+                            } else {
+                                "Add Food Manually"
+                            },
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )
+
+                if (productOnlyMode && onScanBarcode != null) {
+                    Button(
+                        onClick = onScanBarcode,
+                        enabled =
+                            !isSaving &&
+                                !isScanningBarcode,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text =
+                                if (isScanningBarcode) {
+                                    "Scanning / Looking Up..."
+                                } else {
+                                    "Scan New Food Barcode"
+                                }
+                        )
+                    }
+
+                    Text(
+                        text =
+                            "Scan the package to fill in available " +
+                                "product information, or enter it manually.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
 
                 if (initialFood != null) {
                     Card(
@@ -546,10 +701,10 @@ fun ManualFoodDialog(
                                 fontWeight = FontWeight.Bold
                             )
 
-                            if (!initialFood.barcode.isNullOrBlank()) {
+                            if (barcodeText.isNotBlank()) {
                                 Text(
                                     text =
-                                        "Barcode: ${initialFood.barcode}"
+                                        "Barcode found: $barcodeText"
                                 )
                             }
 
@@ -577,20 +732,63 @@ fun ManualFoodDialog(
                     }
                 }
 
-                Text(
-                    text =
-                        "Enter the serving shown on the nutrition label, " +
-                                "then enter how much you actually ate."
+                OutlinedTextField(
+                    value = barcodeText,
+
+                    onValueChange = { newValue ->
+                        barcodeText =
+                            newValue.filter {
+                                it.isDigit()
+                            }
+                    },
+
+                    label = {
+                        Text("Barcode — optional")
+                    },
+
+                    supportingText = {
+                        Text(
+                            "Correct this if the scanner did not " +
+                                "match the digits printed on the package."
+                        )
+                    },
+
+                    singleLine = true,
+
+                    keyboardOptions =
+                        KeyboardOptions(
+                            keyboardType =
+                                KeyboardType.Number
+                        ),
+
+                    modifier =
+                        Modifier.fillMaxWidth()
                 )
 
-                NumberField(
-                    value = servingQuantityText,
+                Text(
+                    text =
+                        if (productOnlyMode) {
+                            "Enter the product name and the serving shown " +
+                                "on its nutrition label."
+                        } else {
+                            "Enter the serving shown on the nutrition label, " +
+                                "then enter how much you actually ate."
+                        }
+                )
+
+                OutlinedTextField(
+                    value = productName,
                     onValueChange = {
-                        servingQuantityText = it
+                        productName = it
                     },
-                    label = "Serving amount",
-                    allowFractions = true,
-                    modifier = Modifier.weight(0.4f)
+                    label = {
+                        Text("Food name")
+                    },
+                    placeholder = {
+                        Text("Example: Whole Wheat Bread")
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
                 )
 
                 OutlinedTextField(
@@ -779,103 +977,155 @@ fun ManualFoodDialog(
 
                 HorizontalDivider()
 
-                Text(
-                    text = "Amount eaten",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
+                if (!productOnlyMode) {
+                    Text(
+                        text = "Amount eaten",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
 
-                Text(
-                    text = "How do you want to enter this amount?"
-                )
+                    Text(
+                        text = "How do you want to enter this amount?"
+                    )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement =
-                        Arrangement.spacedBy(8.dp)
-                ) {
-                    if (enterAsLabelServings) {
-                        Button(
-                            onClick = {
-                                enterAsLabelServings = true
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Label Servings")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement =
+                            Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (enterAsLabelServings) {
+                            Button(
+                                onClick = {
+                                    enterAsLabelServings = true
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Label Servings")
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    enterAsLabelServings = true
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Label Servings")
+                            }
                         }
-                    } else {
-                        OutlinedButton(
-                            onClick = {
-                                enterAsLabelServings = true
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Label Servings")
+
+                        if (!enterAsLabelServings) {
+                            Button(
+                                onClick = {
+                                    enterAsLabelServings = false
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Measured Amount")
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    enterAsLabelServings = false
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Measured Amount")
+                            }
                         }
                     }
 
-                    if (!enterAsLabelServings) {
-                        Button(
-                            onClick = {
-                                enterAsLabelServings = false
+                    Text(
+                        text =
+                            if (enterAsLabelServings) {
+                                "Enter how many nutrition-label servings you ate."
+                            } else {
+                                "Enter how many $servingUnit you ate."
                             },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Measured Amount")
-                        }
-                    } else {
-                        OutlinedButton(
-                            onClick = {
-                                enterAsLabelServings = false
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    NumberField(
+                        value = quantityEatenText,
+
+                        onValueChange = {
+                            quantityEatenText = it
+                        },
+
+                        label =
+                            if (enterAsLabelServings) {
+                                "Number of label servings"
+                            } else {
+                                "Amount in $servingUnit"
                             },
-                            modifier = Modifier.weight(1f)
+
+                        allowFractions = true
+                    )
+
+                    OutlinedTextField(
+                        value = mealName,
+                        onValueChange = {
+                            mealName = it
+                        },
+                        label = {
+                            Text("Meal name — optional")
+                        },
+                        placeholder = {
+                            Text("Four Hamburgers")
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp)
                         ) {
-                            Text("Measured Amount")
+                            Text(
+                                text = "Calculated amount",
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            Text(
+                                text =
+                                    if (enterAsLabelServings) {
+                                        "${formatFoodNumber(amountEntered)} " +
+                                                "label servings = " +
+                                                "${formatFoodNumber(measuredAmountEaten)} " +
+                                                servingUnit
+                                    } else {
+                                        "${formatFoodNumber(amountEntered)} " +
+                                                "$servingUnit = " +
+                                                "${formatFoodNumber(servingsEaten)} " +
+                                                "label servings"
+                                    }
+                            )
+
+                            Text(
+                                text =
+                                    "${formatFoodNumber(calculatedCalories)} " +
+                                            "calories",
+                                style =
+                                    MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            Text(
+                                text =
+                                    "${formatFoodNumber(calculatedProtein)} g protein  •  " +
+                                            "${formatFoodNumber(calculatedCarbohydrates)} g carbs"
+                            )
+
+                            Text(
+                                text =
+                                    "${formatFoodNumber(calculatedFat)} g fat  •  " +
+                                            "${formatFoodNumber(calculatedSodium)} mg sodium"
+                            )
                         }
                     }
+
                 }
-
-                Text(
-                    text =
-                        if (enterAsLabelServings) {
-                            "Enter how many nutrition-label servings you ate."
-                        } else {
-                            "Enter how many $servingUnit you ate."
-                        },
-                    style = MaterialTheme.typography.bodySmall
-                )
-
-                NumberField(
-                    value = quantityEatenText,
-
-                    onValueChange = {
-                        quantityEatenText = it
-                    },
-
-                    label =
-                        if (enterAsLabelServings) {
-                            "Number of label servings"
-                        } else {
-                            "Amount in $servingUnit"
-                        },
-
-                    allowFractions = true
-                )
-
-                OutlinedTextField(
-                    value = mealName,
-                    onValueChange = {
-                        mealName = it
-                    },
-                    label = {
-                        Text("Meal name — optional")
-                    },
-                    placeholder = {
-                        Text("Four Hamburgers")
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -892,55 +1142,6 @@ fun ManualFoodDialog(
                     Text(
                         text = "Save as favorite food"
                     )
-                }
-
-                Card(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp)
-                    ) {
-                        Text(
-                            text = "Calculated amount",
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Text(
-                            text =
-                                if (enterAsLabelServings) {
-                                    "${formatFoodNumber(amountEntered)} " +
-                                            "label servings = " +
-                                            "${formatFoodNumber(measuredAmountEaten)} " +
-                                            servingUnit
-                                } else {
-                                    "${formatFoodNumber(amountEntered)} " +
-                                            "$servingUnit = " +
-                                            "${formatFoodNumber(servingsEaten)} " +
-                                            "label servings"
-                                }
-                        )
-
-                        Text(
-                            text =
-                                "${formatFoodNumber(calculatedCalories)} " +
-                                        "calories",
-                            style =
-                                MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Text(
-                            text =
-                                "${formatFoodNumber(calculatedProtein)} g protein  •  " +
-                                        "${formatFoodNumber(calculatedCarbohydrates)} g carbs"
-                        )
-
-                        Text(
-                            text =
-                                "${formatFoodNumber(calculatedFat)} g fat  •  " +
-                                        "${formatFoodNumber(calculatedSodium)} mg sodium"
-                        )
-                    }
                 }
 
                 Row(
@@ -960,7 +1161,12 @@ fun ManualFoodDialog(
                         onClick = {
                             val product = FoodProduct(
                                 id = initialFood?.productId ?: 0,
-                                barcode = initialFood?.barcode,
+                                barcode =
+                                    barcodeText
+                                        .trim()
+                                        .ifBlank {
+                                            null
+                                        },
                                 name = productName.trim(),
                                 brand = brand.trim(),
 
@@ -1003,32 +1209,64 @@ fun ManualFoodDialog(
                                 product = product,
 
                                 quantityEaten =
-                                    amountEntered,
+                                    if (productOnlyMode) {
+                                        0.0
+                                    } else {
+                                        amountEntered
+                                    },
 
                                 unit =
-                                    foodEntryUnit,
+                                    if (productOnlyMode) {
+                                        servingUnit.trim()
+                                    } else {
+                                        foodEntryUnit
+                                    },
 
                                 mealName =
-                                    mealName
-                                        .trim()
-                                        .ifBlank {
-                                            null
-                                        },
+                                    if (productOnlyMode) {
+                                        null
+                                    } else {
+                                        mealName
+                                            .trim()
+                                            .ifBlank {
+                                                null
+                                            }
+                                    },
 
                                 calories =
-                                    calculatedCalories,
+                                    if (productOnlyMode) {
+                                        0.0
+                                    } else {
+                                        calculatedCalories
+                                    },
 
                                 proteinGrams =
-                                    calculatedProtein,
+                                    if (productOnlyMode) {
+                                        0.0
+                                    } else {
+                                        calculatedProtein
+                                    },
 
                                 carbohydrateGrams =
-                                    calculatedCarbohydrates,
+                                    if (productOnlyMode) {
+                                        0.0
+                                    } else {
+                                        calculatedCarbohydrates
+                                    },
 
                                 fatGrams =
-                                    calculatedFat,
+                                    if (productOnlyMode) {
+                                        0.0
+                                    } else {
+                                        calculatedFat
+                                    },
 
                                 sodiumMilligrams =
-                                    calculatedSodium
+                                    if (productOnlyMode) {
+                                        0.0
+                                    } else {
+                                        calculatedSodium
+                                    }
                             )
 
                             onSave(draft)
@@ -1040,6 +1278,8 @@ fun ManualFoodDialog(
                         Text(
                             if (isSaving) {
                                 "Saving..."
+                            } else if (productOnlyMode) {
+                                "Save Food"
                             } else {
                                 "Add Food"
                             }

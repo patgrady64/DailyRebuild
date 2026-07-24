@@ -29,7 +29,9 @@ import java.util.Locale
 fun SavedFoodsDialog(
     products: List<FoodProduct>,
     onDismiss: () -> Unit,
-    onSelectProduct: (FoodProduct) -> Unit
+    onUseProduct: (FoodProduct) -> Unit,
+    onEditProduct: (FoodProduct) -> Unit,
+    onDeleteProduct: (FoodProduct) -> Unit
 ) {
     Dialog(
         onDismissRequest = onDismiss
@@ -59,8 +61,7 @@ fun SavedFoodsDialog(
 
                         Text(
                             text =
-                                "Choose a product, then enter " +
-                                        "how much you ate.",
+                                "Use, correct, or remove reusable foods.",
                             style =
                                 MaterialTheme.typography.bodySmall
                         )
@@ -81,7 +82,7 @@ fun SavedFoodsDialog(
                     Text(
                         text =
                             "No foods have been saved yet. " +
-                                    "Scan or manually enter a food first."
+                                "Scan or manually enter a food first."
                     )
                 } else {
                     LazyColumn(
@@ -96,10 +97,14 @@ fun SavedFoodsDialog(
                         ) { product ->
                             SavedFoodRow(
                                 product = product,
-                                onSelect = {
-                                    onSelectProduct(
-                                        product
-                                    )
+                                onUse = {
+                                    onUseProduct(product)
+                                },
+                                onEdit = {
+                                    onEditProduct(product)
+                                },
+                                onDelete = {
+                                    onDeleteProduct(product)
                                 }
                             )
                         }
@@ -113,7 +118,9 @@ fun SavedFoodsDialog(
 @Composable
 private fun SavedFoodRow(
     product: FoodProduct,
-    onSelect: () -> Unit
+    onUse: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth()
@@ -144,10 +151,13 @@ private fun SavedFoodRow(
                     }
                 }
 
-                TextButton(
-                    onClick = onSelect
-                ) {
-                    Text("Use")
+                if (product.isFavorite) {
+                    Text(
+                        text = "Favorite",
+                        style =
+                            MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
 
@@ -160,8 +170,8 @@ private fun SavedFoodRow(
             Text(
                 text =
                     "Serving: " +
-                            "${formatSavedNumber(product.servingQuantity)} " +
-                            product.servingUnit,
+                        "${formatSavedNumber(product.servingQuantity)} " +
+                        product.servingUnit,
                 style =
                     MaterialTheme.typography.bodySmall
             )
@@ -169,7 +179,7 @@ private fun SavedFoodRow(
             Text(
                 text =
                     "${formatSavedNumber(product.caloriesPerServing)} " +
-                            "calories per serving",
+                        "calories per serving",
                 style =
                     MaterialTheme.typography.bodySmall
             )
@@ -181,8 +191,8 @@ private fun SavedFoodRow(
                 Text(
                     text =
                         "Package: " +
-                                "${formatSavedNumber(product.packageQuantity)} " +
-                                product.packageUnit,
+                            "${formatSavedNumber(product.packageQuantity)} " +
+                            product.packageUnit,
                     style =
                         MaterialTheme.typography.bodySmall
                 )
@@ -196,57 +206,69 @@ private fun SavedFoodRow(
                         MaterialTheme.typography.labelSmall
                 )
             }
+
+            Spacer(
+                modifier = Modifier.height(6.dp)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement =
+                    Arrangement.End
+            ) {
+                TextButton(
+                    onClick = onUse
+                ) {
+                    Text("Use")
+                }
+
+                TextButton(
+                    onClick = onEdit
+                ) {
+                    Text("Edit")
+                }
+
+                TextButton(
+                    onClick = onDelete
+                ) {
+                    Text("Delete")
+                }
+            }
         }
     }
 }
 
-/*
- * Converts a reusable local product into the same
- * prefilled form used after scanning a barcode.
- */
 fun FoodProduct.toFoodPrefill():
-        ScannedFoodPrefill {
+    ScannedFoodPrefill {
 
     return ScannedFoodPrefill(
         productId = id,
         barcode = barcode,
-
         name = name,
         brand = brand,
-
         caloriesPerServing =
             caloriesPerServing,
-
         proteinGramsPerServing =
             proteinGramsPerServing,
-
         carbohydrateGramsPerServing =
             carbohydrateGramsPerServing,
-
         fatGramsPerServing =
             fatGramsPerServing,
-
         sodiumMilligramsPerServing =
             sodiumMilligramsPerServing,
-
         servingQuantity =
             servingQuantity,
-
         servingUnit =
             servingUnit,
-
         packageQuantity =
             packageQuantity,
-
         packageUnit =
             packageUnit.orEmpty(),
-
         isFavorite =
             isFavorite,
-
         originalServingSize =
             "${formatSavedNumber(servingQuantity)} " +
-                    servingUnit
+                servingUnit
     )
 }
 
