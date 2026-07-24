@@ -126,4 +126,14 @@ interface FoodDao {
     suspend fun deleteProductById(
         productId: Long
     )
+
+    @Query(
+        """
+        DELETE FROM food_log_entries
+        WHERE mealLogId = :mealLogId
+        """
+    )
+    suspend fun deleteFoodEntriesByMealLogId(
+        mealLogId: String
+    )
 }

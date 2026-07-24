@@ -58,6 +58,56 @@ data class ManualFoodDraft(
     val sodiumMilligrams: Double
 )
 
+private sealed class FuelDisplayItem {
+
+    data class SingleFood(
+        val entry: FoodLogEntry
+    ) : FuelDisplayItem()
+
+    data class LoggedMeal(
+        val mealLogId: String,
+        val mealName: String,
+        val entries: List<FoodLogEntry>
+    ) : FuelDisplayItem()
+}
+
+private fun buildFuelDisplayItems(
+    entries: List<FoodLogEntry>
+): List<FuelDisplayItem> {
+    val items = mutableListOf<FuelDisplayItem>()
+    val handledMealLogIds = mutableSetOf<String>()
+
+    entries.forEach { entry ->
+        val mealLogId = entry.mealLogId
+
+        if (mealLogId.isNullOrBlank()) {
+            items += FuelDisplayItem.SingleFood(entry)
+            return@forEach
+        }
+
+        if (!handledMealLogIds.add(mealLogId)) {
+            return@forEach
+        }
+
+        val mealEntries =
+            entries.filter {
+                it.mealLogId == mealLogId
+            }
+
+        items +=
+            FuelDisplayItem.LoggedMeal(
+                mealLogId = mealLogId,
+                mealName =
+                    entry.mealName
+                        ?.takeIf { it.isNotBlank() }
+                        ?: "Saved Meal",
+                entries = mealEntries
+            )
+    }
+
+    return items
+}
+
 @Composable
 fun FoodSection(
     entries: List<FoodLogEntry>,
@@ -70,7 +120,8 @@ fun FoodSection(
     onOpenSavedFoods: () -> Unit,
     onBuildMeal: () -> Unit,
     onOpenSavedMeals: () -> Unit,
-    onDeleteEntry: (FoodLogEntry) -> Unit
+    onDeleteEntry: (FoodLogEntry) -> Unit,
+    onDeleteMealLog: (String) -> Unit
 ) {
     val totalCalories =
         entries.sumOf { it.calories }
@@ -86,6 +137,9 @@ fun FoodSection(
 
     val totalSodium =
         entries.sumOf { it.sodiumMilligrams }
+
+    val displayItems =
+        buildFuelDisplayItems(entries)
 
     Card(
         modifier = Modifier.fillMaxWidth()
@@ -119,13 +173,13 @@ fun FoodSection(
                 Text(
                     text =
                         "${formatFoodNumber(totalProtein)} g protein  •  " +
-                                "${formatFoodNumber(totalCarbohydrates)} g carbs"
+                            "${formatFoodNumber(totalCarbohydrates)} g carbs"
                 )
 
                 Text(
                     text =
                         "${formatFoodNumber(totalFat)} g fat  •  " +
-                                "${formatFoodNumber(totalSodium)} mg sodium"
+                            "${formatFoodNumber(totalSodium)} mg sodium"
                 )
 
                 HorizontalDivider(
@@ -134,16 +188,33 @@ fun FoodSection(
                     )
                 )
 
-                entries.forEachIndexed { index, entry ->
+                displayItems.forEachIndexed {
+                        index,
+                        item ->
 
-                    FoodEntryRow(
-                        entry = entry,
-                        onDelete = {
-                            onDeleteEntry(entry)
+                    when (item) {
+                        is FuelDisplayItem.SingleFood -> {
+                            FoodEntryRow(
+                                entry = item.entry,
+                                onDelete = {
+                                    onDeleteEntry(item.entry)
+                                }
+                            )
                         }
-                    )
 
-                    if (index < entries.lastIndex) {
+                        is FuelDisplayItem.LoggedMeal -> {
+                            LoggedMealCard(
+                                meal = item,
+                                onDeleteMeal = {
+                                    onDeleteMealLog(
+                                        item.mealLogId
+                                    )
+                                }
+                            )
+                        }
+                    }
+
+                    if (index < displayItems.lastIndex) {
                         HorizontalDivider(
                             modifier = Modifier.padding(
                                 vertical = 8.dp
@@ -200,6 +271,7 @@ fun FoodSection(
             ) {
                 Text("Add Food Manually")
             }
+
             Spacer(
                 modifier = Modifier.height(8.dp)
             )
@@ -241,6 +313,188 @@ fun FoodSection(
 }
 
 @Composable
+private fun LoggedMealCard(
+    meal: FuelDisplayItem.LoggedMeal,
+    onDeleteMeal: () -> Unit
+) {
+    var expanded by rememberSaveable(
+        meal.mealLogId
+    ) {
+        mutableStateOf(false)
+    }
+
+    var showDeleteConfirmation by rememberSaveable(
+        meal.mealLogId
+    ) {
+        mutableStateOf(false)
+    }
+
+    val calories =
+        meal.entries.sumOf { it.calories }
+
+    val protein =
+        meal.entries.sumOf { it.proteinGrams }
+
+    val carbohydrates =
+        meal.entries.sumOf {
+            it.carbohydrateGrams
+        }
+
+    val fat =
+        meal.entries.sumOf { it.fatGrams }
+
+    val sodium =
+        meal.entries.sumOf {
+            it.sodiumMilligrams
+        }
+
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement =
+                Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = meal.mealName,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                text =
+                    "${formatFoodNumber(calories)} calories",
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Text(
+                text =
+                    "${formatFoodNumber(protein)} g protein  •  " +
+                        "${formatFoodNumber(carbohydrates)} g carbs",
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            Text(
+                text =
+                    "${formatFoodNumber(fat)} g fat  •  " +
+                        "${formatFoodNumber(sodium)} mg sodium",
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            if (expanded) {
+                HorizontalDivider()
+
+                meal.entries.forEachIndexed {
+                        index,
+                        entry ->
+
+                    MealIngredientRow(
+                        entry = entry
+                    )
+
+                    if (index < meal.entries.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(
+                                vertical = 4.dp
+                            )
+                        )
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement =
+                    Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        expanded = !expanded
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        if (expanded) {
+                            "Hide Ingredients"
+                        } else {
+                            "Show Ingredients"
+                        }
+                    )
+                }
+
+                TextButton(
+                    onClick = {
+                        showDeleteConfirmation = true
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Delete Meal")
+                }
+            }
+        }
+    }
+
+    if (showDeleteConfirmation) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = {
+                showDeleteConfirmation = false
+            },
+            title = {
+                Text("Delete logged meal?")
+            },
+            text = {
+                Text(
+                    "This removes every ingredient from this " +
+                        "particular ${meal.mealName} entry. " +
+                        "The reusable Saved Meal will remain."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirmation = false
+                        onDeleteMeal()
+                    }
+                ) {
+                    Text("Delete Meal")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirmation = false
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun MealIngredientRow(
+    entry: FoodLogEntry
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = entry.productNameSnapshot,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        Text(
+            text =
+                "${formatFoodNumber(entry.quantity)} ${entry.unit}  •  " +
+                    "${formatFoodNumber(entry.calories)} calories",
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+@Composable
 private fun FoodEntryRow(
     entry: FoodLogEntry,
     onDelete: () -> Unit
@@ -273,7 +527,7 @@ private fun FoodEntryRow(
             Text(
                 text =
                     "${formatFoodNumber(entry.calories)} calories • " +
-                            "${formatFoodNumber(entry.proteinGrams)} g protein",
+                        "${formatFoodNumber(entry.proteinGrams)} g protein",
                 style = MaterialTheme.typography.bodySmall
             )
         }

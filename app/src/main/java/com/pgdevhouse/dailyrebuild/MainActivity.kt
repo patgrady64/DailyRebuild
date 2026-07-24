@@ -51,6 +51,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.UUID
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
@@ -903,6 +904,37 @@ fun DailyRebuildApp() {
                                     )
                             }
                         }
+                    },
+
+                    onDeleteMealLog = { mealLogId ->
+                        coroutineScope.launch {
+                            try {
+                                foodDao
+                                    .deleteFoodEntriesByMealLogId(
+                                        mealLogId
+                                    )
+
+                                foodEntries =
+                                    foodDao
+                                        .getEntriesForDate(
+                                            todayDate
+                                        )
+
+                                snackbarHostState
+                                    .showSnackbar(
+                                        message =
+                                            "Meal deleted from today."
+                                    )
+                            } catch (
+                                exception: Exception
+                            ) {
+                                snackbarHostState
+                                    .showSnackbar(
+                                        message =
+                                            "Could not delete meal."
+                                    )
+                            }
+                        }
                     }
                 )
 
@@ -1311,6 +1343,13 @@ fun DailyRebuildApp() {
                                 it.id
                             }
 
+                        /*
+                         * Every press of Add to Today gets a different ID.
+                         * Two PBJ additions therefore remain separate groups.
+                         */
+                        val mealLogId =
+                            UUID.randomUUID().toString()
+
                         val entriesToAdd =
                             savedMeal.ingredients
                                 .sortedBy {
@@ -1370,6 +1409,9 @@ fun DailyRebuildApp() {
 
                                         mealName =
                                             savedMeal.meal.name,
+
+                                        mealLogId =
+                                            mealLogId,
 
                                         productNameSnapshot =
                                             product.name,

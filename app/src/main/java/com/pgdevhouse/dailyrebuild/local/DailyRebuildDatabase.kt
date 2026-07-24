@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SavedMeal::class,
         SavedMealIngredient::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class DailyRebuildDatabase :
@@ -199,7 +199,8 @@ abstract class DailyRebuildDatabase :
                         )
                             .addMigrations(
                                 MIGRATION_1_2,
-                                MIGRATION_2_3
+                                MIGRATION_2_3,
+                                MIGRATION_3_4
                             )
                             .build()
 
@@ -295,5 +296,18 @@ abstract class DailyRebuildDatabase :
                     )
                 }
             }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+
+            override fun migrate(
+                database: SupportSQLiteDatabase
+            ) {
+                database.execSQL(
+                    "ALTER TABLE food_log_entries " +
+                            "ADD COLUMN mealLogId TEXT"
+                )
+            }
+        }
+
     }
 }

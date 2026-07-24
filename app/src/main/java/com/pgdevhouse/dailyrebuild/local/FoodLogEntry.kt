@@ -57,6 +57,7 @@ data class FoodLogEntry(
      * Dinner
      */
     val mealName: String? = null,
+    val mealLogId: String? = null,
 
     /*
      * Nutrition is saved as a snapshot.
