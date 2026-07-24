@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.pgdevhouse.dailyrebuild.data.local.DailyRebuildDatabase
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
 import com.pgdevhouse.dailyrebuild.ui.theme.DailyRebuildTheme
+import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -73,11 +74,16 @@ fun DailyRebuildApp() {
         database.dailyRecordDao()
     }
 
+    val foodDao = remember {
+        database.foodDao()
+    }
+
     val todayDate = remember {
         LocalDate.now().toString()
     }
 
     val coroutineScope = rememberCoroutineScope()
+
     val snackbarHostState = remember {
         SnackbarHostState()
     }
@@ -88,6 +94,20 @@ fun DailyRebuildApp() {
 
     var isSaving by remember {
         mutableStateOf(false)
+    }
+
+    var isAddingFood by remember {
+        mutableStateOf(false)
+    }
+
+    var showManualFoodDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var foodEntries by remember {
+        mutableStateOf<List<FoodLogEntry>>(
+            emptyList()
+        )
     }
 
     /*
@@ -185,12 +205,14 @@ fun DailyRebuildApp() {
     }
 
     /*
-     * Load today's saved record when the app opens.
+     * Load today's daily record and food entries.
      */
     LaunchedEffect(todayDate) {
         try {
             val savedRecord =
-                dailyRecordDao.getRecordByDate(todayDate)
+                dailyRecordDao.getRecordByDate(
+                    todayDate
+                )
 
             if (savedRecord != null) {
                 foodRecorded =
@@ -212,44 +234,69 @@ fun DailyRebuildApp() {
                     savedRecord.shinPain
 
                 plainReusableBottleCount =
-                    savedRecord.plainReusableBottleCount
+                    savedRecord
+                        .plainReusableBottleCount
 
                 mioReusableBottleCount =
-                    savedRecord.mioReusableBottleCount
+                    savedRecord
+                        .mioReusableBottleCount
 
                 plainDisposableBottleCount =
-                    savedRecord.plainDisposableBottleCount
+                    savedRecord
+                        .plainDisposableBottleCount
 
                 mioDisposableBottleCount =
-                    savedRecord.mioDisposableBottleCount
+                    savedRecord
+                        .mioDisposableBottleCount
 
                 morningAspirinTaken =
-                    savedRecord.morningAspirinTaken
+                    savedRecord
+                        .morningAspirinTaken
 
                 morningIbuprofenTaken =
-                    savedRecord.morningIbuprofenTaken
+                    savedRecord
+                        .morningIbuprofenTaken
 
                 morningNaproxenTaken =
-                    savedRecord.morningNaproxenTaken
+                    savedRecord
+                        .morningNaproxenTaken
 
                 morningAcetaminophenTaken =
-                    savedRecord.morningAcetaminophenTaken
+                    savedRecord
+                        .morningAcetaminophenTaken
 
                 nightIbuprofenTaken =
-                    savedRecord.nightIbuprofenTaken
+                    savedRecord
+                        .nightIbuprofenTaken
 
                 nightNaproxenTaken =
-                    savedRecord.nightNaproxenTaken
+                    savedRecord
+                        .nightNaproxenTaken
 
                 nightAcetaminophenTaken =
-                    savedRecord.nightAcetaminophenTaken
+                    savedRecord
+                        .nightAcetaminophenTaken
 
                 journalText =
                     savedRecord.journalText
             }
+
+            foodEntries =
+                foodDao.getEntriesForDate(
+                    todayDate
+                )
+
+            /*
+             * Existing food entries count as recording food,
+             * even if Save Today was not pressed afterward.
+             */
+            if (foodEntries.isNotEmpty()) {
+                foodRecorded = true
+            }
         } catch (exception: Exception) {
             snackbarHostState.showSnackbar(
-                message = "Could not load today's record."
+                message =
+                    "Could not load today's record."
             )
         } finally {
             isLoading = false
@@ -296,33 +343,98 @@ fun DailyRebuildApp() {
                 HeaderSection()
 
                 ProgressSection(
-                    completedTasks = completedTasks,
-                    progressPercent = progressPercent
+                    completedTasks =
+                        completedTasks,
+
+                    progressPercent =
+                        progressPercent
                 )
 
                 DailyTasksSection(
-                    foodRecorded = foodRecorded,
+                    foodRecorded =
+                        foodRecorded,
+
                     onFoodRecordedChange = {
                         foodRecorded = it
                     },
 
-                    walkCompleted = walkCompleted,
+                    walkCompleted =
+                        walkCompleted,
+
                     onWalkCompletedChange = {
                         walkCompleted = it
                     },
 
-                    painRecorded = painRecorded,
+                    painRecorded =
+                        painRecorded,
+
                     onPainRecordedChange = {
                         painRecorded = it
                     },
 
-                    mobilityCompleted = mobilityCompleted,
+                    mobilityCompleted =
+                        mobilityCompleted,
+
                     onMobilityCompletedChange = {
                         mobilityCompleted = it
                     }
                 )
 
-                FoodSection()
+                /*
+                 * This calls the new FoodSection in FoodUi.kt.
+                 *
+                 * The old no-argument FoodSection farther down
+                 * in MainActivity can remain for now. Kotlin
+                 * selects this version because the parameters differ.
+                 */
+                FoodSection(
+                    entries = foodEntries,
+
+                    onScanFood = {
+                        coroutineScope.launch {
+                            snackbarHostState
+                                .showSnackbar(
+                                    message =
+                                        "Barcode scanning is next."
+                                )
+                        }
+                    },
+
+                    onAddFoodManually = {
+                        showManualFoodDialog = true
+                    },
+
+                    onDeleteEntry = { entry ->
+                        coroutineScope.launch {
+                            try {
+                                foodDao
+                                    .deleteFoodEntryById(
+                                        entry.id
+                                    )
+
+                                foodEntries =
+                                    foodDao
+                                        .getEntriesForDate(
+                                            todayDate
+                                        )
+
+                                snackbarHostState
+                                    .showSnackbar(
+                                        message =
+                                            "Food entry deleted."
+                                    )
+                            } catch (
+                                exception: Exception
+                            ) {
+                                snackbarHostState
+                                    .showSnackbar(
+                                        message =
+                                            "Could not delete food."
+                                    )
+                            }
+                        }
+                    }
+                )
 
                 WaterSection(
                     nextBottleHasMio =
@@ -478,81 +590,86 @@ fun DailyRebuildApp() {
                             isSaving = true
 
                             try {
-                                val record = DailyRecord(
-                                    date = todayDate,
+                                val record =
+                                    DailyRecord(
+                                        date =
+                                            todayDate,
 
-                                    foodRecorded =
-                                        foodRecorded,
+                                        foodRecorded =
+                                            foodRecorded,
 
-                                    walkCompleted =
-                                        walkCompleted,
+                                        walkCompleted =
+                                            walkCompleted,
 
-                                    painRecorded =
-                                        painRecorded,
+                                        painRecorded =
+                                            painRecorded,
 
-                                    mobilityCompleted =
-                                        mobilityCompleted,
+                                        mobilityCompleted =
+                                            mobilityCompleted,
 
-                                    backPain =
-                                        backPain,
+                                        backPain =
+                                            backPain,
 
-                                    shinPain =
-                                        shinPain,
+                                        shinPain =
+                                            shinPain,
 
-                                    plainReusableBottleCount =
-                                        plainReusableBottleCount,
+                                        plainReusableBottleCount =
+                                            plainReusableBottleCount,
 
-                                    mioReusableBottleCount =
-                                        mioReusableBottleCount,
+                                        mioReusableBottleCount =
+                                            mioReusableBottleCount,
 
-                                    plainDisposableBottleCount =
-                                        plainDisposableBottleCount,
+                                        plainDisposableBottleCount =
+                                            plainDisposableBottleCount,
 
-                                    mioDisposableBottleCount =
-                                        mioDisposableBottleCount,
+                                        mioDisposableBottleCount =
+                                            mioDisposableBottleCount,
 
-                                    morningAspirinTaken =
-                                        morningAspirinTaken,
+                                        morningAspirinTaken =
+                                            morningAspirinTaken,
 
-                                    morningIbuprofenTaken =
-                                        morningIbuprofenTaken,
+                                        morningIbuprofenTaken =
+                                            morningIbuprofenTaken,
 
-                                    morningNaproxenTaken =
-                                        morningNaproxenTaken,
+                                        morningNaproxenTaken =
+                                            morningNaproxenTaken,
 
-                                    morningAcetaminophenTaken =
-                                        morningAcetaminophenTaken,
+                                        morningAcetaminophenTaken =
+                                            morningAcetaminophenTaken,
 
-                                    nightIbuprofenTaken =
-                                        nightIbuprofenTaken,
+                                        nightIbuprofenTaken =
+                                            nightIbuprofenTaken,
 
-                                    nightNaproxenTaken =
-                                        nightNaproxenTaken,
+                                        nightNaproxenTaken =
+                                            nightNaproxenTaken,
 
-                                    nightAcetaminophenTaken =
-                                        nightAcetaminophenTaken,
+                                        nightAcetaminophenTaken =
+                                            nightAcetaminophenTaken,
 
-                                    journalText =
-                                        journalText,
+                                        journalText =
+                                            journalText,
 
-                                    updatedAt =
-                                        System.currentTimeMillis()
-                                )
+                                        updatedAt =
+                                            System.currentTimeMillis()
+                                    )
 
                                 dailyRecordDao.saveRecord(
                                     record
                                 )
 
-                                snackbarHostState.showSnackbar(
-                                    message = "Today saved."
-                                )
+                                snackbarHostState
+                                    .showSnackbar(
+                                        message =
+                                            "Today saved."
+                                    )
                             } catch (
                                 exception: Exception
                             ) {
-                                snackbarHostState.showSnackbar(
-                                    message =
-                                        "Could not save today."
-                                )
+                                snackbarHostState
+                                    .showSnackbar(
+                                        message =
+                                            "Could not save today."
+                                    )
                             } finally {
                                 isSaving = false
                             }
@@ -582,6 +699,100 @@ fun DailyRebuildApp() {
                 )
             }
         }
+    }
+
+    if (showManualFoodDialog) {
+        ManualFoodDialog(
+            isSaving = isAddingFood,
+
+            onDismiss = {
+                if (!isAddingFood) {
+                    showManualFoodDialog = false
+                }
+            },
+
+            onSave = { draft ->
+                coroutineScope.launch {
+                    isAddingFood = true
+
+                    try {
+                        val productId =
+                            foodDao.addProduct(
+                                draft.product
+                            )
+
+                        val entry =
+                            FoodLogEntry(
+                                date =
+                                    todayDate,
+
+                                productId =
+                                    productId,
+
+                                quantity =
+                                    draft.quantityEaten,
+
+                                unit =
+                                    draft.unit,
+
+                                mealName =
+                                    draft.mealName,
+
+                                productNameSnapshot =
+                                    draft.product.name,
+
+                                calories =
+                                    draft.calories,
+
+                                proteinGrams =
+                                    draft.proteinGrams,
+
+                                carbohydrateGrams =
+                                    draft
+                                        .carbohydrateGrams,
+
+                                fatGrams =
+                                    draft.fatGrams,
+
+                                sodiumMilligrams =
+                                    draft
+                                        .sodiumMilligrams
+                            )
+
+                        foodDao.addFoodEntry(
+                            entry
+                        )
+
+                        foodEntries =
+                            foodDao
+                                .getEntriesForDate(
+                                    todayDate
+                                )
+
+                        foodRecorded = true
+
+                        showManualFoodDialog =
+                            false
+
+                        snackbarHostState
+                            .showSnackbar(
+                                message =
+                                    "Food added."
+                            )
+                    } catch (
+                        exception: Exception
+                    ) {
+                        snackbarHostState
+                            .showSnackbar(
+                                message =
+                                    "Could not add food."
+                            )
+                    } finally {
+                        isAddingFood = false
+                    }
+                }
+            }
+        )
     }
 }
 

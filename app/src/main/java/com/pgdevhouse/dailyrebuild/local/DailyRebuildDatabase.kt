@@ -4,39 +4,203 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
-        DailyRecord::class
+        DailyRecord::class,
+        FoodProduct::class,
+        FoodLogEntry::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
-abstract class DailyRebuildDatabase : RoomDatabase() {
+abstract class DailyRebuildDatabase :
+    RoomDatabase() {
 
-    abstract fun dailyRecordDao(): DailyRecordDao
+    abstract fun dailyRecordDao():
+            DailyRecordDao
+
+    abstract fun foodDao():
+            FoodDao
 
     companion object {
 
         @Volatile
-        private var INSTANCE: DailyRebuildDatabase? = null
+        private var INSTANCE:
+                DailyRebuildDatabase? = null
+
+        /*
+         * Version 1 contained only daily_records.
+         *
+         * Version 2 adds:
+         *
+         * food_products
+         * food_log_entries
+         */
+        private val MIGRATION_1_2 =
+            object : Migration(1, 2) {
+
+                override fun migrate(
+                    database:
+                    SupportSQLiteDatabase
+                ) {
+                    database.execSQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS
+                        `food_products`
+                        (
+                            `id` INTEGER PRIMARY KEY
+                                AUTOINCREMENT NOT NULL,
+
+                            `barcode` TEXT,
+
+                            `name` TEXT NOT NULL,
+
+                            `brand` TEXT NOT NULL,
+
+                            `caloriesPerServing`
+                                REAL NOT NULL,
+
+                            `proteinGramsPerServing`
+                                REAL NOT NULL,
+
+                            `carbohydrateGramsPerServing`
+                                REAL NOT NULL,
+
+                            `fatGramsPerServing`
+                                REAL NOT NULL,
+
+                            `sodiumMilligramsPerServing`
+                                REAL NOT NULL,
+
+                            `servingQuantity`
+                                REAL NOT NULL,
+
+                            `servingUnit`
+                                TEXT NOT NULL,
+
+                            `packageQuantity`
+                                REAL,
+
+                            `packageUnit`
+                                TEXT,
+
+                            `isFavorite`
+                                INTEGER NOT NULL,
+
+                            `createdAt`
+                                INTEGER NOT NULL,
+
+                            `updatedAt`
+                                INTEGER NOT NULL
+                        )
+                        """.trimIndent()
+                    )
+
+                    database.execSQL(
+                        """
+                        CREATE UNIQUE INDEX
+                        IF NOT EXISTS
+                        `index_food_products_barcode`
+                        ON `food_products` (`barcode`)
+                        """.trimIndent()
+                    )
+
+                    database.execSQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS
+                        `food_log_entries`
+                        (
+                            `id` INTEGER PRIMARY KEY
+                                AUTOINCREMENT NOT NULL,
+
+                            `date` TEXT NOT NULL,
+
+                            `productId`
+                                INTEGER NOT NULL,
+
+                            `quantity`
+                                REAL NOT NULL,
+
+                            `unit`
+                                TEXT NOT NULL,
+
+                            `mealName`
+                                TEXT,
+
+                            `productNameSnapshot`
+                                TEXT NOT NULL,
+
+                            `calories`
+                                REAL NOT NULL,
+
+                            `proteinGrams`
+                                REAL NOT NULL,
+
+                            `carbohydrateGrams`
+                                REAL NOT NULL,
+
+                            `fatGrams`
+                                REAL NOT NULL,
+
+                            `sodiumMilligrams`
+                                REAL NOT NULL,
+
+                            `createdAt`
+                                INTEGER NOT NULL,
+
+                            FOREIGN KEY (`productId`)
+                                REFERENCES
+                                `food_products` (`id`)
+                                ON UPDATE NO ACTION
+                                ON DELETE CASCADE
+                        )
+                        """.trimIndent()
+                    )
+
+                    database.execSQL(
+                        """
+                        CREATE INDEX IF NOT EXISTS
+                        `index_food_log_entries_date`
+                        ON `food_log_entries` (`date`)
+                        """.trimIndent()
+                    )
+
+                    database.execSQL(
+                        """
+                        CREATE INDEX IF NOT EXISTS
+                        `index_food_log_entries_productId`
+                        ON `food_log_entries`
+                        (`productId`)
+                        """.trimIndent()
+                    )
+                }
+            }
 
         fun getDatabase(
             context: Context
         ): DailyRebuildDatabase {
 
-            return INSTANCE ?: synchronized(this) {
+            return INSTANCE
+                ?: synchronized(this) {
 
-                val instance = Room.databaseBuilder(
-                    context.applicationContext,
-                    DailyRebuildDatabase::class.java,
-                    "daily_rebuild_database"
-                ).build()
+                    val instance =
+                        Room.databaseBuilder(
+                            context.applicationContext,
+                            DailyRebuildDatabase::class.java,
+                            "daily_rebuild_database"
+                        )
+                            .addMigrations(
+                                MIGRATION_1_2
+                            )
+                            .build()
 
-                INSTANCE = instance
+                    INSTANCE = instance
 
-                instance
-            }
+                    instance
+                }
         }
     }
 }
