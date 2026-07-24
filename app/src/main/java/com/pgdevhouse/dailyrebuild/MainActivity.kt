@@ -16,24 +16,34 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.pgdevhouse.dailyrebuild.data.local.DailyRebuildDatabase
+import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
 import com.pgdevhouse.dailyrebuild.ui.theme.DailyRebuildTheme
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -53,9 +63,35 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun DailyRebuildApp() {
+    val context = LocalContext.current
+
+    val database = remember {
+        DailyRebuildDatabase.getDatabase(context)
+    }
+
+    val dailyRecordDao = remember {
+        database.dailyRecordDao()
+    }
+
+    val todayDate = remember {
+        LocalDate.now().toString()
+    }
+
+    val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember {
+        SnackbarHostState()
+    }
+
+    var isLoading by remember {
+        mutableStateOf(true)
+    }
+
+    var isSaving by remember {
+        mutableStateOf(false)
+    }
 
     /*
-     * Daily task states
+     * Daily tasks
      */
     var foodRecorded by rememberSaveable {
         mutableStateOf(false)
@@ -74,7 +110,7 @@ fun DailyRebuildApp() {
     }
 
     /*
-     * Pain states
+     * Pain
      */
     var backPain by rememberSaveable {
         mutableStateOf(0f)
@@ -85,7 +121,7 @@ fun DailyRebuildApp() {
     }
 
     /*
-     * Water states
+     * Water
      */
     var nextBottleHasMio by rememberSaveable {
         mutableStateOf(false)
@@ -108,10 +144,116 @@ fun DailyRebuildApp() {
     }
 
     /*
-     * Journal state
+     * Morning pain relievers
+     */
+    var morningAspirinTaken by rememberSaveable {
+        mutableStateOf(true)
+    }
+
+    var morningIbuprofenTaken by rememberSaveable {
+        mutableStateOf(true)
+    }
+
+    var morningNaproxenTaken by rememberSaveable {
+        mutableStateOf(true)
+    }
+
+    var morningAcetaminophenTaken by rememberSaveable {
+        mutableStateOf(true)
+    }
+
+    /*
+     * Night pain relievers
+     */
+    var nightIbuprofenTaken by rememberSaveable {
+        mutableStateOf(true)
+    }
+
+    var nightNaproxenTaken by rememberSaveable {
+        mutableStateOf(true)
+    }
+
+    var nightAcetaminophenTaken by rememberSaveable {
+        mutableStateOf(true)
+    }
+
+    /*
+     * Journal
      */
     var journalText by rememberSaveable {
         mutableStateOf("")
+    }
+
+    /*
+     * Load today's saved record when the app opens.
+     */
+    LaunchedEffect(todayDate) {
+        try {
+            val savedRecord =
+                dailyRecordDao.getRecordByDate(todayDate)
+
+            if (savedRecord != null) {
+                foodRecorded =
+                    savedRecord.foodRecorded
+
+                walkCompleted =
+                    savedRecord.walkCompleted
+
+                painRecorded =
+                    savedRecord.painRecorded
+
+                mobilityCompleted =
+                    savedRecord.mobilityCompleted
+
+                backPain =
+                    savedRecord.backPain
+
+                shinPain =
+                    savedRecord.shinPain
+
+                plainReusableBottleCount =
+                    savedRecord.plainReusableBottleCount
+
+                mioReusableBottleCount =
+                    savedRecord.mioReusableBottleCount
+
+                plainDisposableBottleCount =
+                    savedRecord.plainDisposableBottleCount
+
+                mioDisposableBottleCount =
+                    savedRecord.mioDisposableBottleCount
+
+                morningAspirinTaken =
+                    savedRecord.morningAspirinTaken
+
+                morningIbuprofenTaken =
+                    savedRecord.morningIbuprofenTaken
+
+                morningNaproxenTaken =
+                    savedRecord.morningNaproxenTaken
+
+                morningAcetaminophenTaken =
+                    savedRecord.morningAcetaminophenTaken
+
+                nightIbuprofenTaken =
+                    savedRecord.nightIbuprofenTaken
+
+                nightNaproxenTaken =
+                    savedRecord.nightNaproxenTaken
+
+                nightAcetaminophenTaken =
+                    savedRecord.nightAcetaminophenTaken
+
+                journalText =
+                    savedRecord.journalText
+            }
+        } catch (exception: Exception) {
+            snackbarHostState.showSnackbar(
+                message = "Could not load today's record."
+            )
+        } finally {
+            isLoading = false
+        }
     }
 
     val completedTasks = listOf(
@@ -121,143 +263,346 @@ fun DailyRebuildApp() {
         mobilityCompleted
     ).count { it }
 
-    val progressPercent = completedTasks * 25
+    val progressPercent =
+        completedTasks * 25
 
     Scaffold(
-        modifier = Modifier.fillMaxSize()
-    ) { innerPadding ->
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-
-            HeaderSection()
-
-            ProgressSection(
-                completedTasks = completedTasks,
-                progressPercent = progressPercent
-            )
-
-            DailyTasksSection(
-                foodRecorded = foodRecorded,
-                onFoodRecordedChange = {
-                    foodRecorded = it
-                },
-                walkCompleted = walkCompleted,
-                onWalkCompletedChange = {
-                    walkCompleted = it
-                },
-                painRecorded = painRecorded,
-                onPainRecordedChange = {
-                    painRecorded = it
-                },
-                mobilityCompleted = mobilityCompleted,
-                onMobilityCompletedChange = {
-                    mobilityCompleted = it
-                }
-            )
-
-            FoodSection()
-
-            WaterSection(
-                nextBottleHasMio = nextBottleHasMio,
-                onNextBottleHasMioChange = {
-                    nextBottleHasMio = it
-                },
-
-                plainReusableBottleCount = plainReusableBottleCount,
-                mioReusableBottleCount = mioReusableBottleCount,
-                plainDisposableBottleCount = plainDisposableBottleCount,
-                mioDisposableBottleCount = mioDisposableBottleCount,
-
-                onAddReusableBottle = {
-                    if (nextBottleHasMio) {
-                        mioReusableBottleCount++
-                    } else {
-                        plainReusableBottleCount++
-                    }
-
-                    foodRecorded = true
-                },
-
-                onAddDisposableBottle = {
-                    if (nextBottleHasMio) {
-                        mioDisposableBottleCount++
-                    } else {
-                        plainDisposableBottleCount++
-                    }
-
-                    foodRecorded = true
-                },
-
-                onRemovePlainReusableBottle = {
-                    if (plainReusableBottleCount > 0) {
-                        plainReusableBottleCount--
-                    }
-                },
-
-                onRemoveMioReusableBottle = {
-                    if (mioReusableBottleCount > 0) {
-                        mioReusableBottleCount--
-                    }
-                },
-
-                onRemovePlainDisposableBottle = {
-                    if (plainDisposableBottleCount > 0) {
-                        plainDisposableBottleCount--
-                    }
-                },
-
-                onRemoveMioDisposableBottle = {
-                    if (mioDisposableBottleCount > 0) {
-                        mioDisposableBottleCount--
-                    }
-                }
-            )
-
-            PainSection(
-                backPain = backPain,
-                onBackPainChange = {
-                    backPain = it
-                    painRecorded = true
-                },
-
-                shinPain = shinPain,
-                onShinPainChange = {
-                    shinPain = it
-                    painRecorded = true
-                }
-            )
-
-            MedicationSection()
-
-            JournalSection(
-                journalText = journalText,
-                onJournalTextChange = {
-                    journalText = it
-                }
-            )
-
-            Button(
-                onClick = {
-                    /*
-                     * Permanent saving will be added next.
-                     */
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Save Today")
-            }
-
-            Spacer(
-                modifier = Modifier.height(24.dp)
+        modifier = Modifier.fillMaxSize(),
+        snackbarHost = {
+            SnackbarHost(
+                hostState = snackbarHostState
             )
         }
+    ) { innerPadding ->
+
+        if (isLoading) {
+            LoadingScreen(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .verticalScroll(
+                        rememberScrollState()
+                    )
+                    .padding(16.dp),
+                verticalArrangement =
+                    Arrangement.spacedBy(16.dp)
+            ) {
+                HeaderSection()
+
+                ProgressSection(
+                    completedTasks = completedTasks,
+                    progressPercent = progressPercent
+                )
+
+                DailyTasksSection(
+                    foodRecorded = foodRecorded,
+                    onFoodRecordedChange = {
+                        foodRecorded = it
+                    },
+
+                    walkCompleted = walkCompleted,
+                    onWalkCompletedChange = {
+                        walkCompleted = it
+                    },
+
+                    painRecorded = painRecorded,
+                    onPainRecordedChange = {
+                        painRecorded = it
+                    },
+
+                    mobilityCompleted = mobilityCompleted,
+                    onMobilityCompletedChange = {
+                        mobilityCompleted = it
+                    }
+                )
+
+                FoodSection()
+
+                WaterSection(
+                    nextBottleHasMio =
+                        nextBottleHasMio,
+
+                    onNextBottleHasMioChange = {
+                        nextBottleHasMio = it
+                    },
+
+                    plainReusableBottleCount =
+                        plainReusableBottleCount,
+
+                    mioReusableBottleCount =
+                        mioReusableBottleCount,
+
+                    plainDisposableBottleCount =
+                        plainDisposableBottleCount,
+
+                    mioDisposableBottleCount =
+                        mioDisposableBottleCount,
+
+                    onAddReusableBottle = {
+                        if (nextBottleHasMio) {
+                            mioReusableBottleCount++
+                        } else {
+                            plainReusableBottleCount++
+                        }
+
+                        foodRecorded = true
+                    },
+
+                    onAddDisposableBottle = {
+                        if (nextBottleHasMio) {
+                            mioDisposableBottleCount++
+                        } else {
+                            plainDisposableBottleCount++
+                        }
+
+                        foodRecorded = true
+                    },
+
+                    onRemovePlainReusableBottle = {
+                        if (
+                            plainReusableBottleCount > 0
+                        ) {
+                            plainReusableBottleCount--
+                        }
+                    },
+
+                    onRemoveMioReusableBottle = {
+                        if (
+                            mioReusableBottleCount > 0
+                        ) {
+                            mioReusableBottleCount--
+                        }
+                    },
+
+                    onRemovePlainDisposableBottle = {
+                        if (
+                            plainDisposableBottleCount > 0
+                        ) {
+                            plainDisposableBottleCount--
+                        }
+                    },
+
+                    onRemoveMioDisposableBottle = {
+                        if (
+                            mioDisposableBottleCount > 0
+                        ) {
+                            mioDisposableBottleCount--
+                        }
+                    }
+                )
+
+                PainSection(
+                    backPain = backPain,
+
+                    onBackPainChange = {
+                        backPain = it
+                        painRecorded = true
+                    },
+
+                    shinPain = shinPain,
+
+                    onShinPainChange = {
+                        shinPain = it
+                        painRecorded = true
+                    }
+                )
+
+                MedicationSection(
+                    morningAspirinTaken =
+                        morningAspirinTaken,
+
+                    onMorningAspirinChange = {
+                        morningAspirinTaken = it
+                    },
+
+                    morningIbuprofenTaken =
+                        morningIbuprofenTaken,
+
+                    onMorningIbuprofenChange = {
+                        morningIbuprofenTaken = it
+                    },
+
+                    morningNaproxenTaken =
+                        morningNaproxenTaken,
+
+                    onMorningNaproxenChange = {
+                        morningNaproxenTaken = it
+                    },
+
+                    morningAcetaminophenTaken =
+                        morningAcetaminophenTaken,
+
+                    onMorningAcetaminophenChange = {
+                        morningAcetaminophenTaken = it
+                    },
+
+                    nightIbuprofenTaken =
+                        nightIbuprofenTaken,
+
+                    onNightIbuprofenChange = {
+                        nightIbuprofenTaken = it
+                    },
+
+                    nightNaproxenTaken =
+                        nightNaproxenTaken,
+
+                    onNightNaproxenChange = {
+                        nightNaproxenTaken = it
+                    },
+
+                    nightAcetaminophenTaken =
+                        nightAcetaminophenTaken,
+
+                    onNightAcetaminophenChange = {
+                        nightAcetaminophenTaken = it
+                    }
+                )
+
+                JournalSection(
+                    journalText = journalText,
+
+                    onJournalTextChange = {
+                        journalText = it
+                    }
+                )
+
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            isSaving = true
+
+                            try {
+                                val record = DailyRecord(
+                                    date = todayDate,
+
+                                    foodRecorded =
+                                        foodRecorded,
+
+                                    walkCompleted =
+                                        walkCompleted,
+
+                                    painRecorded =
+                                        painRecorded,
+
+                                    mobilityCompleted =
+                                        mobilityCompleted,
+
+                                    backPain =
+                                        backPain,
+
+                                    shinPain =
+                                        shinPain,
+
+                                    plainReusableBottleCount =
+                                        plainReusableBottleCount,
+
+                                    mioReusableBottleCount =
+                                        mioReusableBottleCount,
+
+                                    plainDisposableBottleCount =
+                                        plainDisposableBottleCount,
+
+                                    mioDisposableBottleCount =
+                                        mioDisposableBottleCount,
+
+                                    morningAspirinTaken =
+                                        morningAspirinTaken,
+
+                                    morningIbuprofenTaken =
+                                        morningIbuprofenTaken,
+
+                                    morningNaproxenTaken =
+                                        morningNaproxenTaken,
+
+                                    morningAcetaminophenTaken =
+                                        morningAcetaminophenTaken,
+
+                                    nightIbuprofenTaken =
+                                        nightIbuprofenTaken,
+
+                                    nightNaproxenTaken =
+                                        nightNaproxenTaken,
+
+                                    nightAcetaminophenTaken =
+                                        nightAcetaminophenTaken,
+
+                                    journalText =
+                                        journalText,
+
+                                    updatedAt =
+                                        System.currentTimeMillis()
+                                )
+
+                                dailyRecordDao.saveRecord(
+                                    record
+                                )
+
+                                snackbarHostState.showSnackbar(
+                                    message = "Today saved."
+                                )
+                            } catch (
+                                exception: Exception
+                            ) {
+                                snackbarHostState.showSnackbar(
+                                    message =
+                                        "Could not save today."
+                                )
+                            } finally {
+                                isSaving = false
+                            }
+                        }
+                    },
+                    enabled = !isSaving,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isSaving) {
+                        Text("Saving...")
+                    } else {
+                        Text("Save Today")
+                    }
+                }
+
+                Text(
+                    text =
+                        "You can continue editing today " +
+                                "and press Save Today again. " +
+                                "The existing record will be updated.",
+                    style =
+                        MaterialTheme.typography.bodySmall
+                )
+
+                Spacer(
+                    modifier = Modifier.height(24.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LoadingScreen(
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement =
+            Arrangement.Center,
+        horizontalAlignment =
+            Alignment.CenterHorizontally
+    ) {
+        CircularProgressIndicator()
+
+        Spacer(
+            modifier = Modifier.height(12.dp)
+        )
+
+        Text("Loading today...")
     }
 }
 
@@ -269,12 +614,15 @@ private fun HeaderSection() {
         DateTimeFormatter.ofPattern("EEEE")
 
     val dateFormatter =
-        DateTimeFormatter.ofPattern("MMMM d, yyyy")
+        DateTimeFormatter.ofPattern(
+            "MMMM d, yyyy"
+        )
 
     Column {
         Text(
             text = "Daily Rebuild",
-            style = MaterialTheme.typography.headlineLarge,
+            style =
+                MaterialTheme.typography.headlineLarge,
             fontWeight = FontWeight.Bold
         )
 
@@ -283,13 +631,19 @@ private fun HeaderSection() {
         )
 
         Text(
-            text = today.format(dayFormatter),
-            style = MaterialTheme.typography.titleLarge
+            text = today.format(
+                dayFormatter
+            ),
+            style =
+                MaterialTheme.typography.titleLarge
         )
 
         Text(
-            text = today.format(dateFormatter),
-            style = MaterialTheme.typography.bodyLarge
+            text = today.format(
+                dateFormatter
+            ),
+            style =
+                MaterialTheme.typography.bodyLarge
         )
     }
 }
@@ -307,7 +661,8 @@ private fun ProgressSection(
         ) {
             Text(
                 text = "Today's Progress",
-                style = MaterialTheme.typography.titleLarge,
+                style =
+                    MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
 
@@ -316,12 +671,14 @@ private fun ProgressSection(
             )
 
             Text(
-                text = "$completedTasks of 4 tasks completed"
+                text =
+                    "$completedTasks of 4 tasks completed"
             )
 
             Text(
                 text = "$progressPercent%",
-                style = MaterialTheme.typography.headlineMedium,
+                style =
+                    MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold
             )
         }
@@ -350,32 +707,41 @@ private fun DailyTasksSection(
         ) {
             Text(
                 text = "Today's Next Steps",
-                style = MaterialTheme.typography.titleLarge,
+                style =
+                    MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
 
             TaskCheckbox(
-                text = "Record food and drinks",
+                text =
+                    "Record food and drinks",
                 checked = foodRecorded,
-                onCheckedChange = onFoodRecordedChange
+                onCheckedChange =
+                    onFoodRecordedChange
             )
 
             TaskCheckbox(
-                text = "Complete today's walk or movement",
+                text =
+                    "Complete today's walk or movement",
                 checked = walkCompleted,
-                onCheckedChange = onWalkCompletedChange
+                onCheckedChange =
+                    onWalkCompletedChange
             )
 
             TaskCheckbox(
-                text = "Record pain levels",
+                text =
+                    "Record pain levels",
                 checked = painRecorded,
-                onCheckedChange = onPainRecordedChange
+                onCheckedChange =
+                    onPainRecordedChange
             )
 
             TaskCheckbox(
-                text = "Complete mobility routine",
+                text =
+                    "Complete mobility routine",
                 checked = mobilityCompleted,
-                onCheckedChange = onMobilityCompletedChange
+                onCheckedChange =
+                    onMobilityCompletedChange
             )
         }
     }
@@ -389,11 +755,13 @@ private fun TaskCheckbox(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment =
+            Alignment.CenterVertically
     ) {
         Checkbox(
             checked = checked,
-            onCheckedChange = onCheckedChange
+            onCheckedChange =
+                onCheckedChange
         )
 
         Text(
@@ -413,7 +781,8 @@ private fun FoodSection() {
         ) {
             Text(
                 text = "Today's Fuel",
-                style = MaterialTheme.typography.titleLarge,
+                style =
+                    MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
 
@@ -421,7 +790,9 @@ private fun FoodSection() {
                 modifier = Modifier.height(8.dp)
             )
 
-            Text("No food recorded yet.")
+            Text(
+                "No food recorded yet."
+            )
 
             Spacer(
                 modifier = Modifier.height(12.dp)
@@ -430,12 +801,15 @@ private fun FoodSection() {
             Button(
                 onClick = {
                     /*
-                     * Barcode scanning will be added later.
+                     * Barcode scanning will be added
+                     * after the food database.
                      */
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Scan Food Barcode")
+                Text(
+                    "Scan Food Barcode"
+                )
             }
 
             Spacer(
@@ -445,12 +819,15 @@ private fun FoodSection() {
             OutlinedButton(
                 onClick = {
                     /*
-                     * Manual food entry will be added later.
+                     * Manual food entry will be added
+                     * after the food database.
                      */
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Add Food Manually")
+                Text(
+                    "Add Food Manually"
+                )
             }
         }
     }
@@ -475,10 +852,12 @@ private fun WaterSection(
     onRemoveMioDisposableBottle: () -> Unit
 ) {
     val reusableBottleTotal =
-        plainReusableBottleCount + mioReusableBottleCount
+        plainReusableBottleCount +
+                mioReusableBottleCount
 
     val disposableBottleTotal =
-        plainDisposableBottleCount + mioDisposableBottleCount
+        plainDisposableBottleCount +
+                mioDisposableBottleCount
 
     val totalWaterOunces =
         (reusableBottleTotal * 20.0) +
@@ -492,7 +871,8 @@ private fun WaterSection(
         ) {
             Text(
                 text = "Water",
-                style = MaterialTheme.typography.titleLarge,
+                style =
+                    MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
 
@@ -501,8 +881,10 @@ private fun WaterSection(
             )
 
             Text(
-                text = "${formatOunces(totalWaterOunces)} oz today",
-                style = MaterialTheme.typography.headlineMedium,
+                text =
+                    "${formatOunces(totalWaterOunces)} oz today",
+                style =
+                    MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold
             )
 
@@ -512,11 +894,14 @@ private fun WaterSection(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment =
+                    Alignment.CenterVertically
             ) {
                 Checkbox(
-                    checked = nextBottleHasMio,
-                    onCheckedChange = onNextBottleHasMioChange
+                    checked =
+                        nextBottleHasMio,
+                    onCheckedChange =
+                        onNextBottleHasMioChange
                 )
 
                 Column(
@@ -524,12 +909,15 @@ private fun WaterSection(
                 ) {
                     Text(
                         text = "MiO added",
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight =
+                            FontWeight.SemiBold
                     )
 
                     Text(
-                        text = "Applies to the next bottle logged",
-                        style = MaterialTheme.typography.bodySmall
+                        text =
+                            "Applies to the next bottle logged",
+                        style =
+                            MaterialTheme.typography.bodySmall
                     )
                 }
             }
@@ -539,10 +927,14 @@ private fun WaterSection(
             )
 
             Button(
-                onClick = onAddReusableBottle,
-                modifier = Modifier.fillMaxWidth()
+                onClick =
+                    onAddReusableBottle,
+                modifier =
+                    Modifier.fillMaxWidth()
             ) {
-                Text("Add Reusable Bottle — 20 oz")
+                Text(
+                    "Add Reusable Bottle — 20 oz"
+                )
             }
 
             Spacer(
@@ -550,10 +942,14 @@ private fun WaterSection(
             )
 
             OutlinedButton(
-                onClick = onAddDisposableBottle,
-                modifier = Modifier.fillMaxWidth()
+                onClick =
+                    onAddDisposableBottle,
+                modifier =
+                    Modifier.fillMaxWidth()
             ) {
-                Text("Add Water Bottle — 16.9 oz")
+                Text(
+                    "Add Water Bottle — 16.9 oz"
+                )
             }
 
             if (
@@ -561,44 +957,69 @@ private fun WaterSection(
                 disposableBottleTotal > 0
             ) {
                 HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 16.dp)
+                    modifier =
+                        Modifier.padding(
+                            vertical = 16.dp
+                        )
                 )
 
                 Text(
-                    text = "Today's Water Entries",
-                    style = MaterialTheme.typography.titleMedium,
+                    text =
+                        "Today's Water Entries",
+                    style =
+                        MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
 
-                if (plainReusableBottleCount > 0) {
+                if (
+                    plainReusableBottleCount > 0
+                ) {
                     WaterCountRow(
-                        label = "20 oz plain water",
-                        count = plainReusableBottleCount,
-                        onRemoveOne = onRemovePlainReusableBottle
+                        label =
+                            "20 oz plain water",
+                        count =
+                            plainReusableBottleCount,
+                        onRemoveOne =
+                            onRemovePlainReusableBottle
                     )
                 }
 
-                if (mioReusableBottleCount > 0) {
+                if (
+                    mioReusableBottleCount > 0
+                ) {
                     WaterCountRow(
-                        label = "20 oz MiO water",
-                        count = mioReusableBottleCount,
-                        onRemoveOne = onRemoveMioReusableBottle
+                        label =
+                            "20 oz MiO water",
+                        count =
+                            mioReusableBottleCount,
+                        onRemoveOne =
+                            onRemoveMioReusableBottle
                     )
                 }
 
-                if (plainDisposableBottleCount > 0) {
+                if (
+                    plainDisposableBottleCount > 0
+                ) {
                     WaterCountRow(
-                        label = "16.9 oz plain water",
-                        count = plainDisposableBottleCount,
-                        onRemoveOne = onRemovePlainDisposableBottle
+                        label =
+                            "16.9 oz plain water",
+                        count =
+                            plainDisposableBottleCount,
+                        onRemoveOne =
+                            onRemovePlainDisposableBottle
                     )
                 }
 
-                if (mioDisposableBottleCount > 0) {
+                if (
+                    mioDisposableBottleCount > 0
+                ) {
                     WaterCountRow(
-                        label = "16.9 oz MiO water",
-                        count = mioDisposableBottleCount,
-                        onRemoveOne = onRemoveMioDisposableBottle
+                        label =
+                            "16.9 oz MiO water",
+                        count =
+                            mioDisposableBottleCount,
+                        onRemoveOne =
+                            onRemoveMioDisposableBottle
                     )
                 }
             }
@@ -614,7 +1035,8 @@ private fun WaterCountRow(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment =
+            Alignment.CenterVertically
     ) {
         Text(
             text = "$label × $count",
@@ -632,7 +1054,9 @@ private fun WaterCountRow(
 private fun formatOunces(
     ounces: Double
 ): String {
-    return if (ounces % 1.0 == 0.0) {
+    return if (
+        ounces % 1.0 == 0.0
+    ) {
         ounces.toInt().toString()
     } else {
         String.format(
@@ -659,7 +1083,8 @@ private fun PainSection(
         ) {
             Text(
                 text = "Pain",
-                style = MaterialTheme.typography.titleLarge,
+                style =
+                    MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
 
@@ -668,19 +1093,26 @@ private fun PainSection(
             )
 
             PainSlider(
-                label = "Lower Back Pain",
-                painValue = backPain,
-                onPainValueChange = onBackPainChange
+                label =
+                    "Lower Back Pain",
+                painValue =
+                    backPain,
+                onPainValueChange =
+                    onBackPainChange
             )
 
             HorizontalDivider(
-                modifier = Modifier.padding(vertical = 12.dp)
+                modifier =
+                    Modifier.padding(
+                        vertical = 12.dp
+                    )
             )
 
             PainSlider(
                 label = "Shin Pain",
                 painValue = shinPain,
-                onPainValueChange = onShinPainChange
+                onPainValueChange =
+                    onShinPainChange
             )
         }
     }
@@ -700,19 +1132,23 @@ private fun PainSlider(
         ) {
             Text(
                 text = label,
-                fontWeight = FontWeight.SemiBold
+                fontWeight =
+                    FontWeight.SemiBold
             )
 
             Text(
-                text = painValue.toInt().toString(),
-                style = MaterialTheme.typography.titleLarge,
+                text =
+                    painValue.toInt().toString(),
+                style =
+                    MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
         }
 
         Slider(
             value = painValue,
-            onValueChange = onPainValueChange,
+            onValueChange =
+                onPainValueChange,
             valueRange = 0f..10f,
             steps = 9
         )
@@ -729,42 +1165,28 @@ private fun PainSlider(
 }
 
 @Composable
-private fun MedicationSection() {
+private fun MedicationSection(
+    morningAspirinTaken: Boolean,
+    onMorningAspirinChange: (Boolean) -> Unit,
 
-    /*
-     * Morning doses
-     */
-    var morningAspirinTaken by rememberSaveable {
-        mutableStateOf(true)
-    }
+    morningIbuprofenTaken: Boolean,
+    onMorningIbuprofenChange: (Boolean) -> Unit,
 
-    var morningIbuprofenTaken by rememberSaveable {
-        mutableStateOf(true)
-    }
+    morningNaproxenTaken: Boolean,
+    onMorningNaproxenChange: (Boolean) -> Unit,
 
-    var morningNaproxenTaken by rememberSaveable {
-        mutableStateOf(true)
-    }
+    morningAcetaminophenTaken: Boolean,
+    onMorningAcetaminophenChange: (Boolean) -> Unit,
 
-    var morningAcetaminophenTaken by rememberSaveable {
-        mutableStateOf(true)
-    }
+    nightIbuprofenTaken: Boolean,
+    onNightIbuprofenChange: (Boolean) -> Unit,
 
-    /*
-     * Night doses
-     */
-    var nightIbuprofenTaken by rememberSaveable {
-        mutableStateOf(true)
-    }
+    nightNaproxenTaken: Boolean,
+    onNightNaproxenChange: (Boolean) -> Unit,
 
-    var nightNaproxenTaken by rememberSaveable {
-        mutableStateOf(true)
-    }
-
-    var nightAcetaminophenTaken by rememberSaveable {
-        mutableStateOf(true)
-    }
-
+    nightAcetaminophenTaken: Boolean,
+    onNightAcetaminophenChange: (Boolean) -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -773,14 +1195,17 @@ private fun MedicationSection() {
         ) {
             Text(
                 text = "Pain Relievers",
-                style = MaterialTheme.typography.titleLarge,
+                style =
+                    MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
 
             Text(
-                text = "Prefilled from your normal pill organizer. " +
-                        "Uncheck any dose you did not take.",
-                style = MaterialTheme.typography.bodySmall
+                text =
+                    "Prefilled from your normal pill organizer. " +
+                            "Uncheck any dose you did not take.",
+                style =
+                    MaterialTheme.typography.bodySmall
             )
 
             Spacer(
@@ -789,81 +1214,92 @@ private fun MedicationSection() {
 
             Text(
                 text = "Morning / Day",
-                style = MaterialTheme.typography.titleMedium,
+                style =
+                    MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
 
             MedicationCheckbox(
                 name = "Aspirin",
                 dose = "325 mg",
-                checked = morningAspirinTaken,
-                onCheckedChange = {
-                    morningAspirinTaken = it
-                }
+                checked =
+                    morningAspirinTaken,
+                onCheckedChange =
+                    onMorningAspirinChange
             )
 
             MedicationCheckbox(
                 name = "Ibuprofen",
-                dose = "400 mg — 2 × 200 mg",
-                checked = morningIbuprofenTaken,
-                onCheckedChange = {
-                    morningIbuprofenTaken = it
-                }
+                dose =
+                    "400 mg — 2 × 200 mg",
+                checked =
+                    morningIbuprofenTaken,
+                onCheckedChange =
+                    onMorningIbuprofenChange
             )
 
             MedicationCheckbox(
-                name = "Naproxen sodium",
+                name =
+                    "Naproxen sodium",
                 dose = "220 mg",
-                checked = morningNaproxenTaken,
-                onCheckedChange = {
-                    morningNaproxenTaken = it
-                }
+                checked =
+                    morningNaproxenTaken,
+                onCheckedChange =
+                    onMorningNaproxenChange
             )
 
             MedicationCheckbox(
                 name = "Acetaminophen",
-                dose = "1,000 mg — 2 × 500 mg",
-                checked = morningAcetaminophenTaken,
-                onCheckedChange = {
-                    morningAcetaminophenTaken = it
-                }
+                dose =
+                    "1,000 mg — 2 × 500 mg",
+                checked =
+                    morningAcetaminophenTaken,
+                onCheckedChange =
+                    onMorningAcetaminophenChange
             )
 
             HorizontalDivider(
-                modifier = Modifier.padding(vertical = 12.dp)
+                modifier =
+                    Modifier.padding(
+                        vertical = 12.dp
+                    )
             )
 
             Text(
                 text = "Night",
-                style = MaterialTheme.typography.titleMedium,
+                style =
+                    MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
 
             MedicationCheckbox(
                 name = "Ibuprofen",
-                dose = "400 mg — 2 × 200 mg",
-                checked = nightIbuprofenTaken,
-                onCheckedChange = {
-                    nightIbuprofenTaken = it
-                }
+                dose =
+                    "400 mg — 2 × 200 mg",
+                checked =
+                    nightIbuprofenTaken,
+                onCheckedChange =
+                    onNightIbuprofenChange
             )
 
             MedicationCheckbox(
-                name = "Naproxen sodium",
+                name =
+                    "Naproxen sodium",
                 dose = "220 mg",
-                checked = nightNaproxenTaken,
-                onCheckedChange = {
-                    nightNaproxenTaken = it
-                }
+                checked =
+                    nightNaproxenTaken,
+                onCheckedChange =
+                    onNightNaproxenChange
             )
 
             MedicationCheckbox(
                 name = "Acetaminophen",
-                dose = "1,000 mg — 2 × 500 mg",
-                checked = nightAcetaminophenTaken,
-                onCheckedChange = {
-                    nightAcetaminophenTaken = it
-                }
+                dose =
+                    "1,000 mg — 2 × 500 mg",
+                checked =
+                    nightAcetaminophenTaken,
+                onCheckedChange =
+                    onNightAcetaminophenChange
             )
         }
     }
@@ -878,11 +1314,13 @@ private fun MedicationCheckbox(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment =
+            Alignment.CenterVertically
     ) {
         Checkbox(
             checked = checked,
-            onCheckedChange = onCheckedChange
+            onCheckedChange =
+                onCheckedChange
         )
 
         Column(
@@ -890,12 +1328,14 @@ private fun MedicationCheckbox(
         ) {
             Text(
                 text = name,
-                fontWeight = FontWeight.SemiBold
+                fontWeight =
+                    FontWeight.SemiBold
             )
 
             Text(
                 text = dose,
-                style = MaterialTheme.typography.bodySmall
+                style =
+                    MaterialTheme.typography.bodySmall
             )
         }
     }
@@ -914,14 +1354,18 @@ private fun JournalSection(
         ) {
             Text(
                 text = "Journal",
-                style = MaterialTheme.typography.titleLarge,
+                style =
+                    MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
 
             Text(
-                text = "Use this for AA meeting notes, activities that " +
-                        "caused pain, progress, or anything else from today.",
-                style = MaterialTheme.typography.bodySmall
+                text =
+                    "Use this for AA meeting notes, activities " +
+                            "that caused pain, progress, or anything " +
+                            "else from today.",
+                style =
+                    MaterialTheme.typography.bodySmall
             )
 
             Spacer(
@@ -930,7 +1374,8 @@ private fun JournalSection(
 
             OutlinedTextField(
                 value = journalText,
-                onValueChange = onJournalTextChange,
+                onValueChange =
+                    onJournalTextChange,
                 label = {
                     Text("Today's journal")
                 },
@@ -941,7 +1386,8 @@ private fun JournalSection(
                     )
                 },
                 minLines = 7,
-                modifier = Modifier.fillMaxWidth()
+                modifier =
+                    Modifier.fillMaxWidth()
             )
         }
     }
