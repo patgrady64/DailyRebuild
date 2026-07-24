@@ -23,11 +23,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import com.pgdevhouse.dailyrebuild.ui.theme.DailyRebuildTheme
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
@@ -52,15 +53,66 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun DailyRebuildApp() {
-    var foodRecorded by remember { mutableStateOf(false) }
-    var walkCompleted by remember { mutableStateOf(false) }
-    var painRecorded by remember { mutableStateOf(false) }
-    var mobilityCompleted by remember { mutableStateOf(false) }
 
-    var backPain by remember { mutableFloatStateOf(0f) }
-    var shinPain by remember { mutableFloatStateOf(0f) }
+    /*
+     * Daily task states
+     */
+    var foodRecorded by rememberSaveable {
+        mutableStateOf(false)
+    }
 
-    var notes by remember { mutableStateOf("") }
+    var walkCompleted by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var painRecorded by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var mobilityCompleted by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    /*
+     * Pain states
+     */
+    var backPain by rememberSaveable {
+        mutableStateOf(0f)
+    }
+
+    var shinPain by rememberSaveable {
+        mutableStateOf(0f)
+    }
+
+    /*
+     * Water states
+     */
+    var nextBottleHasMio by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var plainReusableBottleCount by rememberSaveable {
+        mutableStateOf(0)
+    }
+
+    var mioReusableBottleCount by rememberSaveable {
+        mutableStateOf(0)
+    }
+
+    var plainDisposableBottleCount by rememberSaveable {
+        mutableStateOf(0)
+    }
+
+    var mioDisposableBottleCount by rememberSaveable {
+        mutableStateOf(0)
+    }
+
+    /*
+     * Journal state
+     */
+    var journalText by rememberSaveable {
+        mutableStateOf("")
+    }
 
     val completedTasks = listOf(
         foodRecorded,
@@ -93,19 +145,80 @@ fun DailyRebuildApp() {
 
             DailyTasksSection(
                 foodRecorded = foodRecorded,
-                onFoodRecordedChange = { foodRecorded = it },
-
+                onFoodRecordedChange = {
+                    foodRecorded = it
+                },
                 walkCompleted = walkCompleted,
-                onWalkCompletedChange = { walkCompleted = it },
-
+                onWalkCompletedChange = {
+                    walkCompleted = it
+                },
                 painRecorded = painRecorded,
-                onPainRecordedChange = { painRecorded = it },
-
+                onPainRecordedChange = {
+                    painRecorded = it
+                },
                 mobilityCompleted = mobilityCompleted,
-                onMobilityCompletedChange = { mobilityCompleted = it }
+                onMobilityCompletedChange = {
+                    mobilityCompleted = it
+                }
             )
 
             FoodSection()
+
+            WaterSection(
+                nextBottleHasMio = nextBottleHasMio,
+                onNextBottleHasMioChange = {
+                    nextBottleHasMio = it
+                },
+
+                plainReusableBottleCount = plainReusableBottleCount,
+                mioReusableBottleCount = mioReusableBottleCount,
+                plainDisposableBottleCount = plainDisposableBottleCount,
+                mioDisposableBottleCount = mioDisposableBottleCount,
+
+                onAddReusableBottle = {
+                    if (nextBottleHasMio) {
+                        mioReusableBottleCount++
+                    } else {
+                        plainReusableBottleCount++
+                    }
+
+                    foodRecorded = true
+                },
+
+                onAddDisposableBottle = {
+                    if (nextBottleHasMio) {
+                        mioDisposableBottleCount++
+                    } else {
+                        plainDisposableBottleCount++
+                    }
+
+                    foodRecorded = true
+                },
+
+                onRemovePlainReusableBottle = {
+                    if (plainReusableBottleCount > 0) {
+                        plainReusableBottleCount--
+                    }
+                },
+
+                onRemoveMioReusableBottle = {
+                    if (mioReusableBottleCount > 0) {
+                        mioReusableBottleCount--
+                    }
+                },
+
+                onRemovePlainDisposableBottle = {
+                    if (plainDisposableBottleCount > 0) {
+                        plainDisposableBottleCount--
+                    }
+                },
+
+                onRemoveMioDisposableBottle = {
+                    if (mioDisposableBottleCount > 0) {
+                        mioDisposableBottleCount--
+                    }
+                }
+            )
 
             PainSection(
                 backPain = backPain,
@@ -123,16 +236,17 @@ fun DailyRebuildApp() {
 
             MedicationSection()
 
-            NotesSection(
-                notes = notes,
-                onNotesChange = { notes = it }
+            JournalSection(
+                journalText = journalText,
+                onJournalTextChange = {
+                    journalText = it
+                }
             )
 
             Button(
                 onClick = {
                     /*
-                     * Saving will be added after we create
-                     * the Room database.
+                     * Permanent saving will be added next.
                      */
                 },
                 modifier = Modifier.fillMaxWidth()
@@ -140,7 +254,9 @@ fun DailyRebuildApp() {
                 Text("Save Today")
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(
+                modifier = Modifier.height(24.dp)
+            )
         }
     }
 }
@@ -149,8 +265,11 @@ fun DailyRebuildApp() {
 private fun HeaderSection() {
     val today = LocalDate.now()
 
-    val dayFormatter = DateTimeFormatter.ofPattern("EEEE")
-    val dateFormatter = DateTimeFormatter.ofPattern("MMMM d, yyyy")
+    val dayFormatter =
+        DateTimeFormatter.ofPattern("EEEE")
+
+    val dateFormatter =
+        DateTimeFormatter.ofPattern("MMMM d, yyyy")
 
     Column {
         Text(
@@ -159,7 +278,9 @@ private fun HeaderSection() {
             fontWeight = FontWeight.Bold
         )
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(
+            modifier = Modifier.height(4.dp)
+        )
 
         Text(
             text = today.format(dayFormatter),
@@ -190,7 +311,9 @@ private fun ProgressSection(
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
 
             Text(
                 text = "$completedTasks of 4 tasks completed"
@@ -294,16 +417,20 @@ private fun FoodSection() {
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
 
-            Text("No food or drinks recorded yet.")
+            Text("No food recorded yet.")
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(
+                modifier = Modifier.height(12.dp)
+            )
 
             Button(
                 onClick = {
                     /*
-                     * Barcode scanning will be added soon.
+                     * Barcode scanning will be added later.
                      */
                 },
                 modifier = Modifier.fillMaxWidth()
@@ -311,32 +438,208 @@ private fun FoodSection() {
                 Text("Scan Food Barcode")
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
 
             OutlinedButton(
                 onClick = {
                     /*
-                     * Manual food entry will be added next.
+                     * Manual food entry will be added later.
                      */
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Add Food Manually")
             }
+        }
+    }
+}
 
-            Spacer(modifier = Modifier.height(8.dp))
+@Composable
+private fun WaterSection(
+    nextBottleHasMio: Boolean,
+    onNextBottleHasMioChange: (Boolean) -> Unit,
 
-            OutlinedButton(
-                onClick = {
-                    /*
-                     * Water logging will be added next.
-                     */
-                },
+    plainReusableBottleCount: Int,
+    mioReusableBottleCount: Int,
+    plainDisposableBottleCount: Int,
+    mioDisposableBottleCount: Int,
+
+    onAddReusableBottle: () -> Unit,
+    onAddDisposableBottle: () -> Unit,
+
+    onRemovePlainReusableBottle: () -> Unit,
+    onRemoveMioReusableBottle: () -> Unit,
+    onRemovePlainDisposableBottle: () -> Unit,
+    onRemoveMioDisposableBottle: () -> Unit
+) {
+    val reusableBottleTotal =
+        plainReusableBottleCount + mioReusableBottleCount
+
+    val disposableBottleTotal =
+        plainDisposableBottleCount + mioDisposableBottleCount
+
+    val totalWaterOunces =
+        (reusableBottleTotal * 20.0) +
+                (disposableBottleTotal * 16.9)
+
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = "Water",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(
+                modifier = Modifier.height(4.dp)
+            )
+
+            Text(
+                text = "${formatOunces(totalWaterOunces)} oz today",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = nextBottleHasMio,
+                    onCheckedChange = onNextBottleHasMioChange
+                )
+
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "MiO added",
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Text(
+                        text = "Applies to the next bottle logged",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
+
+            Button(
+                onClick = onAddReusableBottle,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Add Water")
+                Text("Add Reusable Bottle — 20 oz")
+            }
+
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
+
+            OutlinedButton(
+                onClick = onAddDisposableBottle,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Add Water Bottle — 16.9 oz")
+            }
+
+            if (
+                reusableBottleTotal > 0 ||
+                disposableBottleTotal > 0
+            ) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 16.dp)
+                )
+
+                Text(
+                    text = "Today's Water Entries",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                if (plainReusableBottleCount > 0) {
+                    WaterCountRow(
+                        label = "20 oz plain water",
+                        count = plainReusableBottleCount,
+                        onRemoveOne = onRemovePlainReusableBottle
+                    )
+                }
+
+                if (mioReusableBottleCount > 0) {
+                    WaterCountRow(
+                        label = "20 oz MiO water",
+                        count = mioReusableBottleCount,
+                        onRemoveOne = onRemoveMioReusableBottle
+                    )
+                }
+
+                if (plainDisposableBottleCount > 0) {
+                    WaterCountRow(
+                        label = "16.9 oz plain water",
+                        count = plainDisposableBottleCount,
+                        onRemoveOne = onRemovePlainDisposableBottle
+                    )
+                }
+
+                if (mioDisposableBottleCount > 0) {
+                    WaterCountRow(
+                        label = "16.9 oz MiO water",
+                        count = mioDisposableBottleCount,
+                        onRemoveOne = onRemoveMioDisposableBottle
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun WaterCountRow(
+    label: String,
+    count: Int,
+    onRemoveOne: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "$label × $count",
+            modifier = Modifier.weight(1f)
+        )
+
+        TextButton(
+            onClick = onRemoveOne
+        ) {
+            Text("Remove One")
+        }
+    }
+}
+
+private fun formatOunces(
+    ounces: Double
+): String {
+    return if (ounces % 1.0 == 0.0) {
+        ounces.toInt().toString()
+    } else {
+        String.format(
+            Locale.US,
+            "%.1f",
+            ounces
+        )
     }
 }
 
@@ -360,7 +663,9 @@ private fun PainSection(
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(
+                modifier = Modifier.height(12.dp)
+            )
 
             PainSlider(
                 label = "Lower Back Pain",
@@ -390,7 +695,8 @@ private fun PainSlider(
     Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement =
+                Arrangement.SpaceBetween
         ) {
             Text(
                 text = label,
@@ -413,7 +719,8 @@ private fun PainSlider(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement =
+                Arrangement.SpaceBetween
         ) {
             Text("No pain")
             Text("Worst pain")
@@ -423,10 +730,40 @@ private fun PainSlider(
 
 @Composable
 private fun MedicationSection() {
-    var aspirinTaken by remember { mutableStateOf(true) }
-    var ibuprofenTaken by remember { mutableStateOf(true) }
-    var naproxenTaken by remember { mutableStateOf(true) }
-    var acetaminophenTaken by remember { mutableStateOf(true) }
+
+    /*
+     * Morning doses
+     */
+    var morningAspirinTaken by rememberSaveable {
+        mutableStateOf(true)
+    }
+
+    var morningIbuprofenTaken by rememberSaveable {
+        mutableStateOf(true)
+    }
+
+    var morningNaproxenTaken by rememberSaveable {
+        mutableStateOf(true)
+    }
+
+    var morningAcetaminophenTaken by rememberSaveable {
+        mutableStateOf(true)
+    }
+
+    /*
+     * Night doses
+     */
+    var nightIbuprofenTaken by rememberSaveable {
+        mutableStateOf(true)
+    }
+
+    var nightNaproxenTaken by rememberSaveable {
+        mutableStateOf(true)
+    }
+
+    var nightAcetaminophenTaken by rememberSaveable {
+        mutableStateOf(true)
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth()
@@ -442,38 +779,91 @@ private fun MedicationSection() {
 
             Text(
                 text = "Prefilled from your normal pill organizer. " +
-                        "Uncheck anything you did not take today.",
+                        "Uncheck any dose you did not take.",
                 style = MaterialTheme.typography.bodySmall
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(
+                modifier = Modifier.height(12.dp)
+            )
+
+            Text(
+                text = "Morning / Day",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
 
             MedicationCheckbox(
                 name = "Aspirin",
                 dose = "325 mg",
-                checked = aspirinTaken,
-                onCheckedChange = { aspirinTaken = it }
+                checked = morningAspirinTaken,
+                onCheckedChange = {
+                    morningAspirinTaken = it
+                }
             )
 
             MedicationCheckbox(
                 name = "Ibuprofen",
-                dose = "800 mg total",
-                checked = ibuprofenTaken,
-                onCheckedChange = { ibuprofenTaken = it }
+                dose = "400 mg — 2 × 200 mg",
+                checked = morningIbuprofenTaken,
+                onCheckedChange = {
+                    morningIbuprofenTaken = it
+                }
             )
 
             MedicationCheckbox(
                 name = "Naproxen sodium",
-                dose = "440 mg total",
-                checked = naproxenTaken,
-                onCheckedChange = { naproxenTaken = it }
+                dose = "220 mg",
+                checked = morningNaproxenTaken,
+                onCheckedChange = {
+                    morningNaproxenTaken = it
+                }
             )
 
             MedicationCheckbox(
                 name = "Acetaminophen",
-                dose = "2,000 mg total",
-                checked = acetaminophenTaken,
-                onCheckedChange = { acetaminophenTaken = it }
+                dose = "1,000 mg — 2 × 500 mg",
+                checked = morningAcetaminophenTaken,
+                onCheckedChange = {
+                    morningAcetaminophenTaken = it
+                }
+            )
+
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 12.dp)
+            )
+
+            Text(
+                text = "Night",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            MedicationCheckbox(
+                name = "Ibuprofen",
+                dose = "400 mg — 2 × 200 mg",
+                checked = nightIbuprofenTaken,
+                onCheckedChange = {
+                    nightIbuprofenTaken = it
+                }
+            )
+
+            MedicationCheckbox(
+                name = "Naproxen sodium",
+                dose = "220 mg",
+                checked = nightNaproxenTaken,
+                onCheckedChange = {
+                    nightNaproxenTaken = it
+                }
+            )
+
+            MedicationCheckbox(
+                name = "Acetaminophen",
+                dose = "1,000 mg — 2 × 500 mg",
+                checked = nightAcetaminophenTaken,
+                onCheckedChange = {
+                    nightAcetaminophenTaken = it
+                }
             )
         }
     }
@@ -512,9 +902,9 @@ private fun MedicationCheckbox(
 }
 
 @Composable
-private fun NotesSection(
-    notes: String,
-    onNotesChange: (String) -> Unit
+private fun JournalSection(
+    journalText: String,
+    onJournalTextChange: (String) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth()
@@ -523,20 +913,34 @@ private fun NotesSection(
             modifier = Modifier.padding(16.dp)
         ) {
             Text(
-                text = "Notes",
+                text = "Journal",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Use this for AA meeting notes, activities that " +
+                        "caused pain, progress, or anything else from today.",
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
 
             OutlinedTextField(
-                value = notes,
-                onValueChange = onNotesChange,
+                value = journalText,
+                onValueChange = onJournalTextChange,
                 label = {
-                    Text("How did today feel?")
+                    Text("Today's journal")
                 },
-                minLines = 3,
+                placeholder = {
+                    Text(
+                        "Example: The meeting was about acceptance. " +
+                                "My back hurt more while doing dishes..."
+                    )
+                },
+                minLines = 7,
                 modifier = Modifier.fillMaxWidth()
             )
         }
