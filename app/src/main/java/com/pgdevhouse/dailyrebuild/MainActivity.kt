@@ -331,6 +331,31 @@ fun DailyRebuildApp() {
     }
 
     /*
+     * Read-only daily history.
+     *
+     * The first version scans the most recent 365 dates by using the
+     * existing date-based DAO methods. This avoids a schema change and
+     * preserves every existing record.
+     */
+    var showDailyHistoryDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var isLoadingDailyHistory by remember {
+        mutableStateOf(false)
+    }
+
+    var isDeletingDailyHistoryDay by remember {
+        mutableStateOf(false)
+    }
+
+    var dailyHistoryDays by remember {
+        mutableStateOf<List<DailyHistoryDay>>(
+            emptyList()
+        )
+    }
+
+    /*
      * Load today's daily record and food entries.
      */
     LaunchedEffect(todayDate) {
@@ -444,6 +469,59 @@ fun DailyRebuildApp() {
 
     val progressPercent =
         completedTasks * 25
+
+    fun openDailyHistory() {
+        showDailyHistoryDialog = true
+        isLoadingDailyHistory = true
+
+        coroutineScope.launch {
+            try {
+                val loadedDays =
+                    mutableListOf<DailyHistoryDay>()
+
+                val today = LocalDate.now()
+
+                for (dayOffset in 0L until 365L) {
+                    val date =
+                        today
+                            .minusDays(dayOffset)
+                            .toString()
+
+                    val record =
+                        dailyRecordDao.getRecordByDate(
+                            date
+                        )
+
+                    val entries =
+                        foodDao.getEntriesForDate(
+                            date
+                        )
+
+                    if (
+                        record != null ||
+                        entries.isNotEmpty()
+                    ) {
+                        loadedDays.add(
+                            DailyHistoryDay(
+                                date = date,
+                                record = record,
+                                foodEntries = entries
+                            )
+                        )
+                    }
+                }
+
+                dailyHistoryDays = loadedDays
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message =
+                        "Could not load daily history."
+                )
+            } finally {
+                isLoadingDailyHistory = false
+            }
+        }
+    }
 
     fun lookupFoodBarcode(
         barcodeText: String,
@@ -1196,6 +1274,15 @@ fun DailyRebuildApp() {
                         MaterialTheme.typography.bodySmall
                 )
 
+                OutlinedButton(
+                    onClick = {
+                        openDailyHistory()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Open Daily Calendar")
+                }
+
                 Spacer(
                     modifier = Modifier.height(24.dp)
                 )
@@ -1780,6 +1867,90 @@ fun DailyRebuildApp() {
                     }
                 ) {
                     Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showDailyHistoryDialog) {
+        DailyHistoryDialog(
+            days = dailyHistoryDays,
+            isLoading = isLoadingDailyHistory,
+            isDeletingDay =
+                isDeletingDailyHistoryDay,
+
+            onDeleteDay = { day ->
+                coroutineScope.launch {
+                    isDeletingDailyHistoryDay = true
+
+                    try {
+                        database.withTransaction {
+                            day.foodEntries.forEach { entry ->
+                                foodDao.deleteFoodEntryById(
+                                    entry.id
+                                )
+                            }
+
+                            day.record?.let { record ->
+                                dailyRecordDao.deleteRecord(
+                                    record
+                                )
+                            }
+                        }
+
+                        dailyHistoryDays =
+                            dailyHistoryDays.filterNot {
+                                it.date == day.date
+                            }
+
+                        if (day.date == todayDate) {
+                            foodEntries = emptyList()
+
+                            foodRecorded = false
+                            walkCompleted = false
+                            painRecorded = false
+                            mobilityCompleted = false
+
+                            backPain = 0f
+                            shinPain = 0f
+
+                            nextBottleHasMio = false
+                            plainReusableBottleCount = 0
+                            mioReusableBottleCount = 0
+                            plainDisposableBottleCount = 0
+                            mioDisposableBottleCount = 0
+
+                            morningAspirinTaken = true
+                            morningIbuprofenTaken = true
+                            morningNaproxenTaken = true
+                            morningAcetaminophenTaken = true
+
+                            nightIbuprofenTaken = true
+                            nightNaproxenTaken = true
+                            nightAcetaminophenTaken = true
+
+                            journalText = ""
+                        }
+
+                        snackbarHostState.showSnackbar(
+                            message = "Entire day deleted."
+                        )
+                    } catch (
+                        exception: Exception
+                    ) {
+                        snackbarHostState.showSnackbar(
+                            message =
+                                "Could not delete the entire day."
+                        )
+                    } finally {
+                        isDeletingDailyHistoryDay = false
+                    }
+                }
+            },
+
+            onDismiss = {
+                if (!isDeletingDailyHistoryDay) {
+                    showDailyHistoryDialog = false
                 }
             }
         )

@@ -39,4 +39,9 @@ interface DailyRecordDao {
         """
     )
     suspend fun getAllRecords(): List<DailyRecord>
+
+    @androidx.room.Delete
+    suspend fun deleteRecord(
+        record: DailyRecord
+    )
 }
