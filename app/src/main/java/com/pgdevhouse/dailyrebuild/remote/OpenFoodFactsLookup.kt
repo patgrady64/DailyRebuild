@@ -7,27 +7,35 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 data class ScannedFoodPrefill(
-    val barcode: String,
+    /*
+     * Present when loading a product already stored
+     * in Daily Rebuild's local food library.
+     */
+    val productId: Long? = null,
+
+    /*
+     * Null for manually entered products without
+     * a UPC or EAN barcode.
+     */
+    val barcode: String? = null,
+
     val name: String = "",
     val brand: String = "",
+
     val caloriesPerServing: Double = 0.0,
     val proteinGramsPerServing: Double = 0.0,
     val carbohydrateGramsPerServing: Double = 0.0,
     val fatGramsPerServing: Double = 0.0,
     val sodiumMilligramsPerServing: Double = 0.0,
+
     val servingQuantity: Double = 1.0,
     val servingUnit: String = "serving",
-    /*
-     * User-entered package information.
-     *
-     * Examples:
-     * 12 patties
-     * 8 hot dogs
-     * 20 slices
-     */
+
     val packageQuantity: Double? = null,
     val packageUnit: String = "",
+
     val isFavorite: Boolean = false,
+
     val originalServingSize: String = ""
 )
 

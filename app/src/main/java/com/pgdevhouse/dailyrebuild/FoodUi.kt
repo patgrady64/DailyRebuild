@@ -36,6 +36,8 @@ import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
 import java.util.Locale
 import com.pgdevhouse.dailyrebuild.data.remote.ScannedFoodPrefill
+import java.math.BigDecimal
+import kotlin.math.abs
 
 /*
  * Information prepared by the manual food dialog.
@@ -60,8 +62,10 @@ fun FoodSection(
     entries: List<FoodLogEntry>,
     lastScannedBarcode: String?,
     isScanningBarcode: Boolean,
+    savedFoodCount: Int,
     onScanFood: () -> Unit,
     onAddFoodManually: () -> Unit,
+    onOpenSavedFoods: () -> Unit,
     onDeleteEntry: (FoodLogEntry) -> Unit
 ) {
     val totalCalories =
@@ -192,6 +196,18 @@ fun FoodSection(
             ) {
                 Text("Add Food Manually")
             }
+            Spacer(
+                modifier = Modifier.height(8.dp)
+            )
+
+            OutlinedButton(
+                onClick = onOpenSavedFoods,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Saved Foods ($savedFoodCount)"
+                )
+            }
         }
     }
 }
@@ -249,8 +265,20 @@ fun ManualFoodDialog(
     onDismiss: () -> Unit,
     onSave: (ManualFoodDraft) -> Unit
 ) {
+    val initialFoodKey =
+        when {
+            initialFood?.productId != null ->
+                "product-${initialFood.productId}"
+
+            !initialFood?.barcode.isNullOrBlank() ->
+                "barcode-${initialFood?.barcode}"
+
+            else ->
+                "new-manual-food"
+        }
+
     var productName by rememberSaveable(
-        initialFood?.barcode
+        initialFoodKey
     ) {
         mutableStateOf(
             initialFood?.name.orEmpty()
@@ -258,7 +286,7 @@ fun ManualFoodDialog(
     }
 
     var brand by rememberSaveable(
-        initialFood?.barcode
+        initialFoodKey
     ) {
         mutableStateOf(
             initialFood?.brand.orEmpty()
@@ -266,7 +294,7 @@ fun ManualFoodDialog(
     }
 
     var caloriesPerServingText by rememberSaveable(
-        initialFood?.barcode
+        initialFoodKey
     ) {
         mutableStateOf(
             initialFood
@@ -276,7 +304,7 @@ fun ManualFoodDialog(
     }
 
     var proteinPerServingText by rememberSaveable(
-        initialFood?.barcode
+        initialFoodKey
     ) {
         mutableStateOf(
             initialFood
@@ -286,7 +314,7 @@ fun ManualFoodDialog(
     }
 
     var carbohydratePerServingText by rememberSaveable(
-        initialFood?.barcode
+        initialFoodKey
     ) {
         mutableStateOf(
             initialFood
@@ -296,7 +324,7 @@ fun ManualFoodDialog(
     }
 
     var fatPerServingText by rememberSaveable(
-        initialFood?.barcode
+        initialFoodKey
     ) {
         mutableStateOf(
             initialFood
@@ -306,7 +334,7 @@ fun ManualFoodDialog(
     }
 
     var sodiumPerServingText by rememberSaveable(
-        initialFood?.barcode
+        initialFoodKey
     ) {
         mutableStateOf(
             initialFood
@@ -316,20 +344,18 @@ fun ManualFoodDialog(
     }
 
     var servingQuantityText by rememberSaveable(
-        initialFood?.barcode
+        initialFoodKey
     ) {
         mutableStateOf(
             initialFood
                 ?.servingQuantity
-                ?.let {
-                    formatFoodNumber(it)
-                }
+                ?.toEditableFoodAmount()
                 ?: "1"
         )
     }
 
     var servingUnit by rememberSaveable(
-        initialFood?.barcode
+        initialFoodKey
     ) {
         mutableStateOf(
             initialFood
@@ -342,20 +368,18 @@ fun ManualFoodDialog(
     }
 
     var packageQuantityText by rememberSaveable(
-        initialFood?.barcode
+        initialFoodKey
     ) {
         mutableStateOf(
             initialFood
                 ?.packageQuantity
-                ?.let {
-                    formatFoodNumber(it)
-                }
+                ?.toEditableFoodAmount()
                 .orEmpty()
         )
     }
 
     var packageUnit by rememberSaveable(
-        initialFood?.barcode
+        initialFoodKey
     ) {
         mutableStateOf(
             initialFood
@@ -513,14 +537,21 @@ fun ManualFoodDialog(
                             modifier = Modifier.padding(12.dp)
                         ) {
                             Text(
-                                text = "Scanned Product",
+                                text =
+                                    if (initialFood.productId != null) {
+                                        "Saved Product"
+                                    } else {
+                                        "Scanned Product"
+                                    },
                                 fontWeight = FontWeight.Bold
                             )
 
-                            Text(
-                                text =
-                                    "Barcode: ${initialFood.barcode}"
-                            )
+                            if (!initialFood.barcode.isNullOrBlank()) {
+                                Text(
+                                    text =
+                                        "Barcode: ${initialFood.barcode}"
+                                )
+                            }
 
                             if (
                                 initialFood
@@ -554,15 +585,11 @@ fun ManualFoodDialog(
 
                 NumberField(
                     value = servingQuantityText,
-
                     onValueChange = {
                         servingQuantityText = it
                     },
-
                     label = "Serving amount",
-
                     allowFractions = true,
-
                     modifier = Modifier.weight(0.4f)
                 )
 
@@ -645,17 +672,43 @@ fun ManualFoodDialog(
                 ) {
                     OutlinedTextField(
                         value = servingQuantityText,
-                        onValueChange = {
-                            servingQuantityText = it
+
+                        onValueChange = { newValue ->
+                            val filteredValue =
+                                newValue.filter {
+                                    it.isDigit() ||
+                                            it == '.' ||
+                                            it == '/' ||
+                                            it == ' '
+                                }
+
+                            if (
+                                filteredValue.count { it == '/' } <= 1 &&
+                                filteredValue.count { it == '.' } <= 1
+                            ) {
+                                servingQuantityText = filteredValue
+                            }
                         },
+
                         label = {
-                            Text("Amount")
+                            Text("Serving amount")
                         },
+
+                        placeholder = {
+                            Text("Example: 1/4")
+                        },
+
                         singleLine = true,
+
                         keyboardOptions = KeyboardOptions(
-                            keyboardType =
-                                KeyboardType.Decimal
+                            /*
+                             * Do not use Decimal here.
+                             * URI requests a full keyboard suited to
+                             * text containing characters such as "/".
+                             */
+                            keyboardType = KeyboardType.Uri
                         ),
+
                         modifier = Modifier.weight(0.4f)
                     )
 
@@ -906,6 +959,7 @@ fun ManualFoodDialog(
                     Button(
                         onClick = {
                             val product = FoodProduct(
+                                id = initialFood?.productId ?: 0,
                                 barcode = initialFood?.barcode,
                                 name = productName.trim(),
                                 brand = brand.trim(),
@@ -1044,9 +1098,7 @@ private fun NumberField(
                 }
 
             if (isAllowed) {
-                onValueChange(
-                    filteredValue
-                )
+                onValueChange(filteredValue)
             }
         },
 
@@ -1058,7 +1110,15 @@ private fun NumberField(
 
         keyboardOptions = KeyboardOptions(
             keyboardType =
-                KeyboardType.Decimal
+                if (allowFractions) {
+                    /*
+                     * Decimal keyboards usually do not
+                     * provide a slash key.
+                     */
+                    KeyboardType.Text
+                } else {
+                    KeyboardType.Decimal
+                }
         ),
 
         modifier = modifier
@@ -1178,4 +1238,85 @@ private fun Double?.toInitialFieldText():
     }
 
     return formatFoodNumber(this)
+}
+
+private fun Double.toEditableFoodAmount():
+        String {
+
+    /*
+     * Preserve common cooking fractions instead of
+     * displaying rounded decimal values.
+     */
+    val wholeNumber =
+        toInt()
+
+    val fraction =
+        this - wholeNumber
+
+    val fractionText =
+        when {
+            nearlyEquals(
+                fraction,
+                0.125
+            ) -> "1/8"
+
+            nearlyEquals(
+                fraction,
+                0.25
+            ) -> "1/4"
+
+            nearlyEquals(
+                fraction,
+                1.0 / 3.0
+            ) -> "1/3"
+
+            nearlyEquals(
+                fraction,
+                0.5
+            ) -> "1/2"
+
+            nearlyEquals(
+                fraction,
+                2.0 / 3.0
+            ) -> "2/3"
+
+            nearlyEquals(
+                fraction,
+                0.75
+            ) -> "3/4"
+
+            else -> null
+        }
+
+    return when {
+        fractionText != null &&
+                wholeNumber > 0 -> {
+
+            "$wholeNumber $fractionText"
+        }
+
+        fractionText != null -> {
+            fractionText
+        }
+
+        else -> {
+            /*
+             * Avoid scientific notation and remove
+             * unnecessary trailing zeroes.
+             */
+            BigDecimal
+                .valueOf(this)
+                .stripTrailingZeros()
+                .toPlainString()
+        }
+    }
+}
+
+private fun nearlyEquals(
+    first: Double,
+    second: Double
+): Boolean {
+    return abs(
+        first - second
+    ) < 0.0001
 }

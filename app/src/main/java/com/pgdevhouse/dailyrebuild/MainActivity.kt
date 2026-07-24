@@ -54,6 +54,7 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.pgdevhouse.dailyrebuild.data.remote.FoodLookupResult
 import com.pgdevhouse.dailyrebuild.data.remote.OpenFoodFactsLookup
 import com.pgdevhouse.dailyrebuild.data.remote.ScannedFoodPrefill
+import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
 
 class MainActivity : ComponentActivity() {
 
@@ -150,6 +151,16 @@ fun DailyRebuildApp() {
         mutableStateOf<List<FoodLogEntry>>(
             emptyList()
         )
+    }
+
+    var savedProducts by remember {
+        mutableStateOf<List<FoodProduct>>(
+            emptyList()
+        )
+    }
+
+    var showSavedFoodsDialog by rememberSaveable {
+        mutableStateOf(false)
     }
 
     /*
@@ -327,6 +338,8 @@ fun DailyRebuildApp() {
                 foodDao.getEntriesForDate(
                     todayDate
                 )
+            savedProducts =
+                foodDao.getAllProducts()
 
             /*
              * Existing food entries count as recording food,
@@ -423,14 +436,14 @@ fun DailyRebuildApp() {
                 )
 
                 /*
-                 * This calls the new FoodSection in FoodUi.kt.
-                 *
-                 * The old no-argument FoodSection farther down
-                 * in MainActivity can remain for now. Kotlin
-                 * selects this version because the parameters differ.
+                 * Main food card from FoodUi.kt.
                  */
                 FoodSection(
-                    entries = foodEntries,
+                    entries =
+                        foodEntries,
+
+                    savedFoodCount =
+                        savedProducts.size,
 
                     lastScannedBarcode =
                         lastScannedBarcode,
@@ -478,8 +491,12 @@ fun DailyRebuildApp() {
                                             if (existingProduct != null) {
                                                 scannedFoodPrefill =
                                                     ScannedFoodPrefill(
+                                                        productId =
+                                                            existingProduct.id,
+
                                                         barcode =
-                                                            scannedValue,
+                                                            existingProduct.barcode
+                                                                ?: scannedValue,
 
                                                         name =
                                                             existingProduct.name,
@@ -514,6 +531,10 @@ fun DailyRebuildApp() {
                                                         servingUnit =
                                                             existingProduct
                                                                 .servingUnit,
+
+                                                        packageQuantity =
+                                                            existingProduct
+                                                                .packageQuantity,
 
                                                         packageUnit =
                                                             existingProduct
@@ -584,6 +605,7 @@ fun DailyRebuildApp() {
                                                             ScannedFoodPrefill(
                                                                 barcode =
                                                                     scannedValue
+
                                                             )
 
                                                         showManualFoodDialog =
@@ -623,6 +645,23 @@ fun DailyRebuildApp() {
                     onAddFoodManually = {
                         scannedFoodPrefill = null
                         showManualFoodDialog = true
+                    },
+                    onOpenSavedFoods = {
+                        coroutineScope.launch {
+                            try {
+                                savedProducts =
+                                    foodDao.getAllProducts()
+
+                                showSavedFoodsDialog = true
+                            } catch (
+                                exception: Exception
+                            ) {
+                                snackbarHostState.showSnackbar(
+                                    message =
+                                        "Could not load saved foods."
+                                )
+                            }
+                        }
                     },
 
                     onDeleteEntry = { entry ->
@@ -922,6 +961,24 @@ fun DailyRebuildApp() {
         }
     }
 
+    if (showSavedFoodsDialog) {
+        SavedFoodsDialog(
+            products = savedProducts,
+
+            onDismiss = {
+                showSavedFoodsDialog = false
+            },
+
+            onSelectProduct = { product ->
+                scannedFoodPrefill =
+                    product.toFoodPrefill()
+
+                showSavedFoodsDialog = false
+                showManualFoodDialog = true
+            }
+        )
+    }
+
     if (showManualFoodDialog) {
         ManualFoodDialog(
             initialFood = scannedFoodPrefill,
@@ -940,21 +997,36 @@ fun DailyRebuildApp() {
 
                     try {
                         val existingProduct =
-                            draft.product.barcode?.let {
-                                foodDao.getProductByBarcode(it)
+                            if (draft.product.id > 0L) {
+                                foodDao.getProductById(
+                                    draft.product.id
+                                )
+                            } else {
+                                draft.product.barcode
+                                    ?.takeIf {
+                                        it.isNotBlank()
+                                    }
+                                    ?.let { barcode ->
+                                        foodDao.getProductByBarcode(
+                                            barcode
+                                        )
+                                    }
                             }
-
                         val productId =
                             if (existingProduct == null) {
                                 foodDao.addProduct(
-                                    draft.product
+                                    draft.product.copy(
+                                        id = 0
+                                    )
                                 )
                             } else {
                                 foodDao.updateProduct(
                                     draft.product.copy(
                                         id = existingProduct.id,
+
                                         createdAt =
                                             existingProduct.createdAt,
+
                                         updatedAt =
                                             System.currentTimeMillis()
                                     )
@@ -1010,6 +1082,9 @@ fun DailyRebuildApp() {
                                 .getEntriesForDate(
                                     todayDate
                                 )
+
+                        savedProducts =
+                            foodDao.getAllProducts()
 
                         foodRecorded = true
 
@@ -1227,68 +1302,6 @@ private fun TaskCheckbox(
 }
 
 @Composable
-private fun FoodSection() {
-    Card(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = "Today's Fuel",
-                style =
-                    MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-
-            Spacer(
-                modifier = Modifier.height(8.dp)
-            )
-
-            Text(
-                "No food recorded yet."
-            )
-
-            Spacer(
-                modifier = Modifier.height(12.dp)
-            )
-
-            Button(
-                onClick = {
-                    /*
-                     * Barcode scanning will be added
-                     * after the food database.
-                     */
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    "Scan Food Barcode"
-                )
-            }
-
-            Spacer(
-                modifier = Modifier.height(8.dp)
-            )
-
-            OutlinedButton(
-                onClick = {
-                    /*
-                     * Manual food entry will be added
-                     * after the food database.
-                     */
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    "Add Food Manually"
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun WaterSection(
     nextBottleHasMio: Boolean,
     onNextBottleHasMioChange: (Boolean) -> Unit,
@@ -1431,7 +1444,7 @@ private fun WaterSection(
                 ) {
                     WaterCountRow(
                         label =
-                            "20 oz plain water",
+                            "24 oz plain water",
                         count =
                             plainReusableBottleCount,
                         onRemoveOne =
@@ -1444,7 +1457,7 @@ private fun WaterSection(
                 ) {
                     WaterCountRow(
                         label =
-                            "20 oz MiO water",
+                            "24 oz MiO water",
                         count =
                             mioReusableBottleCount,
                         onRemoveOne =
