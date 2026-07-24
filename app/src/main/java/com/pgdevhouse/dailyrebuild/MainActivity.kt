@@ -58,6 +58,7 @@ import com.pgdevhouse.dailyrebuild.data.remote.FoodLookupResult
 import com.pgdevhouse.dailyrebuild.data.remote.OpenFoodFactsLookup
 import com.pgdevhouse.dailyrebuild.data.remote.ScannedFoodPrefill
 import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
+import com.pgdevhouse.dailyrebuild.data.local.MealAmountMode
 import androidx.room.withTransaction
 import com.pgdevhouse.dailyrebuild.data.local.SavedMeal
 import com.pgdevhouse.dailyrebuild.data.local.SavedMealIngredient
@@ -191,6 +192,10 @@ fun DailyRebuildApp() {
     }
 
     var isSavingMeal by remember {
+        mutableStateOf(false)
+    }
+
+    var isAddingSavedMeal by remember {
         mutableStateOf(false)
     }
 
@@ -1294,6 +1299,147 @@ fun DailyRebuildApp() {
 
             products = savedProducts,
 
+            isAddingMeal = isAddingSavedMeal,
+
+            onAddToToday = { savedMeal, multiplier ->
+                coroutineScope.launch {
+                    isAddingSavedMeal = true
+
+                    try {
+                        val productsById =
+                            savedProducts.associateBy {
+                                it.id
+                            }
+
+                        val entriesToAdd =
+                            savedMeal.ingredients
+                                .sortedBy {
+                                    it.sortOrder
+                                }
+                                .map { ingredient ->
+                                    val product =
+                                        productsById[
+                                            ingredient.productId
+                                        ] ?: error(
+                                            "Saved meal contains a missing food."
+                                        )
+
+                                    val totalAmount =
+                                        ingredient.amount * multiplier
+
+                                    val servings =
+                                        when (
+                                            ingredient.amountMode
+                                        ) {
+                                            MealAmountMode
+                                                .LABEL_SERVINGS -> {
+                                                totalAmount
+                                            }
+
+                                            else -> {
+                                                if (
+                                                    product.servingQuantity <= 0.0
+                                                ) {
+                                                    error(
+                                                        "Saved food has an invalid serving size."
+                                                    )
+                                                }
+
+                                                totalAmount /
+                                                    product.servingQuantity
+                                            }
+                                        }
+
+                                    FoodLogEntry(
+                                        date = todayDate,
+
+                                        productId = product.id,
+
+                                        quantity = totalAmount,
+
+                                        unit =
+                                            if (
+                                                ingredient.amountMode ==
+                                                MealAmountMode
+                                                    .LABEL_SERVINGS
+                                            ) {
+                                                "servings"
+                                            } else {
+                                                product.servingUnit
+                                            },
+
+                                        mealName =
+                                            savedMeal.meal.name,
+
+                                        productNameSnapshot =
+                                            product.name,
+
+                                        calories =
+                                            product
+                                                .caloriesPerServing *
+                                                servings,
+
+                                        proteinGrams =
+                                            product
+                                                .proteinGramsPerServing *
+                                                servings,
+
+                                        carbohydrateGrams =
+                                            product
+                                                .carbohydrateGramsPerServing *
+                                                servings,
+
+                                        fatGrams =
+                                            product
+                                                .fatGramsPerServing *
+                                                servings,
+
+                                        sodiumMilligrams =
+                                            product
+                                                .sodiumMilligramsPerServing *
+                                                servings
+                                    )
+                                }
+
+                        if (entriesToAdd.isEmpty()) {
+                            error(
+                                "Saved meal has no ingredients."
+                            )
+                        }
+
+                        database.withTransaction {
+                            entriesToAdd.forEach { entry ->
+                                foodDao.addFoodEntry(
+                                    entry
+                                )
+                            }
+                        }
+
+                        foodEntries =
+                            foodDao.getEntriesForDate(
+                                todayDate
+                            )
+
+                        foodRecorded = true
+                        showSavedMealsDialog = false
+
+                        snackbarHostState.showSnackbar(
+                            message =
+                                "${savedMeal.meal.name} added to today."
+                        )
+                    } catch (
+                        exception: Exception
+                    ) {
+                        snackbarHostState.showSnackbar(
+                            message =
+                                "Could not add saved meal."
+                        )
+                    } finally {
+                        isAddingSavedMeal = false
+                    }
+                }
+            },
+
             onEdit = { savedMeal ->
                 mealBeingEdited = savedMeal
                 showSavedMealsDialog = false
@@ -1327,7 +1473,9 @@ fun DailyRebuildApp() {
             },
 
             onDismiss = {
-                showSavedMealsDialog = false
+                if (!isAddingSavedMeal) {
+                    showSavedMealsDialog = false
+                }
             }
         )
     }

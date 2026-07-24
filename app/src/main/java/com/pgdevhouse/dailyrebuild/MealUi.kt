@@ -1110,6 +1110,11 @@ private fun MealIngredientAmountPage(
 fun SavedMealsDialog(
     meals: List<SavedMealWithIngredients>,
     products: List<FoodProduct>,
+    isAddingMeal: Boolean,
+    onAddToToday: (
+        SavedMealWithIngredients,
+        Double
+    ) -> Unit,
     onEdit: (SavedMealWithIngredients) -> Unit,
     onDelete: (SavedMealWithIngredients) -> Unit,
     onDismiss: () -> Unit
@@ -1125,8 +1130,22 @@ fun SavedMealsDialog(
         >(null)
     }
 
+    var mealPendingAdd by remember {
+        mutableStateOf<
+            SavedMealWithIngredients?
+        >(null)
+    }
+
+    var mealMultiplierText by rememberSaveable {
+        mutableStateOf("1")
+    }
+
     Dialog(
-        onDismissRequest = onDismiss
+        onDismissRequest = {
+            if (!isAddingMeal) {
+                onDismiss()
+            }
+        }
     ) {
         Card(
             modifier = Modifier
@@ -1164,7 +1183,8 @@ fun SavedMealsDialog(
                     }
 
                     TextButton(
-                        onClick = onDismiss
+                        onClick = onDismiss,
+                        enabled = !isAddingMeal
                     ) {
                         Text("Close")
                     }
@@ -1287,10 +1307,25 @@ fun SavedMealsDialog(
                                     ) {
                                         TextButton(
                                             onClick = {
+                                                mealMultiplierText =
+                                                    "1"
+                                                mealPendingAdd =
+                                                    savedMeal
+                                            },
+                                            enabled =
+                                                !isAddingMeal
+                                        ) {
+                                            Text("Add to Today")
+                                        }
+
+                                        TextButton(
+                                            onClick = {
                                                 onEdit(
                                                     savedMeal
                                                 )
-                                            }
+                                            },
+                                            enabled =
+                                                !isAddingMeal
                                         ) {
                                             Text("Edit")
                                         }
@@ -1299,7 +1334,9 @@ fun SavedMealsDialog(
                                             onClick = {
                                                 mealPendingDelete =
                                                     savedMeal
-                                            }
+                                            },
+                                            enabled =
+                                                !isAddingMeal
                                         ) {
                                             Text("Delete")
                                         }
@@ -1311,6 +1348,130 @@ fun SavedMealsDialog(
                 }
             }
         }
+    }
+
+    val pendingAddMeal =
+        mealPendingAdd
+
+    if (pendingAddMeal != null) {
+        val multiplier =
+            parseMealAmount(
+                mealMultiplierText
+            ) ?: 0.0
+
+        AlertDialog(
+            onDismissRequest = {
+                if (!isAddingMeal) {
+                    mealPendingAdd = null
+                }
+            },
+
+            title = {
+                Text("Add meal to today?")
+            },
+
+            text = {
+                Column(
+                    verticalArrangement =
+                        Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text =
+                            pendingAddMeal.meal.name,
+                        fontWeight =
+                            FontWeight.Bold
+                    )
+
+                    Text(
+                        text =
+                            "How many of this meal should be added?"
+                    )
+
+                    OutlinedTextField(
+                        value =
+                            mealMultiplierText,
+
+                        onValueChange = {
+                            mealMultiplierText = it
+                        },
+
+                        label = {
+                            Text("Meal amount")
+                        },
+
+                        supportingText = {
+                            Text(
+                                "Examples: 1, 2, or 1/2"
+                            )
+                        },
+
+                        keyboardOptions =
+                            KeyboardOptions(
+                                keyboardType =
+                                    KeyboardType.Uri
+                            ),
+
+                        singleLine = true,
+                        enabled = !isAddingMeal,
+                        modifier =
+                            Modifier.fillMaxWidth()
+                    )
+
+                    if (
+                        mealMultiplierText.isNotBlank() &&
+                        multiplier <= 0.0
+                    ) {
+                        Text(
+                            text =
+                                "Enter an amount greater than zero.",
+                            color =
+                                MaterialTheme
+                                    .colorScheme
+                                    .error,
+                            style =
+                                MaterialTheme
+                                    .typography
+                                    .bodySmall
+                        )
+                    }
+                }
+            },
+
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        mealPendingAdd = null
+                        onAddToToday(
+                            pendingAddMeal,
+                            multiplier
+                        )
+                    },
+                    enabled =
+                        !isAddingMeal &&
+                        multiplier > 0.0
+                ) {
+                    Text(
+                        if (isAddingMeal) {
+                            "Adding..."
+                        } else {
+                            "Add to Today"
+                        }
+                    )
+                }
+            },
+
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        mealPendingAdd = null
+                    },
+                    enabled =
+                        !isAddingMeal
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     val pendingMeal =
