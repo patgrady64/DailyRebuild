@@ -57,6 +57,8 @@ data class ManualFoodDraft(
 @Composable
 fun FoodSection(
     entries: List<FoodLogEntry>,
+    lastScannedBarcode: String?,
+    isScanningBarcode: Boolean,
     onScanFood: () -> Unit,
     onAddFoodManually: () -> Unit,
     onDeleteEntry: (FoodLogEntry) -> Unit
@@ -142,15 +144,41 @@ fun FoodSection(
                 }
             }
 
+            if (!lastScannedBarcode.isNullOrBlank()) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(
+                        vertical = 12.dp
+                    )
+                )
+
+                Text(
+                    text = "Last Scanned Barcode",
+                    style = MaterialTheme.typography.labelLarge
+                )
+
+                Text(
+                    text = lastScannedBarcode,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
             Spacer(
                 modifier = Modifier.height(16.dp)
             )
 
             Button(
                 onClick = onScanFood,
+                enabled = !isScanningBarcode,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Scan Food Barcode")
+                Text(
+                    text = if (isScanningBarcode) {
+                        "Opening Scanner..."
+                    } else {
+                        "Scan Food Barcode"
+                    }
+                )
             }
 
             Spacer(

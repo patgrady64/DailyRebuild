@@ -48,6 +48,9 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 
 class MainActivity : ComponentActivity() {
 
@@ -78,6 +81,28 @@ fun DailyRebuildApp() {
         database.foodDao()
     }
 
+    val barcodeScannerOptions = remember {
+        GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(
+                Barcode.FORMAT_UPC_A,
+                Barcode.FORMAT_UPC_E,
+                Barcode.FORMAT_EAN_8,
+                Barcode.FORMAT_EAN_13
+            )
+            .enableAutoZoom()
+            .build()
+    }
+
+    val barcodeScanner = remember(
+        context,
+        barcodeScannerOptions
+    ) {
+        GmsBarcodeScanning.getClient(
+            context,
+            barcodeScannerOptions
+        )
+    }
+
     val todayDate = remember {
         LocalDate.now().toString()
     }
@@ -102,6 +127,14 @@ fun DailyRebuildApp() {
 
     var showManualFoodDialog by rememberSaveable {
         mutableStateOf(false)
+    }
+
+    var isScanningBarcode by remember {
+        mutableStateOf(false)
+    }
+
+    var lastScannedBarcode by rememberSaveable {
+        mutableStateOf<String?>(null)
     }
 
     var foodEntries by remember {
@@ -390,13 +423,87 @@ fun DailyRebuildApp() {
                 FoodSection(
                     entries = foodEntries,
 
+                    lastScannedBarcode =
+                        lastScannedBarcode,
+
+                    isScanningBarcode =
+                        isScanningBarcode,
+
                     onScanFood = {
-                        coroutineScope.launch {
-                            snackbarHostState
-                                .showSnackbar(
-                                    message =
-                                        "Barcode scanning is next."
-                                )
+                        if (!isScanningBarcode) {
+                            isScanningBarcode = true
+
+                            barcodeScanner
+                                .startScan()
+                                .addOnSuccessListener { barcode ->
+                                    isScanningBarcode = false
+
+                                    val scannedValue =
+                                        barcode.rawValue
+
+                                    if (
+                                        scannedValue.isNullOrBlank()
+                                    ) {
+                                        coroutineScope.launch {
+                                            snackbarHostState
+                                                .showSnackbar(
+                                                    message =
+                                                        "The barcode could not be read."
+                                                )
+                                        }
+                                    } else {
+                                        lastScannedBarcode =
+                                            scannedValue
+
+                                        coroutineScope.launch {
+                                            try {
+                                                val existingProduct =
+                                                    foodDao
+                                                        .getProductByBarcode(
+                                                            scannedValue
+                                                        )
+
+                                                if (
+                                                    existingProduct != null
+                                                ) {
+                                                    snackbarHostState
+                                                        .showSnackbar(
+                                                            message =
+                                                                "Scanned ${existingProduct.name}."
+                                                        )
+                                                } else {
+                                                    snackbarHostState
+                                                        .showSnackbar(
+                                                            message =
+                                                                "Barcode scanned: $scannedValue"
+                                                        )
+                                                }
+                                            } catch (
+                                                exception: Exception
+                                            ) {
+                                                snackbarHostState
+                                                    .showSnackbar(
+                                                        message =
+                                                            "Barcode scanned: $scannedValue"
+                                                    )
+                                            }
+                                        }
+                                    }
+                                }
+                                .addOnCanceledListener {
+                                    isScanningBarcode = false
+                                }
+                                .addOnFailureListener {
+                                    isScanningBarcode = false
+
+                                    coroutineScope.launch {
+                                        snackbarHostState
+                                            .showSnackbar(
+                                                message =
+                                                    "Could not open the barcode scanner."
+                                            )
+                                    }
+                                }
                         }
                     },
 
