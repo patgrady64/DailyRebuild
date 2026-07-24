@@ -11,9 +11,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     entities = [
         DailyRecord::class,
         FoodProduct::class,
-        FoodLogEntry::class
+        FoodLogEntry::class,
+        SavedMeal::class,
+        SavedMealIngredient::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class DailyRebuildDatabase :
@@ -24,6 +26,9 @@ abstract class DailyRebuildDatabase :
 
     abstract fun foodDao():
             FoodDao
+
+    abstract fun mealDao():
+            MealDao
 
     companion object {
 
@@ -193,7 +198,8 @@ abstract class DailyRebuildDatabase :
                             "daily_rebuild_database"
                         )
                             .addMigrations(
-                                MIGRATION_1_2
+                                MIGRATION_1_2,
+                                MIGRATION_2_3
                             )
                             .build()
 
@@ -202,5 +208,92 @@ abstract class DailyRebuildDatabase :
                     instance
                 }
         }
+
+        private val MIGRATION_2_3 =
+            object : Migration(2, 3) {
+
+                override fun migrate(
+                    database:
+                    SupportSQLiteDatabase
+                ) {
+                    database.execSQL(
+                        """
+                CREATE TABLE IF NOT EXISTS
+                `saved_meals`
+                (
+                    `id` INTEGER PRIMARY KEY
+                        AUTOINCREMENT NOT NULL,
+
+                    `name` TEXT NOT NULL,
+
+                    `isFavorite`
+                        INTEGER NOT NULL,
+
+                    `createdAt`
+                        INTEGER NOT NULL,
+
+                    `updatedAt`
+                        INTEGER NOT NULL
+                )
+                """.trimIndent()
+                    )
+
+                    database.execSQL(
+                        """
+                CREATE TABLE IF NOT EXISTS
+                `saved_meal_ingredients`
+                (
+                    `id` INTEGER PRIMARY KEY
+                        AUTOINCREMENT NOT NULL,
+
+                    `mealId`
+                        INTEGER NOT NULL,
+
+                    `productId`
+                        INTEGER NOT NULL,
+
+                    `amountMode`
+                        TEXT NOT NULL,
+
+                    `amount`
+                        REAL NOT NULL,
+
+                    `sortOrder`
+                        INTEGER NOT NULL,
+
+                    FOREIGN KEY (`mealId`)
+                        REFERENCES
+                        `saved_meals` (`id`)
+                        ON UPDATE NO ACTION
+                        ON DELETE CASCADE,
+
+                    FOREIGN KEY (`productId`)
+                        REFERENCES
+                        `food_products` (`id`)
+                        ON UPDATE NO ACTION
+                        ON DELETE NO ACTION
+                )
+                """.trimIndent()
+                    )
+
+                    database.execSQL(
+                        """
+                CREATE INDEX IF NOT EXISTS
+                `index_saved_meal_ingredients_mealId`
+                ON `saved_meal_ingredients`
+                (`mealId`)
+                """.trimIndent()
+                    )
+
+                    database.execSQL(
+                        """
+                CREATE INDEX IF NOT EXISTS
+                `index_saved_meal_ingredients_productId`
+                ON `saved_meal_ingredients`
+                (`productId`)
+                """.trimIndent()
+                    )
+                }
+            }
     }
 }
