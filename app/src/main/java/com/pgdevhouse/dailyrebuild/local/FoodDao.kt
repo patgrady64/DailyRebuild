@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Upsert
+import androidx.room.Update
 
 @Dao
 interface FoodDao {
@@ -25,6 +26,11 @@ interface FoodDao {
         product: FoodProduct
     ): Long
 
+    @Update
+    suspend fun updateProduct(
+        product: FoodProduct
+    )
+
     @Query(
         """
         SELECT *
@@ -39,11 +45,20 @@ interface FoodDao {
 
     @Query(
         """
-        SELECT *
-        FROM food_products
-        WHERE barcode = :barcode
-        LIMIT 1
-        """
+    SELECT *
+    FROM food_products
+    WHERE barcode = :barcode
+
+       OR barcode = ('0' || :barcode)
+
+       OR (
+            length(:barcode) = 13
+            AND substr(:barcode, 1, 1) = '0'
+            AND barcode = substr(:barcode, 2)
+       )
+
+    LIMIT 1
+    """
     )
     suspend fun getProductByBarcode(
         barcode: String

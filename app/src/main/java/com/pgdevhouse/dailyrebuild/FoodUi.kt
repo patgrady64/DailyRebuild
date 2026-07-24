@@ -35,6 +35,7 @@ import androidx.compose.ui.window.Dialog
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
 import java.util.Locale
+import com.pgdevhouse.dailyrebuild.data.remote.ScannedFoodPrefill
 
 /*
  * Information prepared by the manual food dialog.
@@ -174,7 +175,7 @@ fun FoodSection(
             ) {
                 Text(
                     text = if (isScanningBarcode) {
-                        "Opening Scanner..."
+                        "Scanning / Looking Up..."
                     } else {
                         "Scan Food Barcode"
                     }
@@ -243,52 +244,124 @@ private fun FoodEntryRow(
 
 @Composable
 fun ManualFoodDialog(
+    initialFood: ScannedFoodPrefill? = null,
     isSaving: Boolean,
     onDismiss: () -> Unit,
     onSave: (ManualFoodDraft) -> Unit
 ) {
-    var productName by rememberSaveable {
-        mutableStateOf("")
+    var productName by rememberSaveable(
+        initialFood?.barcode
+    ) {
+        mutableStateOf(
+            initialFood?.name.orEmpty()
+        )
     }
 
-    var brand by rememberSaveable {
-        mutableStateOf("")
+    var brand by rememberSaveable(
+        initialFood?.barcode
+    ) {
+        mutableStateOf(
+            initialFood?.brand.orEmpty()
+        )
     }
 
-    var caloriesPerServingText by rememberSaveable {
-        mutableStateOf("")
+    var caloriesPerServingText by rememberSaveable(
+        initialFood?.barcode
+    ) {
+        mutableStateOf(
+            initialFood
+                ?.caloriesPerServing
+                .toInitialFieldText()
+        )
     }
 
-    var proteinPerServingText by rememberSaveable {
-        mutableStateOf("")
+    var proteinPerServingText by rememberSaveable(
+        initialFood?.barcode
+    ) {
+        mutableStateOf(
+            initialFood
+                ?.proteinGramsPerServing
+                .toInitialFieldText()
+        )
     }
 
-    var carbohydratePerServingText by rememberSaveable {
-        mutableStateOf("")
+    var carbohydratePerServingText by rememberSaveable(
+        initialFood?.barcode
+    ) {
+        mutableStateOf(
+            initialFood
+                ?.carbohydrateGramsPerServing
+                .toInitialFieldText()
+        )
     }
 
-    var fatPerServingText by rememberSaveable {
-        mutableStateOf("")
+    var fatPerServingText by rememberSaveable(
+        initialFood?.barcode
+    ) {
+        mutableStateOf(
+            initialFood
+                ?.fatGramsPerServing
+                .toInitialFieldText()
+        )
     }
 
-    var sodiumPerServingText by rememberSaveable {
-        mutableStateOf("")
+    var sodiumPerServingText by rememberSaveable(
+        initialFood?.barcode
+    ) {
+        mutableStateOf(
+            initialFood
+                ?.sodiumMilligramsPerServing
+                .toInitialFieldText()
+        )
     }
 
-    var servingQuantityText by rememberSaveable {
-        mutableStateOf("1")
+    var servingQuantityText by rememberSaveable(
+        initialFood?.barcode
+    ) {
+        mutableStateOf(
+            initialFood
+                ?.servingQuantity
+                ?.let {
+                    formatFoodNumber(it)
+                }
+                ?: "1"
+        )
     }
 
-    var servingUnit by rememberSaveable {
-        mutableStateOf("piece")
+    var servingUnit by rememberSaveable(
+        initialFood?.barcode
+    ) {
+        mutableStateOf(
+            initialFood
+                ?.servingUnit
+                ?.ifBlank {
+                    "serving"
+                }
+                ?: "piece"
+        )
     }
 
-    var packageQuantityText by rememberSaveable {
-        mutableStateOf("")
+    var packageQuantityText by rememberSaveable(
+        initialFood?.barcode
+    ) {
+        mutableStateOf(
+            initialFood
+                ?.packageQuantity
+                ?.let {
+                    formatFoodNumber(it)
+                }
+                .orEmpty()
+        )
     }
 
-    var packageUnit by rememberSaveable {
-        mutableStateOf("")
+    var packageUnit by rememberSaveable(
+        initialFood?.barcode
+    ) {
+        mutableStateOf(
+            initialFood
+                ?.packageUnit
+                .orEmpty()
+        )
     }
 
     var quantityEatenText by rememberSaveable {
@@ -299,8 +372,25 @@ fun ManualFoodDialog(
         mutableStateOf("")
     }
 
-    var saveAsFavorite by rememberSaveable {
-        mutableStateOf(false)
+    var saveAsFavorite by rememberSaveable(
+        initialFood?.barcode
+    ) {
+        mutableStateOf(
+            initialFood?.isFavorite ?: false
+        )
+    }
+
+    var enterAsLabelServings by rememberSaveable(
+        initialFood?.barcode
+    ) {
+        mutableStateOf(
+            /*
+             * Fractional serving sizes are usually easier
+             * to enter as a number of servings.
+             */
+            initialFood != null &&
+                    initialFood.servingQuantity < 1.0
+        )
     }
 
     val caloriesPerServing =
@@ -319,19 +409,46 @@ fun ManualFoodDialog(
         sodiumPerServingText.toDoubleOrNull() ?: 0.0
 
     val servingQuantity =
-        servingQuantityText.toDoubleOrNull() ?: 0.0
+        parseFoodAmount(
+            servingQuantityText
+        ) ?: 0.0
 
     val packageQuantity =
-        packageQuantityText.toDoubleOrNull()
+        parseFoodAmount(
+            packageQuantityText
+        )
 
-    val quantityEaten =
-        quantityEatenText.toDoubleOrNull() ?: 0.0
+    val amountEntered =
+        parseFoodAmount(
+            quantityEatenText
+        ) ?: 0.0
 
+    /*
+     * Label-servings mode:
+     *
+     * Entering 4 means four servings.
+     *
+     * Measured-amount mode:
+     *
+     * Entering 1 means one cup, slice, patty, etc.
+     */
     val servingsEaten =
-        if (servingQuantity > 0.0) {
-            quantityEaten / servingQuantity
+        if (enterAsLabelServings) {
+            amountEntered
+        } else if (servingQuantity > 0.0) {
+            amountEntered / servingQuantity
         } else {
             0.0
+        }
+
+    val measuredAmountEaten =
+        servingsEaten * servingQuantity
+
+    val foodEntryUnit =
+        if (enterAsLabelServings) {
+            "servings"
+        } else {
+            servingUnit.trim()
         }
 
     val calculatedCalories =
@@ -353,7 +470,7 @@ fun ManualFoodDialog(
         productName.isNotBlank() &&
                 servingUnit.isNotBlank() &&
                 servingQuantity > 0.0 &&
-                quantityEaten > 0.0 &&
+                amountEntered > 0.0 &&
                 caloriesPerServing >= 0.0 &&
                 proteinPerServing >= 0.0 &&
                 carbohydratePerServing >= 0.0 &&
@@ -388,25 +505,65 @@ fun ManualFoodDialog(
                     fontWeight = FontWeight.Bold
                 )
 
+                if (initialFood != null) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            Text(
+                                text = "Scanned Product",
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            Text(
+                                text =
+                                    "Barcode: ${initialFood.barcode}"
+                            )
+
+                            if (
+                                initialFood
+                                    .originalServingSize
+                                    .isNotBlank()
+                            ) {
+                                Text(
+                                    text =
+                                        "Database serving: " +
+                                                initialFood
+                                                    .originalServingSize
+                                )
+                            }
+
+                            Text(
+                                text =
+                                    "Review and correct the label " +
+                                            "information before adding it.",
+                                style =
+                                    MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+
                 Text(
                     text =
                         "Enter the serving shown on the nutrition label, " +
                                 "then enter how much you actually ate."
                 )
 
-                OutlinedTextField(
-                    value = productName,
+                NumberField(
+                    value = servingQuantityText,
+
                     onValueChange = {
-                        productName = it
+                        servingQuantityText = it
                     },
-                    label = {
-                        Text("Product name")
-                    },
-                    placeholder = {
-                        Text("Hamburger patties")
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+
+                    label = "Serving amount",
+
+                    allowFractions = true,
+
+                    modifier = Modifier.weight(0.4f)
                 )
 
                 OutlinedTextField(
@@ -537,22 +694,17 @@ fun ManualFoodDialog(
                     horizontalArrangement =
                         Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedTextField(
+                    NumberField(
                         value = packageQuantityText,
+
                         onValueChange = {
                             packageQuantityText = it
                         },
-                        label = {
-                            Text("Package amount")
-                        },
-                        placeholder = {
-                            Text("12")
-                        },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType =
-                                KeyboardType.Decimal
-                        ),
+
+                        label = "Package amount",
+
+                        allowFractions = true,
+
                         modifier = Modifier.weight(0.4f)
                     )
 
@@ -580,12 +732,81 @@ fun ManualFoodDialog(
                     fontWeight = FontWeight.Bold
                 )
 
+                Text(
+                    text = "How do you want to enter this amount?"
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement =
+                        Arrangement.spacedBy(8.dp)
+                ) {
+                    if (enterAsLabelServings) {
+                        Button(
+                            onClick = {
+                                enterAsLabelServings = true
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Label Servings")
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = {
+                                enterAsLabelServings = true
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Label Servings")
+                        }
+                    }
+
+                    if (!enterAsLabelServings) {
+                        Button(
+                            onClick = {
+                                enterAsLabelServings = false
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Measured Amount")
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = {
+                                enterAsLabelServings = false
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Measured Amount")
+                        }
+                    }
+                }
+
+                Text(
+                    text =
+                        if (enterAsLabelServings) {
+                            "Enter how many nutrition-label servings you ate."
+                        } else {
+                            "Enter how many $servingUnit you ate."
+                        },
+                    style = MaterialTheme.typography.bodySmall
+                )
+
                 NumberField(
                     value = quantityEatenText,
+
                     onValueChange = {
                         quantityEatenText = it
                     },
-                    label = "How many $servingUnit did you eat?"
+
+                    label =
+                        if (enterAsLabelServings) {
+                            "Number of label servings"
+                        } else {
+                            "Amount in $servingUnit"
+                        },
+
+                    allowFractions = true
                 )
 
                 OutlinedTextField(
@@ -633,10 +854,17 @@ fun ManualFoodDialog(
 
                         Text(
                             text =
-                                "${formatFoodNumber(quantityEaten)} " +
-                                        "$servingUnit = " +
-                                        "${formatFoodNumber(servingsEaten)} " +
-                                        "label servings"
+                                if (enterAsLabelServings) {
+                                    "${formatFoodNumber(amountEntered)} " +
+                                            "label servings = " +
+                                            "${formatFoodNumber(measuredAmountEaten)} " +
+                                            servingUnit
+                                } else {
+                                    "${formatFoodNumber(amountEntered)} " +
+                                            "$servingUnit = " +
+                                            "${formatFoodNumber(servingsEaten)} " +
+                                            "label servings"
+                                }
                         )
 
                         Text(
@@ -678,6 +906,7 @@ fun ManualFoodDialog(
                     Button(
                         onClick = {
                             val product = FoodProduct(
+                                barcode = initialFood?.barcode,
                                 name = productName.trim(),
                                 brand = brand.trim(),
 
@@ -720,10 +949,10 @@ fun ManualFoodDialog(
                                 product = product,
 
                                 quantityEaten =
-                                    quantityEaten,
+                                    amountEntered,
 
                                 unit =
-                                    servingUnit.trim(),
+                                    foodEntryUnit,
 
                                 mealName =
                                     mealName
@@ -772,36 +1001,156 @@ fun ManualFoodDialog(
 private fun NumberField(
     value: String,
     onValueChange: (String) -> Unit,
-    label: String
+    label: String,
+    allowFractions: Boolean = false,
+    modifier: Modifier = Modifier.fillMaxWidth()
 ) {
     OutlinedTextField(
         value = value,
+
         onValueChange = { newValue ->
+
             val filteredValue =
-                newValue.filter {
-                    it.isDigit() || it == '.'
+                if (allowFractions) {
+                    newValue.filter {
+                        it.isDigit() ||
+                                it == '.' ||
+                                it == '/' ||
+                                it == ' '
+                    }
+                } else {
+                    newValue.filter {
+                        it.isDigit() ||
+                                it == '.'
+                    }
                 }
 
-            /*
-             * Prevent more than one decimal point.
-             */
-            if (
+            val decimalCount =
                 filteredValue.count {
                     it == '.'
-                } <= 1
-            ) {
-                onValueChange(filteredValue)
+                }
+
+            val slashCount =
+                filteredValue.count {
+                    it == '/'
+                }
+
+            val isAllowed =
+                if (allowFractions) {
+                    decimalCount <= 2 &&
+                            slashCount <= 1
+                } else {
+                    decimalCount <= 1
+                }
+
+            if (isAllowed) {
+                onValueChange(
+                    filteredValue
+                )
             }
         },
+
         label = {
             Text(label)
         },
+
         singleLine = true,
+
         keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Decimal
+            keyboardType =
+                KeyboardType.Decimal
         ),
-        modifier = Modifier.fillMaxWidth()
+
+        modifier = modifier
     )
+}
+
+private fun parseFoodAmount(
+    text: String
+): Double? {
+    val cleaned =
+        text
+            .trim()
+            .replace(
+                Regex("""\s+"""),
+                " "
+            )
+
+    if (cleaned.isBlank()) {
+        return null
+    }
+
+    /*
+     * Mixed number:
+     *
+     * 1 1/2
+     */
+    val mixedNumberMatch =
+        Regex(
+            """^(\d+(?:\.\d+)?)\s+""" +
+                    """(\d+(?:\.\d+)?)/""" +
+                    """(\d+(?:\.\d+)?)$"""
+        ).matchEntire(cleaned)
+
+    if (mixedNumberMatch != null) {
+        val whole =
+            mixedNumberMatch
+                .groupValues[1]
+                .toDoubleOrNull()
+                ?: return null
+
+        val numerator =
+            mixedNumberMatch
+                .groupValues[2]
+                .toDoubleOrNull()
+                ?: return null
+
+        val denominator =
+            mixedNumberMatch
+                .groupValues[3]
+                .toDoubleOrNull()
+                ?: return null
+
+        if (denominator == 0.0) {
+            return null
+        }
+
+        return whole +
+                numerator / denominator
+    }
+
+    /*
+     * Simple fraction:
+     *
+     * 1/4
+     */
+    val fractionMatch =
+        Regex(
+            """^(\d+(?:\.\d+)?)/""" +
+                    """(\d+(?:\.\d+)?)$"""
+        ).matchEntire(cleaned)
+
+    if (fractionMatch != null) {
+        val numerator =
+            fractionMatch
+                .groupValues[1]
+                .toDoubleOrNull()
+                ?: return null
+
+        val denominator =
+            fractionMatch
+                .groupValues[2]
+                .toDoubleOrNull()
+                ?: return null
+
+        if (denominator == 0.0) {
+            return null
+        }
+
+        return numerator / denominator
+    }
+
+    return cleaned.toDoubleOrNull()
 }
 
 private fun formatFoodNumber(
@@ -816,4 +1165,17 @@ private fun formatFoodNumber(
             value
         )
     }
+}
+
+private fun Double?.toInitialFieldText():
+        String {
+
+    if (
+        this == null ||
+        this == 0.0
+    ) {
+        return ""
+    }
+
+    return formatFoodNumber(this)
 }

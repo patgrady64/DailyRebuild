@@ -51,6 +51,9 @@ import java.util.Locale
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import com.pgdevhouse.dailyrebuild.data.remote.FoodLookupResult
+import com.pgdevhouse.dailyrebuild.data.remote.OpenFoodFactsLookup
+import com.pgdevhouse.dailyrebuild.data.remote.ScannedFoodPrefill
 
 class MainActivity : ComponentActivity() {
 
@@ -135,6 +138,12 @@ fun DailyRebuildApp() {
 
     var lastScannedBarcode by rememberSaveable {
         mutableStateOf<String?>(null)
+    }
+
+    var scannedFoodPrefill by remember {
+        mutableStateOf<ScannedFoodPrefill?>(
+            null
+        )
     }
 
     var foodEntries by remember {
@@ -436,57 +445,161 @@ fun DailyRebuildApp() {
                             barcodeScanner
                                 .startScan()
                                 .addOnSuccessListener { barcode ->
-                                    isScanningBarcode = false
 
                                     val scannedValue =
                                         barcode.rawValue
 
-                                    if (
-                                        scannedValue.isNullOrBlank()
-                                    ) {
+                                    if (scannedValue.isNullOrBlank()) {
+                                        isScanningBarcode = false
+
                                         coroutineScope.launch {
-                                            snackbarHostState
-                                                .showSnackbar(
-                                                    message =
-                                                        "The barcode could not be read."
-                                                )
+                                            snackbarHostState.showSnackbar(
+                                                message =
+                                                    "The barcode could not be read."
+                                            )
                                         }
-                                    } else {
-                                        lastScannedBarcode =
-                                            scannedValue
 
-                                        coroutineScope.launch {
-                                            try {
-                                                val existingProduct =
-                                                    foodDao
-                                                        .getProductByBarcode(
-                                                            scannedValue
-                                                        )
+                                        return@addOnSuccessListener
+                                    }
 
-                                                if (
-                                                    existingProduct != null
-                                                ) {
-                                                    snackbarHostState
-                                                        .showSnackbar(
-                                                            message =
-                                                                "Scanned ${existingProduct.name}."
-                                                        )
-                                                } else {
-                                                    snackbarHostState
-                                                        .showSnackbar(
-                                                            message =
-                                                                "Barcode scanned: $scannedValue"
-                                                        )
-                                                }
-                                            } catch (
-                                                exception: Exception
-                                            ) {
-                                                snackbarHostState
-                                                    .showSnackbar(
-                                                        message =
-                                                            "Barcode scanned: $scannedValue"
+                                    lastScannedBarcode =
+                                        scannedValue
+
+                                    coroutineScope.launch {
+                                        try {
+                                            /*
+                                             * Use our locally saved copy first.
+                                             */
+                                            val existingProduct =
+                                                foodDao.getProductByBarcode(
+                                                    scannedValue
+                                                )
+
+                                            if (existingProduct != null) {
+                                                scannedFoodPrefill =
+                                                    ScannedFoodPrefill(
+                                                        barcode =
+                                                            scannedValue,
+
+                                                        name =
+                                                            existingProduct.name,
+
+                                                        brand =
+                                                            existingProduct.brand,
+
+                                                        caloriesPerServing =
+                                                            existingProduct
+                                                                .caloriesPerServing,
+
+                                                        proteinGramsPerServing =
+                                                            existingProduct
+                                                                .proteinGramsPerServing,
+
+                                                        carbohydrateGramsPerServing =
+                                                            existingProduct
+                                                                .carbohydrateGramsPerServing,
+
+                                                        fatGramsPerServing =
+                                                            existingProduct
+                                                                .fatGramsPerServing,
+
+                                                        sodiumMilligramsPerServing =
+                                                            existingProduct
+                                                                .sodiumMilligramsPerServing,
+
+                                                        servingQuantity =
+                                                            existingProduct
+                                                                .servingQuantity,
+
+                                                        servingUnit =
+                                                            existingProduct
+                                                                .servingUnit,
+
+                                                        packageUnit =
+                                                            existingProduct
+                                                                .packageUnit
+                                                                .orEmpty(),
+
+                                                        isFavorite =
+                                                            existingProduct
+                                                                .isFavorite,
+
+                                                        originalServingSize =
+                                                            "${existingProduct.servingQuantity} " +
+                                                                    existingProduct.servingUnit
                                                     )
+
+                                                showManualFoodDialog = true
+
+                                                snackbarHostState.showSnackbar(
+                                                    message =
+                                                        "Loaded saved product."
+                                                )
+                                            } else {
+                                                when (
+                                                    val result =
+                                                        OpenFoodFactsLookup
+                                                            .findProduct(
+                                                                scannedValue
+                                                            )
+                                                ) {
+                                                    is FoodLookupResult.Found -> {
+                                                        scannedFoodPrefill =
+                                                            result.food
+
+                                                        showManualFoodDialog =
+                                                            true
+
+                                                        snackbarHostState
+                                                            .showSnackbar(
+                                                                message =
+                                                                    "Product found."
+                                                            )
+                                                    }
+
+                                                    FoodLookupResult.NotFound -> {
+                                                        /*
+                                                         * Keep the barcode, but allow
+                                                         * manual product creation.
+                                                         */
+                                                        scannedFoodPrefill =
+                                                            ScannedFoodPrefill(
+                                                                barcode =
+                                                                    scannedValue
+                                                            )
+
+                                                        showManualFoodDialog =
+                                                            true
+
+                                                        snackbarHostState
+                                                            .showSnackbar(
+                                                                message =
+                                                                    "Product not found. " +
+                                                                            "Enter its label manually."
+                                                            )
+                                                    }
+
+                                                    is FoodLookupResult.Failed -> {
+                                                        scannedFoodPrefill =
+                                                            ScannedFoodPrefill(
+                                                                barcode =
+                                                                    scannedValue
+                                                            )
+
+                                                        showManualFoodDialog =
+                                                            true
+
+                                                        snackbarHostState
+                                                            .showSnackbar(
+                                                                message =
+                                                                    "Lookup failed. " +
+                                                                            "You can enter the label manually."
+                                                            )
+                                                    }
+                                                }
                                             }
+                                        } finally {
+                                            isScanningBarcode = false
                                         }
                                     }
                                 }
@@ -508,6 +621,7 @@ fun DailyRebuildApp() {
                     },
 
                     onAddFoodManually = {
+                        scannedFoodPrefill = null
                         showManualFoodDialog = true
                     },
 
@@ -810,11 +924,13 @@ fun DailyRebuildApp() {
 
     if (showManualFoodDialog) {
         ManualFoodDialog(
+            initialFood = scannedFoodPrefill,
             isSaving = isAddingFood,
 
             onDismiss = {
                 if (!isAddingFood) {
                     showManualFoodDialog = false
+                    scannedFoodPrefill = null
                 }
             },
 
@@ -823,10 +939,29 @@ fun DailyRebuildApp() {
                     isAddingFood = true
 
                     try {
+                        val existingProduct =
+                            draft.product.barcode?.let {
+                                foodDao.getProductByBarcode(it)
+                            }
+
                         val productId =
-                            foodDao.addProduct(
-                                draft.product
-                            )
+                            if (existingProduct == null) {
+                                foodDao.addProduct(
+                                    draft.product
+                                )
+                            } else {
+                                foodDao.updateProduct(
+                                    draft.product.copy(
+                                        id = existingProduct.id,
+                                        createdAt =
+                                            existingProduct.createdAt,
+                                        updatedAt =
+                                            System.currentTimeMillis()
+                                    )
+                                )
+
+                                existingProduct.id
+                            }
 
                         val entry =
                             FoodLogEntry(
@@ -880,6 +1015,8 @@ fun DailyRebuildApp() {
 
                         showManualFoodDialog =
                             false
+
+                        scannedFoodPrefill = null
 
                         snackbarHostState
                             .showSnackbar(
@@ -1178,7 +1315,7 @@ private fun WaterSection(
                 mioDisposableBottleCount
 
     val totalWaterOunces =
-        (reusableBottleTotal * 20.0) +
+        (reusableBottleTotal * 24.0) +
                 (disposableBottleTotal * 16.9)
 
     Card(
@@ -1251,7 +1388,7 @@ private fun WaterSection(
                     Modifier.fillMaxWidth()
             ) {
                 Text(
-                    "Add Reusable Bottle — 20 oz"
+                    "Add Reusable Bottle — 24 oz"
                 )
             }
 
