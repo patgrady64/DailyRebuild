@@ -3,6 +3,7 @@ package com.pgdevhouse.dailyrebuild
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,14 +20,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -38,6 +34,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -52,6 +49,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.health.connect.client.PermissionController
+import com.pgdevhouse.dailyrebuild.data.local.DailyActivitySnapshot
 import com.pgdevhouse.dailyrebuild.data.local.DailyRebuildDatabase
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
@@ -75,19 +74,37 @@ import com.pgdevhouse.dailyrebuild.data.local.SavedMealWithIngredients
 
 class MainActivity : ComponentActivity() {
 
+    private val healthRefreshToken =
+        mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         setContent {
             DailyRebuildAppTheme {
-                DailyRebuildApp()
+                DailyRebuildApp(
+                    healthRefreshToken =
+                        healthRefreshToken.intValue
+                )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+
+        /*
+         * Recheck Health Connect after returning from its
+         * permissions or settings screen.
+         */
+        healthRefreshToken.intValue++
     }
 }
 
 @Composable
-fun DailyRebuildApp() {
+fun DailyRebuildApp(
+    healthRefreshToken: Int = 0
+) {
     val context = LocalContext.current
 
     val database = remember {
@@ -104,6 +121,16 @@ fun DailyRebuildApp() {
 
     val mealDao = remember {
         database.mealDao()
+    }
+
+    val dailyActivityDao = remember {
+        database.dailyActivityDao()
+    }
+
+    val healthConnectManager = remember(
+        context
+    ) {
+        HealthConnectManager(context)
     }
 
     val barcodeScannerOptions = remember {
@@ -339,6 +366,125 @@ fun DailyRebuildApp() {
     }
 
     /*
+     * Health Connect activity.
+     *
+     * The dashboard shows the current live totals when permission is
+     * available. Save Today stores a separate Daily Rebuild snapshot.
+     */
+    var healthAvailability by remember {
+        mutableStateOf(
+            healthConnectManager.getAvailability()
+        )
+    }
+
+    var hasHealthPermissions by remember {
+        mutableStateOf(false)
+    }
+
+    var isLoadingHealthActivity by remember {
+        mutableStateOf(false)
+    }
+
+    var hasLiveHealthActivity by remember {
+        mutableStateOf(false)
+    }
+
+    var liveHealthActivity by remember {
+        mutableStateOf(
+            HealthActivityData()
+        )
+    }
+
+    var savedActivitySnapshot by remember {
+        mutableStateOf<DailyActivitySnapshot?>(
+            null
+        )
+    }
+
+    fun refreshHealthActivity(
+        showFeedback: Boolean = false
+    ) {
+        coroutineScope.launch {
+            healthAvailability =
+                healthConnectManager.getAvailability()
+
+            if (
+                healthAvailability !=
+                    HealthConnectAvailability.AVAILABLE
+            ) {
+                hasHealthPermissions = false
+                hasLiveHealthActivity = false
+                return@launch
+            }
+
+            isLoadingHealthActivity = true
+
+            try {
+                hasHealthPermissions =
+                    healthConnectManager
+                        .hasAllPermissions()
+
+                if (hasHealthPermissions) {
+                    liveHealthActivity =
+                        healthConnectManager
+                            .readTodayActivity()
+
+                    hasLiveHealthActivity = true
+
+                    if (showFeedback) {
+                        snackbarHostState.showSnackbar(
+                            message =
+                                "Activity refreshed."
+                        )
+                    }
+                } else {
+                    hasLiveHealthActivity = false
+                }
+            } catch (
+                exception: Exception
+            ) {
+                hasLiveHealthActivity = false
+
+                if (showFeedback) {
+                    snackbarHostState.showSnackbar(
+                        message =
+                            "Could not refresh activity."
+                    )
+                }
+            } finally {
+                isLoadingHealthActivity = false
+            }
+        }
+    }
+
+    val healthPermissionsLauncher =
+        rememberLauncherForActivityResult(
+            contract =
+                PermissionController
+                    .createRequestPermissionResultContract()
+        ) { grantedPermissions ->
+            if (
+                grantedPermissions.containsAll(
+                    HealthConnectManager.permissions
+                )
+            ) {
+                refreshHealthActivity(
+                    showFeedback = true
+                )
+            } else {
+                hasHealthPermissions = false
+                hasLiveHealthActivity = false
+
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar(
+                        message =
+                            "Activity permission was not granted."
+                    )
+                }
+            }
+        }
+
+    /*
      * Read-only daily history.
      *
      * The first version scans the most recent 365 dates by using the
@@ -440,6 +586,11 @@ fun DailyRebuildApp() {
                     savedRecord.journalText
             }
 
+            savedActivitySnapshot =
+                dailyActivityDao.getSnapshotByDate(
+                    todayDate
+                )
+
             foodEntries =
                 foodDao.getEntriesForDate(
                     todayDate
@@ -468,6 +619,12 @@ fun DailyRebuildApp() {
         }
     }
 
+    LaunchedEffect(
+        healthRefreshToken
+    ) {
+        refreshHealthActivity()
+    }
+
     val completedTasks = listOf(
         foodRecorded,
         walkCompleted,
@@ -484,6 +641,40 @@ fun DailyRebuildApp() {
 
     val totalCaloriesToday =
         foodEntries.sumOf { it.calories }
+
+    val displayedActivity =
+        when {
+            hasLiveHealthActivity ->
+                liveHealthActivity
+
+            savedActivitySnapshot != null ->
+                HealthActivityData(
+                    steps =
+                        savedActivitySnapshot
+                            ?.steps ?: 0L,
+                    distanceMiles =
+                        savedActivitySnapshot
+                            ?.distanceMiles ?: 0.0,
+                    activeCalories =
+                        savedActivitySnapshot
+                            ?.activeCalories ?: 0.0
+                )
+
+            else ->
+                HealthActivityData()
+        }
+
+    val activitySourceLabel =
+        when {
+            hasLiveHealthActivity ->
+                "Live from Health Connect"
+
+            savedActivitySnapshot != null ->
+                "Saved with today's record"
+
+            else ->
+                null
+        }
 
     fun openDailyHistory() {
         showDailyHistoryDialog = true
@@ -512,15 +703,24 @@ fun DailyRebuildApp() {
                             date
                         )
 
+                    val activitySnapshot =
+                        dailyActivityDao
+                            .getSnapshotByDate(
+                                date
+                            )
+
                     if (
                         record != null ||
-                        entries.isNotEmpty()
+                        entries.isNotEmpty() ||
+                        activitySnapshot != null
                     ) {
                         loadedDays.add(
                             DailyHistoryDay(
                                 date = date,
                                 record = record,
-                                foodEntries = entries
+                                foodEntries = entries,
+                                activitySnapshot =
+                                    activitySnapshot
                             )
                         )
                     }
@@ -833,7 +1033,50 @@ fun DailyRebuildApp() {
                         updatedAt = System.currentTimeMillis()
                     )
 
-                dailyRecordDao.saveRecord(record)
+                val snapshotToSave =
+                    when {
+                        hasHealthPermissions &&
+                            hasLiveHealthActivity ->
+                            DailyActivitySnapshot(
+                                date = todayDate,
+                                steps =
+                                    liveHealthActivity
+                                        .steps,
+                                distanceMiles =
+                                    liveHealthActivity
+                                        .distanceMiles,
+                                activeCalories =
+                                    liveHealthActivity
+                                        .activeCalories,
+                                updatedAt =
+                                    System.currentTimeMillis()
+                            )
+
+                        savedActivitySnapshot != null ->
+                            savedActivitySnapshot
+                                ?.copy(
+                                    updatedAt =
+                                        System.currentTimeMillis()
+                                )
+
+                        else ->
+                            null
+                    }
+
+                database.withTransaction {
+                    dailyRecordDao.saveRecord(
+                        record
+                    )
+
+                    snapshotToSave?.let {
+                        dailyActivityDao
+                            .saveSnapshot(it)
+                    }
+                }
+
+                savedActivitySnapshot =
+                    snapshotToSave
+
                 snackbarHostState.showSnackbar(
                     message = "Today saved."
                 )
@@ -894,6 +1137,32 @@ fun DailyRebuildApp() {
                     waterOunces = totalWaterOunces,
                     calories = totalCaloriesToday,
                     backPain = backPain
+                )
+
+                ActivitySection(
+                    availability = healthAvailability,
+                    hasPermissions = hasHealthPermissions,
+                    isLoading = isLoadingHealthActivity,
+                    activity = displayedActivity,
+                    sourceLabel = activitySourceLabel,
+                    onConnect = {
+                        healthPermissionsLauncher.launch(
+                            HealthConnectManager.permissions
+                        )
+                    },
+                    onRefresh = {
+                        refreshHealthActivity(
+                            showFeedback = true
+                        )
+                    },
+                    onManageAccess = {
+                        healthConnectManager
+                            .openHealthConnectSettings()
+                    },
+                    onInstallOrUpdate = {
+                        healthConnectManager
+                            .openInstallOrUpdate()
+                    }
                 )
 
                 DailyTasksSection(
@@ -1854,6 +2123,14 @@ fun DailyRebuildApp() {
                                     record
                                 )
                             }
+
+                            day.activitySnapshot
+                                ?.let { snapshot ->
+                                    dailyActivityDao
+                                        .deleteSnapshot(
+                                            snapshot
+                                        )
+                                }
                         }
 
                         dailyHistoryDays =
@@ -1888,6 +2165,7 @@ fun DailyRebuildApp() {
                             nightAcetaminophenTaken = true
 
                             journalText = ""
+                            savedActivitySnapshot = null
                         }
 
                         snackbarHostState.showSnackbar(
@@ -2207,16 +2485,16 @@ private fun HeaderSection() {
             modifier = Modifier.padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            RebuildStatusBadge(
-                text = today.format(dayFormatter),
-                backgroundColor = Color.White.copy(alpha = 0.14f),
-                contentColor = Color.White
-            )
-
             Text(
                 text = "Daily Rebuild",
                 style = MaterialTheme.typography.headlineLarge,
                 color = Color.White
+            )
+
+            RebuildStatusBadge(
+                text = today.format(dayFormatter),
+                backgroundColor = Color.White.copy(alpha = 0.14f),
+                contentColor = Color.White
             )
 
             Text(
@@ -2303,6 +2581,211 @@ private fun ProgressSection(
             )
         }
     }
+}
+
+@Composable
+private fun ActivitySection(
+    availability: HealthConnectAvailability,
+    hasPermissions: Boolean,
+    isLoading: Boolean,
+    activity: HealthActivityData,
+    sourceLabel: String?,
+    onConnect: () -> Unit,
+    onRefresh: () -> Unit,
+    onManageAccess: () -> Unit,
+    onInstallOrUpdate: () -> Unit
+) {
+    RebuildSectionCard(
+        title = "Today's activity",
+        subtitle =
+            "Steps, distance, and active calories from Health Connect.",
+        accentColor = RebuildBlue
+    ) {
+        when (availability) {
+            HealthConnectAvailability.AVAILABLE -> {
+                if (
+                    hasPermissions ||
+                    sourceLabel != null
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement =
+                            Arrangement.spacedBy(8.dp)
+                    ) {
+                        RebuildMetricPill(
+                            label = "steps",
+                            value =
+                                String.format(
+                                    Locale.US,
+                                    "%,d",
+                                    activity.steps
+                                ),
+                            modifier = Modifier.weight(1f),
+                            color =
+                                MaterialTheme
+                                    .colorScheme
+                                    .primaryContainer
+                        )
+
+                        RebuildMetricPill(
+                            label = "miles",
+                            value =
+                                formatActivityMiles(
+                                    activity.distanceMiles
+                                ),
+                            modifier = Modifier.weight(1f),
+                            color =
+                                MaterialTheme
+                                    .colorScheme
+                                    .secondaryContainer,
+                            contentColor =
+                                MaterialTheme
+                                    .colorScheme
+                                    .onSecondaryContainer
+                        )
+
+                        RebuildMetricPill(
+                            label = "active cal",
+                            value =
+                                activity
+                                    .activeCalories
+                                    .toInt()
+                                    .toString(),
+                            modifier = Modifier.weight(1f),
+                            color =
+                                MaterialTheme
+                                    .colorScheme
+                                    .tertiaryContainer,
+                            contentColor =
+                                MaterialTheme
+                                    .colorScheme
+                                    .onTertiaryContainer
+                        )
+                    }
+
+                    sourceLabel?.let {
+                        Text(
+                            text = it,
+                            style =
+                                MaterialTheme
+                                    .typography
+                                    .bodySmall,
+                            color =
+                                MaterialTheme
+                                    .colorScheme
+                                    .onSurfaceVariant
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement =
+                            Arrangement.spacedBy(10.dp)
+                    ) {
+                        RebuildSecondaryAction(
+                            text =
+                                if (isLoading) {
+                                    "Refreshing…"
+                                } else if (
+                                    hasPermissions
+                                ) {
+                                    "Refresh"
+                                } else {
+                                    "Reconnect"
+                                },
+                            onClick =
+                                if (hasPermissions) {
+                                    onRefresh
+                                } else {
+                                    onConnect
+                                },
+                            enabled = !isLoading,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        RebuildSecondaryAction(
+                            text = "Manage access",
+                            onClick = onManageAccess,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                } else {
+                    Text(
+                        text =
+                            "Connect Health Connect to show activity " +
+                                "recorded by Google Fit, your phone, " +
+                                "or a compatible wearable.",
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodyMedium,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant
+                    )
+
+                    RebuildPrimaryAction(
+                        text = "Connect Health Connect",
+                        onClick = onConnect,
+                        enabled = !isLoading,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
+            HealthConnectAvailability.UPDATE_REQUIRED -> {
+                Text(
+                    text =
+                        "Health Connect must be installed or updated " +
+                            "before Daily Rebuild can read activity.",
+                    color =
+                        MaterialTheme
+                            .colorScheme
+                            .onSurfaceVariant
+                )
+
+                RebuildPrimaryAction(
+                    text = "Install or update",
+                    onClick = onInstallOrUpdate,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            HealthConnectAvailability.UNAVAILABLE -> {
+                Text(
+                    text =
+                        "Health Connect is not available on this device. " +
+                            "Daily Rebuild will continue working without it.",
+                    color =
+                        MaterialTheme
+                            .colorScheme
+                            .onSurfaceVariant
+                )
+            }
+        }
+
+        Text(
+            text =
+                "Daily Rebuild has read-only access. Save Today stores " +
+                    "a separate snapshot for your calendar and future stats.",
+            style = MaterialTheme.typography.bodySmall,
+            color =
+                MaterialTheme
+                    .colorScheme
+                    .onSurfaceVariant
+        )
+    }
+}
+
+private fun formatActivityMiles(
+    miles: Double
+): String {
+    return String.format(
+        Locale.US,
+        "%.2f",
+        miles
+    )
 }
 
 @Composable

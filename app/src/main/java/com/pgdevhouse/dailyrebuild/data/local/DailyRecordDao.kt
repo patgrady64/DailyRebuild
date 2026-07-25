@@ -1,6 +1,7 @@
 package com.pgdevhouse.dailyrebuild.data.local
 
 import androidx.room.Dao
+import androidx.room.Delete
 import androidx.room.Query
 import androidx.room.Upsert
 
@@ -40,7 +41,7 @@ interface DailyRecordDao {
     )
     suspend fun getAllRecords(): List<DailyRecord>
 
-    @androidx.room.Delete
+    @Delete
     suspend fun deleteRecord(
         record: DailyRecord
     )

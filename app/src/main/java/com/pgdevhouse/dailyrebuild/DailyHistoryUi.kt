@@ -35,27 +35,28 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.pgdevhouse.dailyrebuild.data.local.DailyActivitySnapshot
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
-import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.math.abs
 
 /**
  * One read-only history day.
  *
- * A day can contain a saved DailyRecord, food entries, or both. Food is stored
- * immediately, while checklist/water/pain/medication/journal data is stored
- * when Save Today is pressed.
+ * A day can contain a saved DailyRecord, food entries, an activity snapshot,
+ * or any combination of them. Food is stored immediately, while the checklist
+ * and Health Connect snapshot are stored when Save Today is pressed.
  */
 data class DailyHistoryDay(
     val date: String,
     val record: DailyRecord?,
-    val foodEntries: List<FoodLogEntry>
+    val foodEntries: List<FoodLogEntry>,
+    val activitySnapshot: DailyActivitySnapshot? = null
 )
 
 @Composable
@@ -156,8 +157,8 @@ fun DailyHistoryDialog(
                     text =
                         "Delete ${formatHistoryDate(pendingDeletionDay.date)}? " +
                             "This permanently removes the saved checklist, " +
-                            "water, pain, medications, journal, individual foods, " +
-                            "and logged meals for this date. Saved Foods and " +
+                            "water, pain, medications, journal, activity snapshot, " +
+                            "individual foods, and logged meals for this date. Saved Foods and " +
                             "Saved Meal templates will not be deleted."
                 )
             },
@@ -446,7 +447,9 @@ private fun CalendarDayCell(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val hasSavedRecord = historyDay?.record != null
+    val hasSavedRecord =
+        historyDay?.record != null ||
+            historyDay?.activitySnapshot != null
     val hasFood = historyDay?.foodEntries?.isNotEmpty() == true
     val isToday = date == LocalDate.now()
     val containerColor = when {
@@ -532,14 +535,22 @@ private fun DailyHistoryDetailPage(
                 shape = RoundedCornerShape(16.dp)
             ) { Text("‹ Calendar") }
             Spacer(Modifier.weight(1f))
+            val hasSavedData =
+                day.record != null ||
+                    day.activitySnapshot != null
+
             RebuildStatusBadge(
-                text = if (day.record != null && day.foodEntries.isNotEmpty()) {
-                    "Saved + Food"
-                } else if (day.record != null) {
-                    "Saved"
-                } else {
-                    "Food only"
-                }
+                text =
+                    if (
+                        hasSavedData &&
+                        day.foodEntries.isNotEmpty()
+                    ) {
+                        "Saved + Food"
+                    } else if (hasSavedData) {
+                        "Saved"
+                    } else {
+                        "Food only"
+                    }
             )
         }
 
@@ -563,6 +574,12 @@ private fun DailyHistoryDetailPage(
             HistoryWaterCard(record)
             HistoryPainCard(record)
             HistoryMedicationCard(record)
+        }
+
+        day.activitySnapshot?.let {
+            HistoryActivityCard(
+                snapshot = it
+            )
         }
 
         HistoryFoodCard(entries = day.foodEntries)
@@ -592,6 +609,82 @@ private fun DailyHistoryDetailPage(
                 Text(if (isDeletingDay) "Deleting day…" else "Delete entire day")
             }
         }
+    }
+}
+
+@Composable
+private fun HistoryActivityCard(
+    snapshot: DailyActivitySnapshot
+) {
+    HistorySectionCard(
+        title = "Activity"
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement =
+                Arrangement.spacedBy(8.dp)
+        ) {
+            RebuildMetricPill(
+                label = "steps",
+                value =
+                    String.format(
+                        Locale.US,
+                        "%,d",
+                        snapshot.steps
+                    ),
+                modifier = Modifier.weight(1f),
+                color =
+                    MaterialTheme
+                        .colorScheme
+                        .primaryContainer
+            )
+
+            RebuildMetricPill(
+                label = "miles",
+                value =
+                    String.format(
+                        Locale.US,
+                        "%.2f",
+                        snapshot.distanceMiles
+                    ),
+                modifier = Modifier.weight(1f),
+                color =
+                    MaterialTheme
+                        .colorScheme
+                        .secondaryContainer,
+                contentColor =
+                    MaterialTheme
+                        .colorScheme
+                        .onSecondaryContainer
+            )
+
+            RebuildMetricPill(
+                label = "active cal",
+                value =
+                    snapshot
+                        .activeCalories
+                        .toInt()
+                        .toString(),
+                modifier = Modifier.weight(1f),
+                color =
+                    MaterialTheme
+                        .colorScheme
+                        .tertiaryContainer,
+                contentColor =
+                    MaterialTheme
+                        .colorScheme
+                        .onTertiaryContainer
+            )
+        }
+
+        Text(
+            text = "Health Connect snapshot saved with this day.",
+            style = MaterialTheme.typography.bodySmall,
+            color =
+                MaterialTheme
+                    .colorScheme
+                    .onSurfaceVariant
+        )
     }
 }
 
@@ -928,6 +1021,7 @@ private fun HistorySectionCard(
     RebuildSectionCard(
         title = title,
         accentColor = when (title) {
+            "Activity" -> RebuildBlue
             "Water" -> RebuildTeal
             "Pain" -> RebuildAmber
             "Food and Nutrition" -> RebuildGreen

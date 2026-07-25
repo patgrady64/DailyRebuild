@@ -13,9 +13,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         FoodProduct::class,
         FoodLogEntry::class,
         SavedMeal::class,
-        SavedMealIngredient::class
+        SavedMealIngredient::class,
+        DailyActivitySnapshot::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class DailyRebuildDatabase :
@@ -200,7 +201,8 @@ abstract class DailyRebuildDatabase :
                             .addMigrations(
                                 MIGRATION_1_2,
                                 MIGRATION_2_3,
-                                MIGRATION_3_4
+                                MIGRATION_3_4,
+                                MIGRATION_4_5
                             )
                             .build()
 
@@ -310,4 +312,5 @@ abstract class DailyRebuildDatabase :
         }
 
     }
+    abstract fun dailyActivityDao(): DailyActivityDao
 }
