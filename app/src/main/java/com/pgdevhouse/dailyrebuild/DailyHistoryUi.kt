@@ -5,17 +5,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -27,9 +30,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import java.math.BigDecimal
@@ -90,12 +95,14 @@ fun DailyHistoryDialog(
             if (!isDeletingDay) {
                 onDismiss()
             }
-        }
+        },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Card(
+        Surface(
             modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 760.dp)
+                .fillMaxSize()
+                .safeDrawingPadding(),
+            color = MaterialTheme.colorScheme.background
         ) {
             if (selectedDay == null) {
                 DailyHistoryCalendarPage(
@@ -197,92 +204,93 @@ private fun DailyHistoryCalendarPage(
     onDismiss: () -> Unit
 ) {
     val currentMonth = YearMonth.now()
-    val earliestMonth =
-        YearMonth.from(
-            LocalDate.now().minusDays(364)
-        )
+    val earliestMonth = YearMonth.from(LocalDate.now().minusDays(364))
 
     Column(
         modifier = Modifier
-            .verticalScroll(
-                rememberScrollState()
-            )
-            .padding(16.dp),
-        verticalArrangement =
-            Arrangement.spacedBy(12.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
+            Column(Modifier.weight(1f)) {
+                RebuildStatusBadge(text = "History · ${days.size} days")
+                Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Daily Calendar",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
+                    text = "Daily calendar",
+                    style = MaterialTheme.typography.headlineMedium
                 )
-
                 Text(
-                    text =
-                        "Tap a marked date to open its complete record.",
-                    style = MaterialTheme.typography.bodySmall
+                    text = "Marked dates contain a saved record, food entries, or both.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
 
-            TextButton(
-                onClick = onDismiss
+        RebuildInsetPanel {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Close")
+                RebuildStatusBadge(
+                    text = "Saved",
+                    modifier = Modifier.weight(1f),
+                    backgroundColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                RebuildStatusBadge(
+                    text = "Food",
+                    modifier = Modifier.weight(1f),
+                    backgroundColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+                RebuildStatusBadge(
+                    text = "Saved + Food",
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
 
-        HorizontalDivider()
+        CalendarMonthControls(
+            visibleMonth = visibleMonth,
+            canGoPrevious = visibleMonth > earliestMonth,
+            canGoNext = visibleMonth < currentMonth,
+            onPrevious = { onVisibleMonthChange(visibleMonth.minusMonths(1)) },
+            onNext = { onVisibleMonthChange(visibleMonth.plusMonths(1)) }
+        )
 
         if (isLoading) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                CircularProgressIndicator()
-                Text("Loading daily calendar...")
+            RebuildInsetPanel {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text("Loading saved dates…")
+                }
             }
         } else {
-            CalendarMonthControls(
-                visibleMonth = visibleMonth,
-                canGoPrevious =
-                    visibleMonth > earliestMonth,
-                canGoNext =
-                    visibleMonth < currentMonth,
-                onPrevious = {
-                    onVisibleMonthChange(
-                        visibleMonth.minusMonths(1)
-                    )
-                },
-                onNext = {
-                    onVisibleMonthChange(
-                        visibleMonth.plusMonths(1)
-                    )
-                }
-            )
-
             DailyCalendarMonth(
                 visibleMonth = visibleMonth,
                 days = days,
                 onSelectDay = onSelectDay
             )
+        }
 
-            Text(
-                text =
-                    "Marked dates contain a saved daily record, food entries, " +
-                        "or both. The calendar currently covers the most recent " +
-                        "365 days.",
-                style = MaterialTheme.typography.bodySmall
-            )
+        if (!isLoading && days.isEmpty()) {
+            RebuildInsetPanel {
+                Text("No history yet", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Save a day or log food to place it on this calendar.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -295,37 +303,34 @@ private fun CalendarMonthControls(
     onPrevious: () -> Unit,
     onNext: () -> Unit
 ) {
-    Row(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface
     ) {
-        OutlinedButton(
-            onClick = onPrevious,
-            enabled = canGoPrevious
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("Previous")
-        }
-
-        Text(
-            text =
-                visibleMonth.format(
-                    DateTimeFormatter.ofPattern(
-                        "MMMM yyyy",
-                        Locale.US
-                    )
+            OutlinedButton(
+                onClick = onPrevious,
+                enabled = canGoPrevious,
+                shape = RoundedCornerShape(14.dp)
+            ) { Text("‹") }
+            Text(
+                text = visibleMonth.format(
+                    DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)
                 ),
-            modifier = Modifier.weight(1f),
-            textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold
-        )
-
-        OutlinedButton(
-            onClick = onNext,
-            enabled = canGoNext
-        ) {
-            Text("Next")
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.titleLarge
+            )
+            OutlinedButton(
+                onClick = onNext,
+                enabled = canGoNext,
+                shape = RoundedCornerShape(14.dp)
+            ) { Text("›") }
         }
     }
 }
@@ -441,66 +446,63 @@ private fun CalendarDayCell(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val hasSavedRecord =
-        historyDay?.record != null
-
-    val hasFood =
-        historyDay?.foodEntries
-            ?.isNotEmpty() == true
+    val hasSavedRecord = historyDay?.record != null
+    val hasFood = historyDay?.foodEntries?.isNotEmpty() == true
+    val isToday = date == LocalDate.now()
+    val containerColor = when {
+        hasSavedRecord && hasFood -> MaterialTheme.colorScheme.secondaryContainer
+        hasSavedRecord -> MaterialTheme.colorScheme.primaryContainer
+        hasFood -> MaterialTheme.colorScheme.tertiaryContainer
+        else -> MaterialTheme.colorScheme.surface
+    }
+    val contentColor = when {
+        hasSavedRecord && hasFood -> MaterialTheme.colorScheme.onSecondaryContainer
+        hasSavedRecord -> MaterialTheme.colorScheme.onPrimaryContainer
+        hasFood -> MaterialTheme.colorScheme.onTertiaryContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
 
     Card(
         modifier = modifier
-            .height(68.dp)
+            .height(76.dp)
             .padding(2.dp)
-            .clickable(
-                enabled = historyDay != null,
-                onClick = onClick
-            )
+            .clickable(enabled = historyDay != null, onClick = onClick),
+        shape = RoundedCornerShape(15.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = containerColor,
+            contentColor = contentColor
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = if (historyDay != null) 2.dp else 0.dp
+        )
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             Text(
                 text = date.dayOfMonth.toString(),
-                fontWeight =
-                    if (date == LocalDate.now()) {
-                        FontWeight.Bold
-                    } else {
-                        FontWeight.Normal
-                    }
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = if (isToday || historyDay != null) FontWeight.Bold else FontWeight.Normal
             )
-
-            when {
-                hasSavedRecord && hasFood ->
-                    Text(
-                        text = "Saved + Food",
-                        style = MaterialTheme.typography.labelSmall,
-                        textAlign = TextAlign.Center
-                    )
-
-                hasSavedRecord ->
-                    Text(
-                        text = "Saved",
-                        style = MaterialTheme.typography.labelSmall,
-                        textAlign = TextAlign.Center
-                    )
-
-                hasFood ->
-                    Text(
-                        text = "Food",
-                        style = MaterialTheme.typography.labelSmall,
-                        textAlign = TextAlign.Center
-                    )
-            }
-
-            if (date == LocalDate.now()) {
+            Text(
+                text = when {
+                    hasSavedRecord && hasFood -> "Both"
+                    hasSavedRecord -> "Saved"
+                    hasFood -> "Food"
+                    else -> ""
+                },
+                style = MaterialTheme.typography.labelSmall,
+                textAlign = TextAlign.Center
+            )
+            if (isToday) {
                 Text(
                     text = "Today",
-                    style = MaterialTheme.typography.labelSmall
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
@@ -516,37 +518,44 @@ private fun DailyHistoryDetailPage(
 ) {
     Column(
         modifier = Modifier
-            .verticalScroll(
-                rememberScrollState()
-            )
-            .padding(16.dp),
-        verticalArrangement =
-            Arrangement.spacedBy(12.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        OutlinedButton(
-            onClick = onBack,
-            enabled = !isDeletingDay
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Back to Calendar")
+            OutlinedButton(
+                onClick = onBack,
+                enabled = !isDeletingDay,
+                shape = RoundedCornerShape(16.dp)
+            ) { Text("‹ Calendar") }
+            Spacer(Modifier.weight(1f))
+            RebuildStatusBadge(
+                text = if (day.record != null && day.foodEntries.isNotEmpty()) {
+                    "Saved + Food"
+                } else if (day.record != null) {
+                    "Saved"
+                } else {
+                    "Food only"
+                }
+            )
         }
 
         Text(
             text = formatHistoryDate(day.date),
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold
+            style = MaterialTheme.typography.headlineMedium
         )
 
         val record = day.record
-
         if (record == null) {
-            Card(
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            RebuildInsetPanel {
+                Text("Food-only day", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    text =
-                        "The daily checklist was not saved for this date, " +
-                            "but its recorded foods are still available below.",
-                    modifier = Modifier.padding(16.dp)
+                    "The daily checklist was not saved, but the food entries remain available below.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         } else {
@@ -556,42 +565,33 @@ private fun DailyHistoryDetailPage(
             HistoryMedicationCard(record)
         }
 
-        HistoryFoodCard(
-            entries = day.foodEntries
-        )
-
+        HistoryFoodCard(entries = day.foodEntries)
         if (record != null) {
-            HistoryJournalCard(
-                journalText = record.journalText
-            )
+            HistoryJournalCard(journalText = record.journalText)
         }
 
-        HorizontalDivider()
-
-        OutlinedButton(
-            onClick = onRequestDelete,
-            enabled = !isDeletingDay,
-            modifier = Modifier.fillMaxWidth()
+        RebuildInsetPanel(
+            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.42f)
         ) {
             Text(
-                if (isDeletingDay) {
-                    "Deleting Day..."
-                } else {
-                    "Delete Entire Day"
-                }
+                text = "Delete this day",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
             )
+            Text(
+                text = "Use this for test data or a date recorded by mistake. Saved Foods and Saved Meal templates are not removed.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            OutlinedButton(
+                onClick = onRequestDelete,
+                enabled = !isDeletingDay,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text(if (isDeletingDay) "Deleting day…" else "Delete entire day")
+            }
         }
-
-        Text(
-            text =
-                "Use this only for test data or a day recorded by mistake. " +
-                    "This cannot be undone.",
-            style = MaterialTheme.typography.bodySmall
-        )
-
-        Spacer(
-            modifier = Modifier.height(8.dp)
-        )
     }
 }
 
@@ -925,22 +925,16 @@ private fun HistorySectionCard(
     title: String,
     content: @Composable () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement =
-                Arrangement.spacedBy(6.dp)
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-
-            content()
+    RebuildSectionCard(
+        title = title,
+        accentColor = when (title) {
+            "Water" -> RebuildTeal
+            "Pain" -> RebuildAmber
+            "Food and Nutrition" -> RebuildGreen
+            else -> RebuildBlue
         }
+    ) {
+        content()
     }
 }
 

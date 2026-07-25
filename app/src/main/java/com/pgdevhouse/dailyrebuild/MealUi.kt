@@ -4,19 +4,23 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -31,10 +35,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
 import com.pgdevhouse.dailyrebuild.data.local.MealAmountMode
 import com.pgdevhouse.dailyrebuild.data.local.SavedMealWithIngredients
@@ -176,13 +182,15 @@ fun MealBuilderDialog(
             if (!isSaving) {
                 onDismiss()
             }
-        }
+        },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Card(
+        Surface(
             modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 760.dp)
-                .imePadding()
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .imePadding(),
+            color = MaterialTheme.colorScheme.background
         ) {
             when (currentPage) {
                 "choose_product" -> {
@@ -429,202 +437,137 @@ private fun MealBuilderSummaryPage(
 ) {
     Column(
         modifier = Modifier
-            .padding(16.dp)
-            .heightIn(max = 730.dp)
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text(
-            text =
-                if (isEditing) {
-                    "Edit Meal"
-                } else {
-                    "Build a Meal"
-                },
-            style =
-                MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold
+        RebuildStatusBadge(
+            text = if (isEditing) "Editing meal" else "Meal builder"
         )
-
         Text(
-            text =
-                if (isEditing) {
-                    "Update the meal name or ingredients."
-                } else {
-                    "Combine foods from your Saved Foods library."
-                }
+            text = if (isEditing) "Edit saved meal" else "Build a saved meal",
+            style = MaterialTheme.typography.headlineMedium
         )
-
-        Spacer(
-            modifier = Modifier.height(12.dp)
+        Text(
+            text = "Combine reusable Saved Foods into a meal you can add to any day.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         OutlinedTextField(
             value = mealName,
-
-            onValueChange =
-                onMealNameChange,
-
-            label = {
-                Text("Meal name")
-            },
-
-            placeholder = {
-                Text("PBJ Sandwich")
-            },
-
+            onValueChange = onMealNameChange,
+            label = { Text("Meal name") },
+            placeholder = { Text("PBJ sandwich") },
             singleLine = true,
-
-            modifier =
-                Modifier.fillMaxWidth()
+            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier.fillMaxWidth()
         )
 
-        Row(
+        Surface(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment =
-                Alignment.CenterVertically
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.45f)
         ) {
-            Checkbox(
-                checked = isFavorite,
-                onCheckedChange =
-                    onFavoriteChange
-            )
-
-            Text("Favorite meal")
-        }
-
-        HorizontalDivider()
-
-        Spacer(
-            modifier = Modifier.height(8.dp)
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment =
-                Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Ingredients",
-                style =
-                    MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f)
-            )
-
-            Text(
-                text =
-                    "${formatMealNumber(totalCalories)} calories",
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        Spacer(
-            modifier = Modifier.height(8.dp)
-        )
-
-        if (ingredients.isEmpty()) {
-            Text(
-                text =
-                    if (productsAvailable) {
-                        "No ingredients added yet."
-                    } else {
-                        "Create or scan at least one Saved Food before building a meal."
-                    }
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .heightIn(max = 330.dp),
-
-                verticalArrangement =
-                    Arrangement.spacedBy(8.dp)
+            Row(
+                modifier = Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                items(
-                    count = ingredients.size,
-
-                    key = { index ->
-                        "$index-" +
-                                ingredients[index]
-                                    .product.id
-                    }
-                ) { index ->
-                    MealIngredientRow(
-                        ingredient =
-                            ingredients[index],
-
-                        onEdit = {
-                            onEditIngredient(
-                                index
-                            )
-                        },
-
-                        onRemove = {
-                            onRemoveIngredient(
-                                index
-                            )
-                        }
+                Checkbox(
+                    checked = isFavorite,
+                    onCheckedChange = onFavoriteChange
+                )
+                Column(Modifier.weight(1f)) {
+                    Text("Favorite meal", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Favorites can be found quickly in your meal library.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
         }
 
-        Spacer(
-            modifier = Modifier.height(12.dp)
-        )
-
-        OutlinedButton(
-            onClick = onAddIngredient,
-
-            enabled =
-                productsAvailable &&
-                        !isSaving,
-
-            modifier =
-                Modifier.fillMaxWidth()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Add Ingredient")
+            Column(Modifier.weight(1f)) {
+                Text("Ingredients", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "${ingredients.size} added",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            RebuildStatusBadge(
+                text = "${formatMealNumber(totalCalories)} cal",
+                backgroundColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            )
         }
 
-        Spacer(
-            modifier = Modifier.height(12.dp)
+        if (ingredients.isEmpty()) {
+            RebuildInsetPanel {
+                Text(
+                    text = if (productsAvailable) "No ingredients added" else "Saved Foods required",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = if (productsAvailable) {
+                        "Add the first ingredient from your Saved Foods library."
+                    } else {
+                        "Create or scan at least one Saved Food before building a meal."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(
+                    count = ingredients.size,
+                    key = { index -> "$index-${ingredients[index].product.id}" }
+                ) { index ->
+                    MealIngredientRow(
+                        ingredient = ingredients[index],
+                        onEdit = { onEditIngredient(index) },
+                        onRemove = { onRemoveIngredient(index) }
+                    )
+                }
+            }
+        }
+
+        RebuildSecondaryAction(
+            text = "Add ingredient",
+            onClick = onAddIngredient,
+            enabled = productsAvailable && !isSaving,
+            modifier = Modifier.fillMaxWidth()
         )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-
-            horizontalArrangement =
-                Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            OutlinedButton(
+            RebuildSecondaryAction(
+                text = "Cancel",
                 onClick = onCancel,
-
                 enabled = !isSaving,
-
                 modifier = Modifier.weight(1f)
-            ) {
-                Text("Cancel")
-            }
-
-            Button(
+            )
+            RebuildPrimaryAction(
+                text = when {
+                    isSaving -> "Saving…"
+                    isEditing -> "Update meal"
+                    else -> "Save meal"
+                },
                 onClick = onSave,
-
-                enabled =
-                    mealName.isNotBlank() &&
-                            ingredients.isNotEmpty() &&
-                            !isSaving,
-
+                enabled = mealName.isNotBlank() && ingredients.isNotEmpty() && !isSaving,
                 modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    if (isSaving) {
-                        "Saving..."
-                    } else if (isEditing) {
-                        "Update Meal"
-                    } else {
-                        "Save Meal"
-                    }
-                )
-            }
+            )
         }
     }
 }
@@ -636,59 +579,34 @@ private fun MealIngredientRow(
     onRemove: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp)
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text =
-                    ingredient.product.name,
-
-                fontWeight =
-                    FontWeight.SemiBold
-            )
-
-            Text(
-                text =
-                    ingredientAmountDescription(
-                        ingredient
-                    ),
-
-                style =
-                    MaterialTheme.typography.bodySmall
-            )
-
-            Text(
-                text =
-                    "${formatMealNumber(
-                        calculateIngredientCalories(
-                            ingredient
-                        )
-                    )} calories",
-
-                style =
-                    MaterialTheme.typography.bodySmall
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-
-                horizontalArrangement =
-                    Arrangement.End
-            ) {
-                TextButton(
-                    onClick = onEdit
-                ) {
-                    Text("Edit")
-                }
-
-                TextButton(
-                    onClick = onRemove
-                ) {
-                    Text("Remove")
-                }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = ingredient.product.name,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = ingredientAmountDescription(ingredient),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "${formatMealNumber(calculateIngredientCalories(ingredient))} calories",
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
+            TextButton(onClick = onEdit) { Text("Edit") }
+            TextButton(onClick = onRemove) { Text("Remove") }
         }
     }
 }
@@ -1111,235 +1029,164 @@ fun SavedMealsDialog(
     meals: List<SavedMealWithIngredients>,
     products: List<FoodProduct>,
     isAddingMeal: Boolean,
-    onAddToToday: (
-        SavedMealWithIngredients,
-        Double
-    ) -> Unit,
+    onAddToToday: (SavedMealWithIngredients, Double) -> Unit,
     onEdit: (SavedMealWithIngredients) -> Unit,
     onDelete: (SavedMealWithIngredients) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val productsById =
-        products.associateBy {
-            it.id
-        }
-
-    var mealPendingDelete by remember {
-        mutableStateOf<
-            SavedMealWithIngredients?
-        >(null)
-    }
-
-    var mealPendingAdd by remember {
-        mutableStateOf<
-            SavedMealWithIngredients?
-        >(null)
-    }
-
-    var mealMultiplierText by rememberSaveable {
-        mutableStateOf("1")
+    val productsById = products.associateBy { it.id }
+    var mealPendingDelete by remember { mutableStateOf<SavedMealWithIngredients?>(null) }
+    var mealPendingAdd by remember { mutableStateOf<SavedMealWithIngredients?>(null) }
+    var mealMultiplierText by rememberSaveable { mutableStateOf("1") }
+    var searchText by rememberSaveable { mutableStateOf("") }
+    val visibleMeals = meals.filter { meal ->
+        searchText.isBlank() || meal.meal.name.contains(searchText, ignoreCase = true)
     }
 
     Dialog(
-        onDismissRequest = {
-            if (!isAddingMeal) {
-                onDismiss()
-            }
-        }
+        onDismissRequest = { if (!isAddingMeal) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Card(
+        Surface(
             modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 700.dp)
+                .fillMaxSize()
+                .safeDrawingPadding(),
+            color = MaterialTheme.colorScheme.background
         ) {
             Column(
-                modifier = Modifier.padding(16.dp)
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Row(
-                    modifier =
-                        Modifier.fillMaxWidth(),
-
-                    verticalAlignment =
-                        Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(
-                        modifier =
-                            Modifier.weight(1f)
-                    ) {
+                    Column(Modifier.weight(1f)) {
+                        RebuildStatusBadge(text = "Meal library · ${meals.size}")
+                        Spacer(Modifier.height(8.dp))
+                        Text("Saved meals", style = MaterialTheme.typography.headlineMedium)
                         Text(
-                            text = "Saved Meals",
-                            style =
-                                MaterialTheme
-                                    .typography
-                                    .headlineSmall,
-                            fontWeight =
-                                FontWeight.Bold
-                        )
-
-                        Text(
-                            text =
-                                "Meal templates stored locally."
+                            "Add a complete meal to today in one step.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-
-                    TextButton(
-                        onClick = onDismiss,
-                        enabled = !isAddingMeal
-                    ) {
-                        Text("Close")
-                    }
+                    TextButton(onClick = onDismiss, enabled = !isAddingMeal) { Text("Close") }
                 }
 
-                Spacer(
-                    modifier =
-                        Modifier.height(12.dp)
+                OutlinedTextField(
+                    value = searchText,
+                    onValueChange = { searchText = it },
+                    label = { Text("Search meals") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth()
                 )
 
                 if (meals.isEmpty()) {
-                    Text(
-                        text =
-                            "No saved meals yet."
-                    )
+                    RebuildInsetPanel {
+                        Text("No saved meals yet", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Use Build Meal on the main screen to create your first reusable meal.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else if (visibleMeals.isEmpty()) {
+                    RebuildInsetPanel {
+                        Text("No matches", style = MaterialTheme.typography.titleMedium)
+                    }
                 } else {
                     LazyColumn(
-                        verticalArrangement =
-                            Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(
-                            items = meals,
-                            key = {
-                                it.meal.id
-                            }
+                            items = visibleMeals,
+                            key = { it.meal.id }
                         ) { savedMeal ->
+                            val ingredientLines = savedMeal.ingredients
+                                .sortedBy { it.sortOrder }
+                                .map { ingredient ->
+                                    val product = productsById[ingredient.productId]
+                                    val amountDescription = when (ingredient.amountMode) {
+                                        MealAmountMode.LABEL_SERVINGS ->
+                                            "${formatMealNumber(ingredient.amount)} label servings"
+                                        else ->
+                                            "${formatMealNumber(ingredient.amount)} ${product?.servingUnit ?: "units"}"
+                                    }
+                                    "${product?.name ?: "Unknown food"} · $amountDescription"
+                                }
+
                             Card(
-                                modifier =
-                                    Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(22.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surface
+                                ),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                             ) {
                                 Column(
-                                    modifier =
-                                        Modifier.padding(12.dp)
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Text(
-                                        text =
-                                            savedMeal.meal.name,
-
-                                        style =
-                                            MaterialTheme
-                                                .typography
-                                                .titleMedium,
-
-                                        fontWeight =
-                                            FontWeight.Bold
-                                    )
-
-                                    savedMeal.ingredients
-                                        .sortedBy {
-                                            it.sortOrder
-                                        }
-                                        .forEach {
-                                                ingredient ->
-
-                                            val product =
-                                                productsById[
-                                                    ingredient
-                                                        .productId
-                                                ]
-
-                                            val amountText =
-                                                when (
-                                                    ingredient
-                                                        .amountMode
-                                                ) {
-                                                    MealAmountMode
-                                                        .LABEL_SERVINGS -> {
-                                                        "${formatMealNumber(ingredient.amount)} label servings"
-                                                    }
-
-                                                    else -> {
-                                                        "${formatMealNumber(ingredient.amount)} " +
-                                                            (
-                                                                product
-                                                                    ?.servingUnit
-                                                                    ?: "units"
-                                                                )
-                                                    }
-                                                }
-
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
                                             Text(
-                                                text =
-                                                    "• " +
-                                                        (
-                                                            product
-                                                                ?.name
-                                                                ?: "Unknown food"
-                                                            ) +
-                                                        " — " +
-                                                        amountText,
-
-                                                style =
-                                                    MaterialTheme
-                                                        .typography
-                                                        .bodySmall
+                                                savedMeal.meal.name,
+                                                style = MaterialTheme.typography.titleMedium
+                                            )
+                                            Text(
+                                                "${savedMeal.ingredients.size} ingredients",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
+                                        if (savedMeal.meal.isFavorite) {
+                                            RebuildStatusBadge(
+                                                text = "Favorite",
+                                                backgroundColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                                            )
+                                        }
+                                    }
 
-                                    Spacer(
-                                        modifier =
-                                            Modifier.height(6.dp)
-                                    )
-
-                                    Text(
-                                        text =
-                                            "${savedMeal.ingredients.size} ingredients",
-
-                                        style =
-                                            MaterialTheme
-                                                .typography
-                                                .labelSmall
-                                    )
+                                    RebuildInsetPanel {
+                                        ingredientLines.forEach { line ->
+                                            Text(
+                                                text = "• $line",
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
+                                    }
 
                                     Row(
-                                        modifier =
-                                            Modifier.fillMaxWidth(),
-
-                                        horizontalArrangement =
-                                            Arrangement.End
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        TextButton(
+                                        RebuildPrimaryAction(
+                                            text = "Add to today",
                                             onClick = {
-                                                mealMultiplierText =
-                                                    "1"
-                                                mealPendingAdd =
-                                                    savedMeal
+                                                mealMultiplierText = "1"
+                                                mealPendingAdd = savedMeal
                                             },
-                                            enabled =
-                                                !isAddingMeal
-                                        ) {
-                                            Text("Add to Today")
-                                        }
-
+                                            enabled = !isAddingMeal,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        RebuildSecondaryAction(
+                                            text = "Edit",
+                                            onClick = { onEdit(savedMeal) },
+                                            enabled = !isAddingMeal,
+                                            modifier = Modifier.weight(0.65f)
+                                        )
                                         TextButton(
-                                            onClick = {
-                                                onEdit(
-                                                    savedMeal
-                                                )
-                                            },
-                                            enabled =
-                                                !isAddingMeal
-                                        ) {
-                                            Text("Edit")
-                                        }
-
-                                        TextButton(
-                                            onClick = {
-                                                mealPendingDelete =
-                                                    savedMeal
-                                            },
-                                            enabled =
-                                                !isAddingMeal
-                                        ) {
-                                            Text("Delete")
-                                        }
+                                            onClick = { mealPendingDelete = savedMeal },
+                                            enabled = !isAddingMeal,
+                                            modifier = Modifier.weight(0.55f)
+                                        ) { Text("Delete") }
                                     }
                                 }
                             }
@@ -1350,171 +1197,73 @@ fun SavedMealsDialog(
         }
     }
 
-    val pendingAddMeal =
-        mealPendingAdd
-
+    val pendingAddMeal = mealPendingAdd
     if (pendingAddMeal != null) {
-        val multiplier =
-            parseMealAmount(
-                mealMultiplierText
-            ) ?: 0.0
-
+        val multiplier = parseMealAmount(mealMultiplierText) ?: 0.0
         AlertDialog(
-            onDismissRequest = {
-                if (!isAddingMeal) {
-                    mealPendingAdd = null
-                }
-            },
-
-            title = {
-                Text("Add meal to today?")
-            },
-
+            onDismissRequest = { if (!isAddingMeal) mealPendingAdd = null },
+            title = { Text("Add ${pendingAddMeal.meal.name}?") },
             text = {
-                Column(
-                    verticalArrangement =
-                        Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        text =
-                            pendingAddMeal.meal.name,
-                        fontWeight =
-                            FontWeight.Bold
-                    )
-
-                    Text(
-                        text =
-                            "How many of this meal should be added?"
-                    )
-
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("How many of this meal should be added to today?")
                     OutlinedTextField(
-                        value =
-                            mealMultiplierText,
-
-                        onValueChange = {
-                            mealMultiplierText = it
-                        },
-
-                        label = {
-                            Text("Meal amount")
-                        },
-
-                        supportingText = {
-                            Text(
-                                "Examples: 1, 2, or 1/2"
-                            )
-                        },
-
-                        keyboardOptions =
-                            KeyboardOptions(
-                                keyboardType =
-                                    KeyboardType.Uri
-                            ),
-
+                        value = mealMultiplierText,
+                        onValueChange = { mealMultiplierText = it },
+                        label = { Text("Meal amount") },
+                        supportingText = { Text("Examples: 1, 2, or 1/2") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                         singleLine = true,
                         enabled = !isAddingMeal,
-                        modifier =
-                            Modifier.fillMaxWidth()
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth()
                     )
-
-                    if (
-                        mealMultiplierText.isNotBlank() &&
-                        multiplier <= 0.0
-                    ) {
+                    if (mealMultiplierText.isNotBlank() && multiplier <= 0.0) {
                         Text(
-                            text =
-                                "Enter an amount greater than zero.",
-                            color =
-                                MaterialTheme
-                                    .colorScheme
-                                    .error,
-                            style =
-                                MaterialTheme
-                                    .typography
-                                    .bodySmall
+                            "Enter an amount greater than zero.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
                 }
             },
-
             confirmButton = {
                 TextButton(
                     onClick = {
                         mealPendingAdd = null
-                        onAddToToday(
-                            pendingAddMeal,
-                            multiplier
-                        )
+                        onAddToToday(pendingAddMeal, multiplier)
                     },
-                    enabled =
-                        !isAddingMeal &&
-                        multiplier > 0.0
-                ) {
-                    Text(
-                        if (isAddingMeal) {
-                            "Adding..."
-                        } else {
-                            "Add to Today"
-                        }
-                    )
-                }
+                    enabled = !isAddingMeal && multiplier > 0.0
+                ) { Text(if (isAddingMeal) "Adding…" else "Add to today") }
             },
-
             dismissButton = {
                 TextButton(
-                    onClick = {
-                        mealPendingAdd = null
-                    },
-                    enabled =
-                        !isAddingMeal
-                ) {
-                    Text("Cancel")
-                }
+                    onClick = { mealPendingAdd = null },
+                    enabled = !isAddingMeal
+                ) { Text("Cancel") }
             }
         )
     }
 
-    val pendingMeal =
-        mealPendingDelete
-
+    val pendingMeal = mealPendingDelete
     if (pendingMeal != null) {
         AlertDialog(
-            onDismissRequest = {
-                mealPendingDelete = null
-            },
-
-            title = {
-                Text("Delete saved meal?")
-            },
-
+            onDismissRequest = { mealPendingDelete = null },
+            title = { Text("Delete saved meal?") },
             text = {
                 Text(
-                    text =
-                        "\"${pendingMeal.meal.name}\" " +
-                            "will be removed. Its Saved Foods " +
-                            "and past daily entries will remain."
+                    "${pendingMeal.meal.name} will be removed. Its Saved Foods and past daily entries remain."
                 )
             },
-
             confirmButton = {
                 TextButton(
                     onClick = {
                         mealPendingDelete = null
                         onDelete(pendingMeal)
                     }
-                ) {
-                    Text("Delete")
-                }
+                ) { Text("Delete") }
             },
-
             dismissButton = {
-                TextButton(
-                    onClick = {
-                        mealPendingDelete = null
-                    }
-                ) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { mealPendingDelete = null }) { Text("Cancel") }
             }
         )
     }

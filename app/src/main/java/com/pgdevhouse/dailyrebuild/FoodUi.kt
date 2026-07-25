@@ -2,21 +2,26 @@ package com.pgdevhouse.dailyrebuild
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -28,11 +33,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
 import java.util.Locale
@@ -123,190 +131,149 @@ fun FoodSection(
     onDeleteEntry: (FoodLogEntry) -> Unit,
     onDeleteMealLog: (String) -> Unit
 ) {
-    val totalCalories =
-        entries.sumOf { it.calories }
+    val totalCalories = entries.sumOf { it.calories }
+    val totalProtein = entries.sumOf { it.proteinGrams }
+    val totalCarbohydrates = entries.sumOf { it.carbohydrateGrams }
+    val totalFat = entries.sumOf { it.fatGrams }
+    val totalSodium = entries.sumOf { it.sodiumMilligrams }
+    val displayItems = buildFuelDisplayItems(entries)
 
-    val totalProtein =
-        entries.sumOf { it.proteinGrams }
-
-    val totalCarbohydrates =
-        entries.sumOf { it.carbohydrateGrams }
-
-    val totalFat =
-        entries.sumOf { it.fatGrams }
-
-    val totalSodium =
-        entries.sumOf { it.sodiumMilligrams }
-
-    val displayItems =
-        buildFuelDisplayItems(entries)
-
-    Card(
-        modifier = Modifier.fillMaxWidth()
+    RebuildSectionCard(
+        title = "Food and nutrition",
+        subtitle = "Log quickly now; review the useful detail when you need it.",
+        accentColor = RebuildGreen,
+        trailing = {
+            RebuildStatusBadge(
+                text = "${formatFoodNumber(totalCalories)} cal",
+                backgroundColor = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+        }
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = "Today's Fuel",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
+            RebuildMetricPill(
+                label = "protein",
+                value = "${formatFoodNumber(totalProtein)} g",
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.primaryContainer
             )
-
-            Spacer(
-                modifier = Modifier.height(8.dp)
+            RebuildMetricPill(
+                label = "carbs",
+                value = "${formatFoodNumber(totalCarbohydrates)} g",
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
             )
+            RebuildMetricPill(
+                label = "fat",
+                value = "${formatFoodNumber(totalFat)} g",
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+        }
 
-            if (entries.isEmpty()) {
-                Text("No food recorded yet.")
-            } else {
-                Text(
-                    text = "${formatFoodNumber(totalCalories)} calories",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
-                )
+        Text(
+            text = "${formatFoodNumber(totalSodium)} mg sodium",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
-                Spacer(
-                    modifier = Modifier.height(4.dp)
-                )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            RebuildPrimaryAction(
+                text = if (isScanningBarcode) "Scanning…" else "Scan barcode",
+                onClick = onScanFood,
+                enabled = !isScanningBarcode,
+                modifier = Modifier.weight(1f)
+            )
+            RebuildSecondaryAction(
+                text = "Add manually",
+                onClick = onAddFoodManually,
+                modifier = Modifier.weight(1f)
+            )
+        }
 
-                Text(
-                    text =
-                        "${formatFoodNumber(totalProtein)} g protein  •  " +
-                            "${formatFoodNumber(totalCarbohydrates)} g carbs"
-                )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            RebuildSecondaryAction(
+                text = "Saved foods · $savedFoodCount",
+                onClick = onOpenSavedFoods,
+                modifier = Modifier.weight(1f)
+            )
+            RebuildPrimaryAction(
+                text = "Build meal",
+                onClick = onBuildMeal,
+                modifier = Modifier.weight(1f)
+            )
+        }
 
-                Text(
-                    text =
-                        "${formatFoodNumber(totalFat)} g fat  •  " +
-                            "${formatFoodNumber(totalSodium)} mg sodium"
-                )
+        RebuildSecondaryAction(
+            text = "Saved meals · $savedMealCount",
+            onClick = onOpenSavedMeals,
+            modifier = Modifier.fillMaxWidth()
+        )
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(
-                        vertical = 12.dp
-                    )
-                )
-
-                displayItems.forEachIndexed {
-                        index,
-                        item ->
-
-                    when (item) {
-                        is FuelDisplayItem.SingleFood -> {
-                            FoodEntryRow(
-                                entry = item.entry,
-                                onDelete = {
-                                    onDeleteEntry(item.entry)
-                                }
-                            )
-                        }
-
-                        is FuelDisplayItem.LoggedMeal -> {
-                            LoggedMealCard(
-                                meal = item,
-                                onDeleteMeal = {
-                                    onDeleteMealLog(
-                                        item.mealLogId
-                                    )
-                                }
-                            )
-                        }
+        if (!lastScannedBarcode.isNullOrBlank()) {
+            RebuildInsetPanel {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = "Last scanned barcode",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        Text(
+                            text = lastScannedBarcode,
+                            style = MaterialTheme.typography.titleMedium
+                        )
                     }
+                    RebuildStatusBadge(text = "Verified")
+                }
+            }
+        }
 
-                    if (index < displayItems.lastIndex) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(
-                                vertical = 8.dp
-                            )
+        if (entries.isEmpty()) {
+            RebuildInsetPanel {
+                Text(
+                    text = "Nothing logged yet",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = "Scan a package, choose a saved food, or add a meal to begin today’s nutrition record.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Today’s entries",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                displayItems.forEach { item ->
+                    when (item) {
+                        is FuelDisplayItem.SingleFood -> FoodEntryRow(
+                            entry = item.entry,
+                            onDelete = { onDeleteEntry(item.entry) }
+                        )
+                        is FuelDisplayItem.LoggedMeal -> LoggedMealCard(
+                            meal = item,
+                            onDeleteMeal = { onDeleteMealLog(item.mealLogId) }
                         )
                     }
                 }
-            }
-
-            if (!lastScannedBarcode.isNullOrBlank()) {
-                HorizontalDivider(
-                    modifier = Modifier.padding(
-                        vertical = 12.dp
-                    )
-                )
-
-                Text(
-                    text = "Last Scanned Barcode",
-                    style = MaterialTheme.typography.labelLarge
-                )
-
-                Text(
-                    text = lastScannedBarcode,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Spacer(
-                modifier = Modifier.height(16.dp)
-            )
-
-            Button(
-                onClick = onScanFood,
-                enabled = !isScanningBarcode,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = if (isScanningBarcode) {
-                        "Scanning / Looking Up..."
-                    } else {
-                        "Scan Food Barcode"
-                    }
-                )
-            }
-
-            Spacer(
-                modifier = Modifier.height(8.dp)
-            )
-
-            OutlinedButton(
-                onClick = onAddFoodManually,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Add Food Manually")
-            }
-
-            Spacer(
-                modifier = Modifier.height(8.dp)
-            )
-
-            OutlinedButton(
-                onClick = onOpenSavedFoods,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = "Saved Foods ($savedFoodCount)"
-                )
-            }
-
-            Spacer(
-                modifier = Modifier.height(8.dp)
-            )
-
-            Button(
-                onClick = onBuildMeal,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Build Meal")
-            }
-
-            Spacer(
-                modifier = Modifier.height(8.dp)
-            )
-
-            OutlinedButton(
-                onClick = onOpenSavedMeals,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = "Saved Meals ($savedMealCount)"
-                )
             }
         }
     }
@@ -317,119 +284,90 @@ private fun LoggedMealCard(
     meal: FuelDisplayItem.LoggedMeal,
     onDeleteMeal: () -> Unit
 ) {
-    var expanded by rememberSaveable(
-        meal.mealLogId
-    ) {
-        mutableStateOf(false)
-    }
-
-    var showDeleteConfirmation by rememberSaveable(
-        meal.mealLogId
-    ) {
-        mutableStateOf(false)
-    }
-
-    val calories =
-        meal.entries.sumOf { it.calories }
-
-    val protein =
-        meal.entries.sumOf { it.proteinGrams }
-
-    val carbohydrates =
-        meal.entries.sumOf {
-            it.carbohydrateGrams
-        }
-
-    val fat =
-        meal.entries.sumOf { it.fatGrams }
-
-    val sodium =
-        meal.entries.sumOf {
-            it.sodiumMilligrams
-        }
+    var expanded by rememberSaveable(meal.mealLogId) { mutableStateOf(false) }
+    var showDeleteConfirmation by rememberSaveable(meal.mealLogId) { mutableStateOf(false) }
+    val calories = meal.entries.sumOf { it.calories }
+    val protein = meal.entries.sumOf { it.proteinGrams }
+    val carbohydrates = meal.entries.sumOf { it.carbohydrateGrams }
+    val fat = meal.entries.sumOf { it.fatGrams }
+    val sodium = meal.entries.sumOf { it.sodiumMilligrams }
 
     Card(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.36f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement =
-                Arrangement.spacedBy(6.dp)
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(
-                text = meal.mealName,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = meal.mealName,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = "${meal.entries.size} ingredients · ${formatFoodNumber(calories)} calories",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                RebuildStatusBadge(
+                    text = "Meal",
+                    backgroundColor = MaterialTheme.colorScheme.secondary,
+                    contentColor = MaterialTheme.colorScheme.onSecondary
+                )
+            }
 
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                RebuildMetricPill(
+                    label = "protein", value = "${formatFoodNumber(protein)} g",
+                    modifier = Modifier.weight(1f)
+                )
+                RebuildMetricPill(
+                    label = "carbs", value = "${formatFoodNumber(carbohydrates)} g",
+                    modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.surface
+                )
+            }
             Text(
-                text =
-                    "${formatFoodNumber(calories)} calories",
-                fontWeight = FontWeight.SemiBold
-            )
-
-            Text(
-                text =
-                    "${formatFoodNumber(protein)} g protein  •  " +
-                        "${formatFoodNumber(carbohydrates)} g carbs",
-                style = MaterialTheme.typography.bodySmall
-            )
-
-            Text(
-                text =
-                    "${formatFoodNumber(fat)} g fat  •  " +
-                        "${formatFoodNumber(sodium)} mg sodium",
-                style = MaterialTheme.typography.bodySmall
+                text = "${formatFoodNumber(fat)} g fat · ${formatFoodNumber(sodium)} mg sodium",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             if (expanded) {
-                HorizontalDivider()
-
-                meal.entries.forEachIndexed {
-                        index,
-                        entry ->
-
-                    MealIngredientRow(
-                        entry = entry
-                    )
-
-                    if (index < meal.entries.lastIndex) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(
-                                vertical = 4.dp
-                            )
-                        )
+                RebuildInsetPanel {
+                    meal.entries.forEach { entry ->
+                        MealIngredientRow(entry = entry)
                     }
                 }
             }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement =
-                    Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                OutlinedButton(
-                    onClick = {
-                        expanded = !expanded
-                    },
+                RebuildSecondaryAction(
+                    text = if (expanded) "Hide ingredients" else "Show ingredients",
+                    onClick = { expanded = !expanded },
                     modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        if (expanded) {
-                            "Hide Ingredients"
-                        } else {
-                            "Show Ingredients"
-                        }
-                    )
-                }
-
+                )
                 TextButton(
-                    onClick = {
-                        showDeleteConfirmation = true
-                    },
-                    modifier = Modifier.weight(1f)
+                    onClick = { showDeleteConfirmation = true },
+                    modifier = Modifier.weight(0.55f)
                 ) {
-                    Text("Delete Meal")
+                    Text("Delete")
                 }
             }
         }
@@ -437,17 +375,11 @@ private fun LoggedMealCard(
 
     if (showDeleteConfirmation) {
         androidx.compose.material3.AlertDialog(
-            onDismissRequest = {
-                showDeleteConfirmation = false
-            },
-            title = {
-                Text("Delete logged meal?")
-            },
+            onDismissRequest = { showDeleteConfirmation = false },
+            title = { Text("Delete logged meal?") },
             text = {
                 Text(
-                    "This removes every ingredient from this " +
-                        "particular ${meal.mealName} entry. " +
-                        "The reusable Saved Meal will remain."
+                    "This removes every ingredient from this particular ${meal.mealName} entry. The reusable Saved Meal remains."
                 )
             },
             confirmButton = {
@@ -456,18 +388,10 @@ private fun LoggedMealCard(
                         showDeleteConfirmation = false
                         onDeleteMeal()
                     }
-                ) {
-                    Text("Delete Meal")
-                }
+                ) { Text("Delete meal") }
             },
             dismissButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteConfirmation = false
-                    }
-                ) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { showDeleteConfirmation = false }) { Text("Cancel") }
             }
         )
     }
@@ -499,43 +423,39 @@ private fun FoodEntryRow(
     entry: FoodLogEntry,
     onDelete: () -> Unit
 ) {
-    Row(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f)
     ) {
-        Column(
-            modifier = Modifier.weight(1f)
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (!entry.mealName.isNullOrBlank()) {
+            Column(Modifier.weight(1f)) {
+                if (!entry.mealName.isNullOrBlank()) {
+                    RebuildStatusBadge(
+                        text = entry.mealName,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                }
                 Text(
-                    text = entry.mealName,
-                    style = MaterialTheme.typography.labelLarge
+                    text = entry.productNameSnapshot,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = "${formatFoodNumber(entry.quantity)} ${entry.unit}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "${formatFoodNumber(entry.calories)} calories · ${formatFoodNumber(entry.proteinGrams)} g protein",
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
-
-            Text(
-                text = entry.productNameSnapshot,
-                fontWeight = FontWeight.SemiBold
-            )
-
-            Text(
-                text =
-                    "${formatFoodNumber(entry.quantity)} ${entry.unit}",
-                style = MaterialTheme.typography.bodySmall
-            )
-
-            Text(
-                text =
-                    "${formatFoodNumber(entry.calories)} calories • " +
-                        "${formatFoodNumber(entry.proteinGrams)} g protein",
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-
-        TextButton(
-            onClick = onDelete
-        ) {
-            Text("Delete")
+            TextButton(onClick = onDelete) {
+                Text("Delete")
+            }
         }
     }
 }
@@ -883,33 +803,44 @@ fun ManualFoodDialog(
             if (!isSaving) {
                 onDismiss()
             }
-        }
+        },
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false
+        )
     ) {
-        Card(
+        Surface(
             modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 760.dp)
-                .imePadding()
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .imePadding(),
+            color = MaterialTheme.colorScheme.background
         ) {
             Column(
                 modifier = Modifier
-                    .verticalScroll(
-                        rememberScrollState()
-                    )
-                    .padding(16.dp),
-                verticalArrangement =
-                    Arrangement.spacedBy(12.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                RebuildStatusBadge(
+                    text = if (productOnlyMode) "Saved food" else "Daily entry"
+                )
                 Text(
-                    text =
-                        dialogTitle
-                            ?: if (productOnlyMode) {
-                                "Create Saved Food"
-                            } else {
-                                "Add Food Manually"
-                            },
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
+                    text = dialogTitle
+                        ?: if (productOnlyMode) {
+                            "Create or edit food"
+                        } else {
+                            "Add food"
+                        },
+                    style = MaterialTheme.typography.headlineMedium
+                )
+                Text(
+                    text = if (productOnlyMode) {
+                        "Build a reusable food record from the package label."
+                    } else {
+                        "Choose the amount eaten and review the calculated nutrition before saving."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 if (productOnlyMode && onScanBarcode != null) {
