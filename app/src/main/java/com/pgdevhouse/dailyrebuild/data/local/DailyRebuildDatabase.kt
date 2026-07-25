@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SavedMealIngredient::class,
         DailyActivitySnapshot::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class DailyRebuildDatabase :
@@ -202,7 +202,8 @@ abstract class DailyRebuildDatabase :
                                 MIGRATION_1_2,
                                 MIGRATION_2_3,
                                 MIGRATION_3_4,
-                                MIGRATION_4_5
+                                MIGRATION_4_5,
+                                MIGRATION_5_6
                             )
                             .build()
 

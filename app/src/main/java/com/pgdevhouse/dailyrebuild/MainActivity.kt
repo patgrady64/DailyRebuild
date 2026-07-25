@@ -20,9 +20,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -655,9 +660,9 @@ fun DailyRebuildApp(
                     distanceMiles =
                         savedActivitySnapshot
                             ?.distanceMiles ?: 0.0,
-                    activeCalories =
+                    activityMinutes =
                         savedActivitySnapshot
-                            ?.activeCalories ?: 0.0
+                            ?.activityMinutes ?: 0L
                 )
 
             else ->
@@ -1045,9 +1050,9 @@ fun DailyRebuildApp(
                                 distanceMiles =
                                     liveHealthActivity
                                         .distanceMiles,
-                                activeCalories =
+                                activityMinutes =
                                     liveHealthActivity
-                                        .activeCalories,
+                                        .activityMinutes,
                                 updatedAt =
                                     System.currentTimeMillis()
                             )
@@ -2598,7 +2603,7 @@ private fun ActivitySection(
     RebuildSectionCard(
         title = "Today's activity",
         subtitle =
-            "Steps, distance, and active calories from Health Connect.",
+            "Steps, distance, and recorded activity time from Health Connect.",
         accentColor = RebuildBlue
     ) {
         when (availability) {
@@ -2645,12 +2650,11 @@ private fun ActivitySection(
                         )
 
                         RebuildMetricPill(
-                            label = "active cal",
+                            label = "time",
                             value =
-                                activity
-                                    .activeCalories
-                                    .toInt()
-                                    .toString(),
+                                formatActivityTime(
+                                    activity.activityMinutes
+                                ),
                             modifier = Modifier.weight(1f),
                             color =
                                 MaterialTheme
@@ -2786,6 +2790,23 @@ private fun formatActivityMiles(
         "%.2f",
         miles
     )
+}
+
+private fun formatActivityTime(
+    totalMinutes: Long
+): String {
+    if (totalMinutes <= 0L) {
+        return "0m"
+    }
+
+    val hours = totalMinutes / 60L
+    val minutes = totalMinutes % 60L
+
+    return when {
+        hours == 0L -> "${minutes}m"
+        minutes == 0L -> "${hours}h"
+        else -> "${hours}h ${minutes}m"
+    }
 }
 
 @Composable

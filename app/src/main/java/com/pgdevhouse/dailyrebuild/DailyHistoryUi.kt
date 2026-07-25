@@ -42,6 +42,7 @@ import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.math.abs
 
@@ -659,12 +660,11 @@ private fun HistoryActivityCard(
             )
 
             RebuildMetricPill(
-                label = "active cal",
+                label = "time",
                 value =
-                    snapshot
-                        .activeCalories
-                        .toInt()
-                        .toString(),
+                    formatHistoryActivityTime(
+                        snapshot.activityMinutes
+                    ),
                 modifier = Modifier.weight(1f),
                 color =
                     MaterialTheme
@@ -1125,6 +1125,23 @@ private fun formatHistoryOunces(
             "%.1f",
             ounces
         )
+    }
+}
+
+private fun formatHistoryActivityTime(
+    totalMinutes: Long
+): String {
+    if (totalMinutes <= 0L) {
+        return "0m"
+    }
+
+    val hours = totalMinutes / 60L
+    val minutes = totalMinutes % 60L
+
+    return when {
+        hours == 0L -> "${minutes}m"
+        minutes == 0L -> "${hours}h"
+        else -> "${hours}h ${minutes}m"
     }
 }
 

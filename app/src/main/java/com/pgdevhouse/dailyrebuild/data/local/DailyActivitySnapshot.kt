@@ -13,6 +13,6 @@ data class DailyActivitySnapshot(
     val date: String,
     val steps: Long = 0L,
     val distanceMiles: Double = 0.0,
-    val activeCalories: Double = 0.0,
+    val activityMinutes: Long = 0L,
     val updatedAt: Long = System.currentTimeMillis()
 )

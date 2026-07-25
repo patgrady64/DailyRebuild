@@ -6,7 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
-import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
+import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.request.AggregateRequest
@@ -24,7 +24,7 @@ import java.time.ZoneId
 data class HealthActivityData(
     val steps: Long = 0L,
     val distanceMiles: Double = 0.0,
-    val activeCalories: Double = 0.0
+    val activityMinutes: Long = 0L
 )
 
 enum class HealthConnectAvailability {
@@ -50,7 +50,7 @@ class HealthConnectManager(
                     DistanceRecord::class
                 ),
                 HealthPermission.getReadPermission(
-                    ActiveCaloriesBurnedRecord::class
+                    ExerciseSessionRecord::class
                 )
             )
     }
@@ -110,8 +110,8 @@ class HealthConnectManager(
                         setOf(
                             StepsRecord.COUNT_TOTAL,
                             DistanceRecord.DISTANCE_TOTAL,
-                            ActiveCaloriesBurnedRecord
-                                .ACTIVE_CALORIES_TOTAL
+                            ExerciseSessionRecord
+                                .EXERCISE_DURATION_TOTAL
                         ),
                     timeRangeFilter =
                         TimeRangeFilter.between(
@@ -126,11 +126,11 @@ class HealthConnectManager(
                 DistanceRecord.DISTANCE_TOTAL
             ]?.inMeters ?: 0.0
 
-        val activeCalories =
+        val activityMinutes =
             response[
-                ActiveCaloriesBurnedRecord
-                    .ACTIVE_CALORIES_TOTAL
-            ]?.inKilocalories ?: 0.0
+                ExerciseSessionRecord
+                    .EXERCISE_DURATION_TOTAL
+            ]?.toMinutes() ?: 0L
 
         return HealthActivityData(
             steps =
@@ -139,8 +139,8 @@ class HealthConnectManager(
                 ] ?: 0L,
             distanceMiles =
                 distanceMeters / 1609.344,
-            activeCalories =
-                activeCalories
+            activityMinutes =
+                activityMinutes
         )
     }
 
