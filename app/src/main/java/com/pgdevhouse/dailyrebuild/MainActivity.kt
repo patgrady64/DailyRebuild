@@ -59,6 +59,7 @@ import com.pgdevhouse.dailyrebuild.data.local.DailyActivitySnapshot
 import com.pgdevhouse.dailyrebuild.data.local.DailyRebuildDatabase
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
+import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -130,6 +131,10 @@ fun DailyRebuildApp(
 
     val dailyActivityDao = remember {
         database.dailyActivityDao()
+    }
+
+    val mobilitySessionDao = remember {
+        database.mobilitySessionDao()
     }
 
     val healthConnectManager = remember(
@@ -292,6 +297,16 @@ fun DailyRebuildApp(
     }
 
     var mobilityCompleted by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var mobilitySessionsToday by remember {
+        mutableStateOf<List<MobilitySession>>(
+            emptyList()
+        )
+    }
+
+    var isSavingMobility by remember {
         mutableStateOf(false)
     }
 
@@ -596,6 +611,15 @@ fun DailyRebuildApp(
                     todayDate
                 )
 
+            mobilitySessionsToday =
+                mobilitySessionDao.getSessionsForDate(
+                    todayDate
+                )
+
+            if (mobilitySessionsToday.isNotEmpty()) {
+                mobilityCompleted = true
+            }
+
             foodEntries =
                 foodDao.getEntriesForDate(
                     todayDate
@@ -714,10 +738,17 @@ fun DailyRebuildApp(
                                 date
                             )
 
+                    val mobilitySessions =
+                        mobilitySessionDao
+                            .getSessionsForDate(
+                                date
+                            )
+
                     if (
                         record != null ||
                         entries.isNotEmpty() ||
-                        activitySnapshot != null
+                        activitySnapshot != null ||
+                        mobilitySessions.isNotEmpty()
                     ) {
                         loadedDays.add(
                             DailyHistoryDay(
@@ -725,7 +756,9 @@ fun DailyRebuildApp(
                                 record = record,
                                 foodEntries = entries,
                                 activitySnapshot =
-                                    activitySnapshot
+                                    activitySnapshot,
+                                mobilitySessions =
+                                    mobilitySessions
                             )
                         )
                     }
@@ -1197,6 +1230,115 @@ fun DailyRebuildApp(
 
                     onMobilityCompletedChange = {
                         mobilityCompleted = it
+                    }
+                )
+
+                MobilitySection(
+                    sessions =
+                        mobilitySessionsToday,
+                    isSaving =
+                        isSavingMobility,
+                    onSaveSession = { draft ->
+                        coroutineScope.launch {
+                            isSavingMobility = true
+
+                            try {
+                                val session =
+                                    MobilitySession(
+                                        date = todayDate,
+                                        routineName =
+                                            draft.routineName,
+                                        plannedMovementIds =
+                                            encodeMovementIds(
+                                                draft.plannedMovementIds
+                                            ),
+                                        completedMovementIds =
+                                            encodeMovementIds(
+                                                draft.completedMovementIds
+                                            ),
+                                        skippedMovementIds =
+                                            encodeMovementIds(
+                                                draft.skippedMovementIds
+                                            ),
+                                        movementSeconds =
+                                            draft.movementSeconds,
+                                        elapsedSeconds =
+                                            draft.elapsedSeconds,
+                                        notes = draft.notes
+                                    )
+
+                                val sessionId =
+                                    mobilitySessionDao
+                                        .addSession(
+                                            session
+                                        )
+
+                                mobilitySessionsToday =
+                                    listOf(
+                                        session.copy(
+                                            id = sessionId
+                                        )
+                                    ) + mobilitySessionsToday
+
+                                mobilityCompleted = true
+
+                                snackbarHostState
+                                    .showSnackbar(
+                                        message =
+                                            "Mobility session saved."
+                                    )
+                            } catch (
+                                exception: Exception
+                            ) {
+                                snackbarHostState
+                                    .showSnackbar(
+                                        message =
+                                            "Could not save mobility session."
+                                    )
+                            } finally {
+                                isSavingMobility = false
+                            }
+                        }
+                    },
+                    onDeleteSession = { session ->
+                        coroutineScope.launch {
+                            isSavingMobility = true
+
+                            try {
+                                mobilitySessionDao
+                                    .deleteSession(
+                                        session
+                                    )
+
+                                mobilitySessionsToday =
+                                    mobilitySessionsToday
+                                        .filterNot {
+                                            it.id == session.id
+                                        }
+
+                                if (
+                                    mobilitySessionsToday.isEmpty()
+                                ) {
+                                    mobilityCompleted = false
+                                }
+
+                                snackbarHostState
+                                    .showSnackbar(
+                                        message =
+                                            "Mobility session deleted."
+                                    )
+                            } catch (
+                                exception: Exception
+                            ) {
+                                snackbarHostState
+                                    .showSnackbar(
+                                        message =
+                                            "Could not delete mobility session."
+                                    )
+                            } finally {
+                                isSavingMobility = false
+                            }
+                        }
                     }
                 )
 
@@ -2136,6 +2278,11 @@ fun DailyRebuildApp(
                                             snapshot
                                         )
                                 }
+
+                            mobilitySessionDao
+                                .deleteSessionsForDate(
+                                    day.date
+                                )
                         }
 
                         dailyHistoryDays =
@@ -2171,6 +2318,7 @@ fun DailyRebuildApp(
 
                             journalText = ""
                             savedActivitySnapshot = null
+                            mobilitySessionsToday = emptyList()
                         }
 
                         snackbarHostState.showSnackbar(

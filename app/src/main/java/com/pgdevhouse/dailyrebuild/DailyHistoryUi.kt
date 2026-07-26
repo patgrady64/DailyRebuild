@@ -38,6 +38,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.pgdevhouse.dailyrebuild.data.local.DailyActivitySnapshot
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
+import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.YearMonth
@@ -57,7 +58,8 @@ data class DailyHistoryDay(
     val date: String,
     val record: DailyRecord?,
     val foodEntries: List<FoodLogEntry>,
-    val activitySnapshot: DailyActivitySnapshot? = null
+    val activitySnapshot: DailyActivitySnapshot? = null,
+    val mobilitySessions: List<MobilitySession> = emptyList()
 )
 
 @Composable
@@ -159,7 +161,7 @@ fun DailyHistoryDialog(
                         "Delete ${formatHistoryDate(pendingDeletionDay.date)}? " +
                             "This permanently removes the saved checklist, " +
                             "water, pain, medications, journal, activity snapshot, " +
-                            "individual foods, and logged meals for this date. Saved Foods and " +
+                            "mobility sessions, individual foods, and logged meals for this date. Saved Foods and " +
                             "Saved Meal templates will not be deleted."
                 )
             },
@@ -450,7 +452,8 @@ private fun CalendarDayCell(
 ) {
     val hasSavedRecord =
         historyDay?.record != null ||
-            historyDay?.activitySnapshot != null
+            historyDay?.activitySnapshot != null ||
+            historyDay?.mobilitySessions?.isNotEmpty() == true
     val hasFood = historyDay?.foodEntries?.isNotEmpty() == true
     val isToday = date == LocalDate.now()
     val containerColor = when {
@@ -538,7 +541,8 @@ private fun DailyHistoryDetailPage(
             Spacer(Modifier.weight(1f))
             val hasSavedData =
                 day.record != null ||
-                    day.activitySnapshot != null
+                    day.activitySnapshot != null ||
+                    day.mobilitySessions.isNotEmpty()
 
             RebuildStatusBadge(
                 text =
@@ -563,9 +567,9 @@ private fun DailyHistoryDetailPage(
         val record = day.record
         if (record == null) {
             RebuildInsetPanel {
-                Text("Food-only day", style = MaterialTheme.typography.titleMedium)
+                Text("Checklist not saved", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "The daily checklist was not saved, but the food entries remain available below.",
+                    "The daily checklist was not saved, but the day's logged food, activity, or mobility information remains available below.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -580,6 +584,12 @@ private fun DailyHistoryDetailPage(
         day.activitySnapshot?.let {
             HistoryActivityCard(
                 snapshot = it
+            )
+        }
+
+        if (day.mobilitySessions.isNotEmpty()) {
+            HistoryMobilityCard(
+                sessions = day.mobilitySessions
             )
         }
 
@@ -685,6 +695,102 @@ private fun HistoryActivityCard(
                     .colorScheme
                     .onSurfaceVariant
         )
+    }
+}
+
+@Composable
+private fun HistoryMobilityCard(
+    sessions: List<MobilitySession>
+) {
+    val totalSeconds =
+        sessions.sumOf { it.elapsedSeconds }
+
+    HistorySectionCard(
+        title = "Mobility & Stretching"
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement =
+                Arrangement.spacedBy(8.dp)
+        ) {
+            RebuildMetricPill(
+                label = "sessions",
+                value = sessions.size.toString(),
+                modifier = Modifier.weight(1f),
+                color =
+                    MaterialTheme.colorScheme.primaryContainer
+            )
+
+            RebuildMetricPill(
+                label = "time",
+                value =
+                    formatMobilityDuration(
+                        totalSeconds
+                    ),
+                modifier = Modifier.weight(1f),
+                color =
+                    MaterialTheme.colorScheme.secondaryContainer,
+                contentColor =
+                    MaterialTheme.colorScheme.onSecondaryContainer
+            )
+        }
+
+        sessions.forEach { session ->
+            val plannedCount =
+                decodeMovementIds(
+                    session.plannedMovementIds
+                ).size
+            val completedCount =
+                decodeMovementIds(
+                    session.completedMovementIds
+                ).size
+            val skippedCount =
+                decodeMovementIds(
+                    session.skippedMovementIds
+                ).size
+
+            RebuildInsetPanel {
+                Text(
+                    text = session.routineName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Text(
+                    text = buildString {
+                        append(
+                            formatMobilityDuration(
+                                session.elapsedSeconds
+                            )
+                        )
+
+                        if (plannedCount > 0) {
+                            append(" · ")
+                            append(completedCount)
+                            append(" of ")
+                            append(plannedCount)
+                            append(" completed")
+
+                            if (skippedCount > 0) {
+                                append(" · ")
+                                append(skippedCount)
+                                append(" skipped")
+                            }
+                        }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color =
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                if (session.notes.isNotBlank()) {
+                    Text(
+                        text = session.notes,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
     }
 }
 
