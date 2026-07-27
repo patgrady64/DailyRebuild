@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -667,6 +668,13 @@ private fun replacementForMovement(
             .firstOrNull()
 }
 
+private data class MobilityPreferenceDefaults(
+    val seated: Boolean = true,
+    val bed: Boolean = true,
+    val floor: Boolean = false,
+    val standing: Boolean = false
+)
+
 @Composable
 fun MobilitySection(
     sessions: List<MobilitySession>,
@@ -674,6 +682,18 @@ fun MobilitySection(
     onSaveSession: (MobilitySessionDraft) -> Unit,
     onDeleteSession: (MobilitySession) -> Unit
 ) {
+    val context = LocalContext.current
+    val database = remember {
+        com.pgdevhouse.dailyrebuild.data.local.DailyRebuildDatabase
+            .getDatabase(context)
+    }
+    val healthProfileDao = remember {
+        database.healthProfileDao()
+    }
+    var mobilityDefaults by remember {
+        mutableStateOf(MobilityPreferenceDefaults())
+    }
+
     var showRoutineDialog by rememberSaveable {
         mutableStateOf(false)
     }
@@ -684,6 +704,18 @@ fun MobilitySection(
 
     var sessionPendingDeletion by remember {
         mutableStateOf<MobilitySession?>(null)
+    }
+
+    LaunchedEffect(showRoutineDialog) {
+        if (showRoutineDialog) {
+            val profile = healthProfileDao.getProfile()
+            mobilityDefaults = MobilityPreferenceDefaults(
+                seated = profile?.mobilitySeatedDefault ?: true,
+                bed = profile?.mobilityBedDefault ?: true,
+                floor = profile?.mobilityFloorDefault ?: false,
+                standing = profile?.mobilityStandingDefault ?: false
+            )
+        }
     }
 
     val totalSeconds = sessions.sumOf { it.elapsedSeconds }
@@ -775,6 +807,10 @@ fun MobilitySection(
     if (showRoutineDialog) {
         RandomMobilityRoutineDialog(
             isSaving = isSaving,
+            defaultAllowSeated = mobilityDefaults.seated,
+            defaultAllowBed = mobilityDefaults.bed,
+            defaultAllowFloor = mobilityDefaults.floor,
+            defaultAllowStanding = mobilityDefaults.standing,
             onDismiss = {
                 if (!isSaving) {
                     showRoutineDialog = false
@@ -912,6 +948,10 @@ private fun MobilitySessionCard(
 @Composable
 private fun RandomMobilityRoutineDialog(
     isSaving: Boolean,
+    defaultAllowSeated: Boolean,
+    defaultAllowBed: Boolean,
+    defaultAllowFloor: Boolean,
+    defaultAllowStanding: Boolean,
     onDismiss: () -> Unit,
     onSaveSession: (MobilitySessionDraft) -> Unit
 ) {
@@ -928,19 +968,19 @@ private fun RandomMobilityRoutineDialog(
     }
 
     var allowSeated by rememberSaveable {
-        mutableStateOf(true)
+        mutableStateOf(defaultAllowSeated)
     }
 
     var allowBed by rememberSaveable {
-        mutableStateOf(true)
+        mutableStateOf(defaultAllowBed)
     }
 
     var allowFloor by rememberSaveable {
-        mutableStateOf(false)
+        mutableStateOf(defaultAllowFloor)
     }
 
     var allowStanding by rememberSaveable {
-        mutableStateOf(false)
+        mutableStateOf(defaultAllowStanding)
     }
 
     var generatedRoutine by remember {

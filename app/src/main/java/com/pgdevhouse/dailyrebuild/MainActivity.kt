@@ -60,8 +60,11 @@ import com.pgdevhouse.dailyrebuild.data.local.DailyRebuildDatabase
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.Duration
 import java.time.LocalDate
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
@@ -165,8 +168,38 @@ fun DailyRebuildApp(
         )
     }
 
-    val todayDate = remember {
-        LocalDate.now().toString()
+    var todayDate by remember {
+        mutableStateOf(
+            LocalDate.now().toString()
+        )
+    }
+
+    /*
+     * Keep the active day synchronized even when the app remains open
+     * across midnight. A second check runs from onResume below so a
+     * backgrounded app also switches days immediately when reopened.
+     */
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = ZonedDateTime.now()
+            val nextDay =
+                now.toLocalDate()
+                    .plusDays(1)
+                    .atStartOfDay(now.zone)
+                    .plusSeconds(1)
+
+            val waitMilliseconds =
+                Duration.between(
+                    now,
+                    nextDay
+                ).toMillis()
+                    .coerceAtLeast(1_000L)
+
+            delay(waitMilliseconds)
+
+            todayDate =
+                LocalDate.now().toString()
+        }
     }
 
     val coroutineScope = rememberCoroutineScope()
@@ -533,6 +566,44 @@ fun DailyRebuildApp(
      * Load today's daily record and food entries.
      */
     LaunchedEffect(todayDate) {
+        /*
+         * Always begin a newly selected calendar day from clean daily
+         * defaults. Without this reset, fields from the previous day
+         * remain visible when no DailyRecord exists for the new date.
+         * Reusable saved foods and saved meals are intentionally kept.
+         */
+        isLoading = true
+
+        foodRecorded = false
+        walkCompleted = false
+        painRecorded = false
+        mobilityCompleted = false
+
+        backPain = 0f
+        shinPain = 0f
+
+        nextBottleHasMio = false
+        plainReusableBottleCount = 0
+        mioReusableBottleCount = 0
+        plainDisposableBottleCount = 0
+        mioDisposableBottleCount = 0
+
+        morningAspirinTaken = true
+        morningIbuprofenTaken = true
+        morningNaproxenTaken = true
+        morningAcetaminophenTaken = true
+
+        nightIbuprofenTaken = true
+        nightNaproxenTaken = true
+        nightAcetaminophenTaken = true
+
+        journalText = ""
+        foodEntries = emptyList()
+        mobilitySessionsToday = emptyList()
+        savedActivitySnapshot = null
+        hasLiveHealthActivity = false
+        liveHealthActivity = HealthActivityData()
+
         try {
             val savedRecord =
                 dailyRecordDao.getRecordByDate(
@@ -646,11 +717,24 @@ fun DailyRebuildApp(
         } finally {
             isLoading = false
         }
+
+        /*
+         * Health Connect totals are also date-scoped, so refresh them
+         * whenever the dashboard advances to a new day.
+         */
+        refreshHealthActivity()
     }
 
     LaunchedEffect(
         healthRefreshToken
     ) {
+        val currentDeviceDate =
+            LocalDate.now().toString()
+
+        if (todayDate != currentDeviceDate) {
+            todayDate = currentDeviceDate
+        }
+
         refreshHealthActivity()
     }
 
@@ -1167,7 +1251,9 @@ fun DailyRebuildApp(
                 verticalArrangement =
                     Arrangement.spacedBy(16.dp)
             ) {
-                HeaderSection()
+                HeaderSection(
+                    todayDate = todayDate
+                )
 
                 ProgressSection(
                     completedTasks = completedTasks,
@@ -1176,6 +1262,8 @@ fun DailyRebuildApp(
                     calories = totalCaloriesToday,
                     backPain = backPain
                 )
+
+                HealthProfileFeature()
 
                 ActivitySection(
                     availability = healthAvailability,
@@ -2622,8 +2710,12 @@ private fun LoadingScreen(
 }
 
 @Composable
-private fun HeaderSection() {
-    val today = LocalDate.now()
+private fun HeaderSection(
+    todayDate: String
+) {
+    val today = remember(todayDate) {
+        LocalDate.parse(todayDate)
+    }
     val dayFormatter = DateTimeFormatter.ofPattern("EEEE")
     val dateFormatter = DateTimeFormatter.ofPattern("MMMM d, yyyy")
 
