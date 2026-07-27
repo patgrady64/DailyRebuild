@@ -253,8 +253,10 @@ class StatsViewModel(
         val previousWater = averageWater(previousRecords)
         val steps = averageActivity(currentActivity) { it.steps.toDouble() }
         val previousSteps = averageActivity(previousActivity) { it.steps.toDouble() }
-        val pain = averagePain(currentRecords)
-        val previousPain = averagePain(previousRecords)
+        val backPain = averagePain(currentRecords) { it.backPain }
+        val previousBackPain = averagePain(previousRecords) { it.backPain }
+        val shinPain = averagePain(currentRecords) { it.shinPain }
+        val previousShinPain = averagePain(previousRecords) { it.shinPain }
         val weights = currentMeasurements.filter { it.type == HealthMeasurementType.WEIGHT }
         val previousWeights = previousMeasurements.filter { it.type == HealthMeasurementType.WEIGHT }
         val latestWeight = weights.maxByOrNull { it.recordedDate }?.primaryValue
@@ -308,14 +310,25 @@ class StatsViewModel(
             monthlyMode = AggregateMode.AVERAGE,
             formatter = { formatNumber(it, 0) }
         )
-        val painChart = numericChart(
-            title = "Highest Pain",
-            subtitle = coverageText(pain.coverage, days, "pain-recorded days"),
+        val backPainChart = numericChart(
+            title = "Back Pain",
+            subtitle = coverageText(backPain.coverage, days, "pain-recorded days"),
             type = StatsChartType.LINE,
             range = range,
             period = current,
             valuesByDate = currentRecords.filter { it.painRecorded }
-                .associate { it.date to maxOf(it.backPain, it.shinPain).toDouble() },
+                .associate { it.date to it.backPain.toDouble() },
+            monthlyMode = AggregateMode.AVERAGE,
+            formatter = { formatNumber(it, 1) + " / 10" }
+        )
+        val shinPainChart = numericChart(
+            title = "Shin-Splint Pain",
+            subtitle = coverageText(shinPain.coverage, days, "pain-recorded days"),
+            type = StatsChartType.LINE,
+            range = range,
+            period = current,
+            valuesByDate = currentRecords.filter { it.painRecorded }
+                .associate { it.date to it.shinPain.toDouble() },
             monthlyMode = AggregateMode.AVERAGE,
             formatter = { formatNumber(it, 1) + " / 10" }
         )
@@ -369,11 +382,12 @@ class StatsViewModel(
                 averageMetric("Average calories", calories, previousCalories, "cal", days, "food-logged days", 0),
                 averageMetric("Average water", water, previousWater, "oz", days, "hydration days", 1),
                 averageMetric("Average steps", steps, previousSteps, "steps", days, "activity-data days", 0),
-                averageMetric("Average highest pain", pain, previousPain, "/ 10", days, "pain-recorded days", 1),
+                averageMetric("Average back pain", backPain, previousBackPain, "/ 10", days, "pain-recorded days", 1),
+                averageMetric("Average shin pain", shinPain, previousShinPain, "/ 10", days, "pain-recorded days", 1),
                 countMetric("AA meetings", currentMeetings.size, previousMeetings.size.takeIf { hasPreviousPeriod }, meetingGoal),
                 countMetric("Showers", currentShowers.size, previousShowers.size.takeIf { hasPreviousPeriod }, "Minimum reached in ${showerMinimum.first} of ${showerMinimum.second} week(s)")
             ),
-            charts = listOf(stepsChart, painChart),
+            charts = listOf(stepsChart, backPainChart, shinPainChart),
             notes = listOf("Missing days are not counted as zero. Every average shows its data coverage.")
         )
 
@@ -410,14 +424,15 @@ class StatsViewModel(
 
         val health = StatsSection(
             metrics = listOf(
-                averageMetric("Average highest pain", pain, previousPain, "/ 10", days, "pain-recorded days", 1),
+                averageMetric("Average back pain", backPain, previousBackPain, "/ 10", days, "pain-recorded days", 1),
+                averageMetric("Average shin pain", shinPain, previousShinPain, "/ 10", days, "pain-recorded days", 1),
                 valueMetric("Latest weight", latestWeight, previousLatestWeight, "lb", weights.size, 1),
                 countMetric("Migraine / aura events", currentMigraines.size, previousMigraines.size.takeIf { hasPreviousPeriod }, "${currentMigraines.count { it.visualAura }} with visual aura"),
                 countMetric("Appointments", currentAppointments.size, previousAppointments.size.takeIf { hasPreviousPeriod }, appointmentStatusDetail(currentAppointments)),
                 countMetric("Completed care visits", currentVisits.size, previousVisits.size.takeIf { hasPreviousPeriod }, "Visits recorded in this period")
             ),
-            charts = listOf(painChart, weightChart, migraineChart),
-            notes = listOf("Pain uses one value per day: the highest pain experienced that day.")
+            charts = listOf(backPainChart, shinPainChart, weightChart, migraineChart),
+            notes = listOf("Back pain and shin-splint pain each use one daily value: the highest level experienced that day. There are no before-and-after workout values.")
         )
 
         val selfCare = StatsSection(
@@ -461,9 +476,12 @@ class StatsViewModel(
         return NumericSummary(values.takeIf { it.isNotEmpty() }?.average(), values.size)
     }
 
-    private fun averagePain(records: List<DailyRecord>): NumericSummary {
+    private fun averagePain(
+        records: List<DailyRecord>,
+        selector: (DailyRecord) -> Float
+    ): NumericSummary {
         val values = records.filter { it.painRecorded }
-            .map { maxOf(it.backPain, it.shinPain).toDouble() }
+            .map { selector(it).toDouble() }
         return NumericSummary(values.takeIf { it.isNotEmpty() }?.average(), values.size)
     }
 

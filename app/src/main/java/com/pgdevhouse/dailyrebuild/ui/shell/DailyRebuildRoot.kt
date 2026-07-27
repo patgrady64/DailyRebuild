@@ -597,11 +597,15 @@ fun DailyRebuildApp(
     }
 
     /*
-     * One daily pain value: the highest pain experienced so far today.
-     * Existing back/shin database columns are retained for compatibility;
-     * new saves store the highest value in backPain and zero in shinPain.
+     * One daily highest value for each pain area currently tracked.
+     * These are not before/after-workout measurements. Quick logging can raise
+     * either value later in the day but cannot accidentally lower it.
      */
-    var highestPain by rememberSaveable {
+    var backPain by rememberSaveable {
+        mutableStateOf(0f)
+    }
+
+    var shinPain by rememberSaveable {
         mutableStateOf(0f)
     }
 
@@ -824,7 +828,8 @@ fun DailyRebuildApp(
         painRecorded = false
         mobilityCompleted = false
 
-        highestPain = 0f
+        backPain = 0f
+        shinPain = 0f
 
         nextBottleHasMio = false
         plainReusableBottleCount = 0
@@ -877,7 +882,8 @@ fun DailyRebuildApp(
                 walkCompleted = savedRecord.walkCompleted
                 painRecorded = savedRecord.painRecorded
                 mobilityCompleted = savedRecord.mobilityCompleted
-                highestPain = maxOf(savedRecord.backPain, savedRecord.shinPain)
+                backPain = savedRecord.backPain
+                shinPain = savedRecord.shinPain
                 plainReusableBottleCount = savedRecord.plainReusableBottleCount
                 mioReusableBottleCount = savedRecord.mioReusableBottleCount
                 plainDisposableBottleCount = savedRecord.plainDisposableBottleCount
@@ -2493,8 +2499,8 @@ fun DailyRebuildApp(
                         walkCompleted = walkCompleted,
                         painRecorded = painRecorded,
                         mobilityCompleted = mobilityCompleted,
-                        backPain = highestPain,
-                        shinPain = 0f,
+                        backPain = backPain,
+                        shinPain = shinPain,
                         plainReusableBottleCount = plainReusableBottleCount,
                         mioReusableBottleCount = mioReusableBottleCount,
                         plainDisposableBottleCount = plainDisposableBottleCount,
@@ -2984,7 +2990,8 @@ fun DailyRebuildApp(
                         walkCompleted = walkCompleted,
                         painRecorded = painRecorded,
                         mobilityCompleted = mobilityCompleted,
-                        highestPain = highestPain,
+                        backPain = backPain,
+                        shinPain = shinPain,
                         calories = totalCaloriesToday,
                         calorieGoal = currentCalorieGoal,
                         waterOunces = totalWaterOunces,
@@ -3897,11 +3904,13 @@ fun DailyRebuildApp(
     }
 
     if (showQuickPainDialog) {
-        HighestPainDialog(
-            currentHighestPain = highestPain,
+        DailyPainDialog(
+            currentBackPain = backPain,
+            currentShinPain = shinPain,
             wasRecordedToday = painRecorded,
-            onSave = { value ->
-                highestPain = value
+            onSave = { newBackPain, newShinPain ->
+                backPain = newBackPain
+                shinPain = newShinPain
                 painRecorded = true
                 showQuickPainDialog = false
             },

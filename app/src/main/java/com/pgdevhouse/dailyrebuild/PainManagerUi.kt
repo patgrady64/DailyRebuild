@@ -23,86 +23,65 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pgdevhouse.dailyrebuild.domain.recordDailyHighestPain
 
+/**
+ * Records one highest value per day for each pain area Daily Rebuild currently
+ * tracks. This intentionally does not use before/after-workout values.
+ */
 @Composable
-fun HighestPainDialog(
-    currentHighestPain: Float,
+fun DailyPainDialog(
+    currentBackPain: Float,
+    currentShinPain: Float,
     wasRecordedToday: Boolean,
-    onSave: (Float) -> Unit,
+    onSave: (backPain: Float, shinPain: Float) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var selectedPain by remember(currentHighestPain) {
-        mutableFloatStateOf(currentHighestPain)
+    var selectedBackPain by remember(currentBackPain) {
+        mutableFloatStateOf(currentBackPain)
+    }
+    var selectedShinPain by remember(currentShinPain) {
+        mutableFloatStateOf(currentShinPain)
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Highest Pain Today") },
+        title = { Text("Pain Today") },
         text = {
             Column(
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
                     text = if (wasRecordedToday) {
-                        "Today's highest recorded pain is ${currentHighestPain.toInt()} / 10. Raise it if your pain became worse. A lower selection will not reduce today's highest value."
+                        "These are today's highest recorded values. Raise either one if that pain becomes worse. A lower quick-log selection will not reduce the day's recorded high."
                     } else {
-                        "Record the highest pain you have experienced so far today. You can raise it later if something causes more pain."
+                        "Record the highest back pain and shin-splint pain you have experienced so far today. You can raise either value later if the pain gets worse."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text(
-                                text = "Selected highest pain",
-                                style = MaterialTheme.typography.labelLarge
-                            )
-                            Text(
-                                text = painDescription(selectedPain),
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                        Text(
-                            text = "${selectedPain.toInt()} / 10",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                Slider(
-                    value = selectedPain,
-                    onValueChange = { selectedPain = it },
-                    valueRange = 0f..10f,
-                    steps = 9,
-                    modifier = Modifier.fillMaxWidth()
+                DailyPainSlider(
+                    label = "Back pain",
+                    value = selectedBackPain,
+                    onValueChange = { selectedBackPain = it }
                 )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("No pain", style = MaterialTheme.typography.bodySmall)
-                    Text("Worst pain", style = MaterialTheme.typography.bodySmall)
-                }
+                DailyPainSlider(
+                    label = "Shin-splint pain",
+                    value = selectedShinPain,
+                    onValueChange = { selectedShinPain = it }
+                )
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
-                    onSave(recordDailyHighestPain(currentHighestPain, selectedPain))
+                    onSave(
+                        recordDailyHighestPain(currentBackPain, selectedBackPain),
+                        recordDailyHighestPain(currentShinPain, selectedShinPain)
+                    )
                 }
             ) {
-                Text(if (wasRecordedToday) "Update Highest" else "Save")
+                Text(if (wasRecordedToday) "Update Daily Highs" else "Save")
             }
         },
         dismissButton = {
@@ -113,8 +92,63 @@ fun HighestPainDialog(
     )
 }
 
+@Composable
+private fun DailyPainSlider(
+    label: String,
+    value: Float,
+    onValueChange: (Float) -> Unit
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.primaryContainer,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    Text(
+                        text = painDescription(value),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+                Text(
+                    text = "${value.toInt()} / 10",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = 0f..10f,
+            steps = 9,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("No pain", style = MaterialTheme.typography.bodySmall)
+            Text("Worst pain", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
 private fun painDescription(value: Float): String = when {
-    value <= 0f -> "No pain recorded"
+    value <= 0f -> "No pain"
     value < 4f -> "Mild"
     value < 7f -> "Moderate"
     value < 9f -> "Severe"

@@ -1313,20 +1313,17 @@ private fun HistoryWaterCard(
 private fun HistoryPainCard(
     record: DailyRecord
 ) {
-    val highestPain = maxOf(
-        record.backPain,
-        record.shinPain
-    )
-
     HistorySectionCard(
-        title = "Highest Pain"
+        title = "Pain"
     ) {
         Text(
-            text =
-                "Highest pain that day: ${formatHistoryPain(highestPain)} / 10"
+            text = "Highest back pain: ${formatHistoryPain(record.backPain)} / 10"
         )
         Text(
-            text = "Older records automatically use the higher of the former back and shin values.",
+            text = "Highest shin-splint pain: ${formatHistoryPain(record.shinPain)} / 10"
+        )
+        Text(
+            text = "Each value is the highest recorded for that day. Daily Rebuild does not use before-and-after workout pain entries.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

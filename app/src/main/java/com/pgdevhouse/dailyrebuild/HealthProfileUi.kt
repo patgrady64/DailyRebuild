@@ -108,7 +108,7 @@ fun HealthProfileFeature(
     RebuildSectionCard(
         title = "Health profile & goals",
         subtitle =
-            "Private local tracking for goals, measurements, daily highest pain, and your medication reference list.",
+            "Private local tracking for goals, measurements, daily back and shin pain, and your medication reference list.",
         accentColor = RebuildAmber
     ) {
         if (isLoading || data == null) {
@@ -552,12 +552,12 @@ private fun HealthProfileDialog(
                     )
 
                     RebuildSectionCard(
-                        title = "Daily Highest Pain",
-                        subtitle = "Pain is now managed as one daily value: the highest pain experienced that day.",
+                        title = "Daily Pain",
+                        subtitle = "Track one daily high for back pain and one for shin-splint pain.",
                         accentColor = RebuildAmber
                     ) {
                         Text(
-                            text = "Use Highest Pain from Home or the Health quick-log area. If pain increases later, update the same daily value. The former before-and-after activity form is no longer part of the interface.",
+                            text = "Use Pain from Today or the Health quick-log area. If either pain increases later, raise that pain's daily value. There are no before-and-after workout entries.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }

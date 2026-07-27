@@ -2,7 +2,10 @@ package com.pgdevhouse.dailyrebuild.domain
 
 import kotlin.math.max
 
-/** Business rule for the app's single daily pain value. */
+/**
+ * Records the highest value seen so far today for one pain area.
+ * Daily Rebuild applies this independently to back pain and shin-splint pain.
+ */
 fun recordDailyHighestPain(
     currentHighest: Float,
     candidate: Float

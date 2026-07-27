@@ -58,7 +58,8 @@ data class TodayScreenState(
     val walkCompleted: Boolean,
     val painRecorded: Boolean,
     val mobilityCompleted: Boolean,
-    val highestPain: Float,
+    val backPain: Float,
+    val shinPain: Float,
     val calories: Double,
     val calorieGoal: Int?,
     val waterOunces: Double,
@@ -163,9 +164,9 @@ fun TodayScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 RebuildMetricPill(
-                    label = "highest pain",
+                    label = "back pain",
                     value = if (state.painRecorded) {
-                        "${state.highestPain.toInt()} / 10"
+                        "${state.backPain.toInt()} / 10"
                     } else {
                         "Not logged"
                     },
@@ -174,12 +175,23 @@ fun TodayScreen(
                     contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                 )
                 RebuildMetricPill(
-                    label = "anchors",
-                    value = "${state.completedTasks} / 4",
+                    label = "shin pain",
+                    value = if (state.painRecorded) {
+                        "${state.shinPain.toInt()} / 10"
+                    } else {
+                        "Not logged"
+                    },
                     modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.surfaceVariant
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                 )
             }
+            RebuildMetricPill(
+                label = "anchors",
+                value = "${state.completedTasks} / 4",
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            )
         }
 
         HomeAppointmentCard(
@@ -257,7 +269,7 @@ fun TodayScreen(
                 OutlinedButton(
                     onClick = actions.onOpenPain,
                     modifier = Modifier.weight(1f)
-                ) { Text("Highest Pain") }
+                ) { Text("Pain") }
             }
         }
 
@@ -376,9 +388,9 @@ private fun TodayPriorityCard(
             action = actions.onOpenMobility
         }
         !state.painRecorded -> {
-            title = "Record today’s highest pain"
-            message = "Use one number for the highest pain experienced today."
-            button = "Log Highest Pain"
+            title = "Record today’s pain"
+            message = "Log the highest back pain and shin-splint pain experienced so far today."
+            button = "Log Pain"
             action = actions.onOpenPain
         }
         else -> {
@@ -444,7 +456,7 @@ private fun DailyAnchorPanel(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         DailyAnchorRow("Food recorded", state.foodRecorded, actions.onFoodRecordedChange)
         DailyAnchorRow("Walk or intentional movement", state.walkCompleted, actions.onWalkCompletedChange)
-        DailyAnchorRow("Highest pain recorded", state.painRecorded, actions.onPainRecordedChange)
+        DailyAnchorRow("Back and shin pain recorded", state.painRecorded, actions.onPainRecordedChange)
         DailyAnchorRow("Mobility or stretching", state.mobilityCompleted, actions.onMobilityCompletedChange)
     }
 }
@@ -888,7 +900,7 @@ fun HealthHubScreen(
                 OutlinedButton(
                     onClick = actions.onLogPain,
                     modifier = Modifier.weight(1f)
-                ) { Text("Highest Pain") }
+                ) { Text("Pain") }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
