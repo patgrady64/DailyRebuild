@@ -25,6 +25,26 @@ interface DailyActivityDao {
         date: String
     ): DailyActivitySnapshot?
 
+    @Query(
+        """
+        SELECT * FROM daily_activity_snapshots
+        WHERE date BETWEEN :startDate AND :endDate
+        ORDER BY date ASC
+        """
+    )
+    suspend fun getSnapshotsBetween(
+        startDate: String,
+        endDate: String
+    ): List<DailyActivitySnapshot>
+
+    @Query(
+        """
+        SELECT * FROM daily_activity_snapshots
+        ORDER BY date ASC
+        """
+    )
+    suspend fun getAllSnapshots(): List<DailyActivitySnapshot>
+
     @Delete
     suspend fun deleteSnapshot(
         snapshot: DailyActivitySnapshot

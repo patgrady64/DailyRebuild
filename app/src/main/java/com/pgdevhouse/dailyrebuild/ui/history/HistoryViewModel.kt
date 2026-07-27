@@ -72,64 +72,52 @@ class HistoryViewModel(
     }
 
     private suspend fun loadHistoryDays(): List<DailyHistoryDay> {
-        val loadedDays = mutableListOf<DailyHistoryDay>()
-        val today = LocalDate.now()
-        val appointmentHistory = repositories.appointments.getAllAppointments()
-        val appointmentsByDate = appointmentHistory.groupBy { it.date }
+        val records = repositories.dailyRecords.getAllRecords()
+        val foodEntries = repositories.food.getAllEntries()
+        val activitySnapshots = repositories.activity.getAllSnapshots()
+        val mobilitySessions = repositories.mobility.getAllSessions()
+        val showerLogs = repositories.showers.getAllLogs()
+        val migraineEvents = repositories.migraines.getAllLogs()
+        val meetingAttendance = repositories.meetings.getAllAttendance()
+        val careVisits = repositories.careVisits.getAllVisits()
+        val careAppointments = repositories.appointments.getAllAppointments()
 
-        for (dayOffset in 0L until 365L) {
-            val date = today.minusDays(dayOffset).toString()
-            val record = repositories.dailyRecords.getRecordByDate(date)
-            val entries = repositories.food.getEntriesForDate(date)
-            val activitySnapshot = repositories.activity.getSnapshotByDate(date)
-            val mobilitySessions = repositories.mobility.getSessionsForDate(date)
-            val showerLog = repositories.showers.getLogByDate(date)
-            val migraineEvents = repositories.migraines.getLogsForDate(date)
-            val meetingAttendance = repositories.meetings.getAttendanceForDate(date)
-            val careVisits = repositories.careVisits.getVisitsForDate(date)
-            val careAppointments = appointmentsByDate[date].orEmpty()
+        val recordsByDate = records.associateBy { it.date }
+        val foodByDate = foodEntries.groupBy { it.date }
+        val activityByDate = activitySnapshots.associateBy { it.date }
+        val mobilityByDate = mobilitySessions.groupBy { it.date }
+        val showersByDate = showerLogs.associateBy { it.date }
+        val migrainesByDate = migraineEvents.groupBy { it.date }
+        val meetingsByDate = meetingAttendance.groupBy { it.date }
+        val visitsByDate = careVisits.groupBy { it.date }
+        val appointmentsByDate = careAppointments.groupBy { it.date }
 
-            if (
-                record != null ||
-                entries.isNotEmpty() ||
-                activitySnapshot != null ||
-                mobilitySessions.isNotEmpty() ||
-                showerLog != null ||
-                migraineEvents.isNotEmpty() ||
-                meetingAttendance.isNotEmpty() ||
-                careVisits.isNotEmpty() ||
-                careAppointments.isNotEmpty()
-            ) {
-                loadedDays += DailyHistoryDay(
-                    date = date,
-                    record = record,
-                    foodEntries = entries,
-                    activitySnapshot = activitySnapshot,
-                    mobilitySessions = mobilitySessions,
-                    showerLogged = showerLog != null,
-                    migraineLogs = migraineEvents,
-                    meetingAttendance = meetingAttendance,
-                    careVisits = careVisits,
-                    careAppointments = careAppointments
-                )
-            }
+        val allDates = buildSet {
+            addAll(recordsByDate.keys)
+            addAll(foodByDate.keys)
+            addAll(activityByDate.keys)
+            addAll(mobilityByDate.keys)
+            addAll(showersByDate.keys)
+            addAll(migrainesByDate.keys)
+            addAll(meetingsByDate.keys)
+            addAll(visitsByDate.keys)
+            addAll(appointmentsByDate.keys)
         }
 
-        val futureLimit = today.plusYears(1).toString()
-        appointmentsByDate
-            .filterKeys { date ->
-                date > today.toString() && date <= futureLimit
-            }
-            .forEach { (date, appointments) ->
-                loadedDays += DailyHistoryDay(
-                    date = date,
-                    record = null,
-                    foodEntries = emptyList(),
-                    careAppointments = appointments
-                )
-            }
-
-        return loadedDays.sortedByDescending { it.date }
+        return allDates.map { date ->
+            DailyHistoryDay(
+                date = date,
+                record = recordsByDate[date],
+                foodEntries = foodByDate[date].orEmpty(),
+                activitySnapshot = activityByDate[date],
+                mobilitySessions = mobilityByDate[date].orEmpty(),
+                showerLogged = showersByDate.containsKey(date),
+                migraineLogs = migrainesByDate[date].orEmpty(),
+                meetingAttendance = meetingsByDate[date].orEmpty(),
+                careVisits = visitsByDate[date].orEmpty(),
+                careAppointments = appointmentsByDate[date].orEmpty()
+            )
+        }.sortedByDescending { it.date }
     }
 
     companion object {

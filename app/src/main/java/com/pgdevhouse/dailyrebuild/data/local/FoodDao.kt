@@ -102,6 +102,28 @@ interface FoodDao {
         date: String
     ): List<FoodLogEntry>
 
+    @Query(
+        """
+        SELECT *
+        FROM food_log_entries
+        WHERE date BETWEEN :startDate AND :endDate
+        ORDER BY date ASC, createdAt ASC
+        """
+    )
+    suspend fun getEntriesBetween(
+        startDate: String,
+        endDate: String
+    ): List<FoodLogEntry>
+
+    @Query(
+        """
+        SELECT *
+        FROM food_log_entries
+        ORDER BY date ASC, createdAt ASC
+        """
+    )
+    suspend fun getAllEntries(): List<FoodLogEntry>
+
     @Delete
     suspend fun deleteFoodEntry(
         entry: FoodLogEntry

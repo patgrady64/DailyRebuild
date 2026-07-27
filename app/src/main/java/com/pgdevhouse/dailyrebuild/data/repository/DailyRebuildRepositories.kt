@@ -85,6 +85,9 @@ class FoodRepository internal constructor(database: DailyRebuildDatabase) {
     suspend fun getFavoriteProducts(): List<FoodProduct> = dao.getFavoriteProducts()
     suspend fun addFoodEntry(entry: FoodLogEntry): Long = dao.addFoodEntry(entry)
     suspend fun getEntriesForDate(date: String): List<FoodLogEntry> = dao.getEntriesForDate(date)
+    suspend fun getEntriesBetween(startDate: String, endDate: String): List<FoodLogEntry> =
+        dao.getEntriesBetween(startDate, endDate)
+    suspend fun getAllEntries(): List<FoodLogEntry> = dao.getAllEntries()
     suspend fun deleteFoodEntry(entry: FoodLogEntry) = dao.deleteFoodEntry(entry)
     suspend fun deleteFoodEntryById(entryId: Long) = dao.deleteFoodEntryById(entryId)
     suspend fun deleteProductById(productId: Long) = dao.deleteProductById(productId)
@@ -122,6 +125,9 @@ class DailyActivityRepository internal constructor(database: DailyRebuildDatabas
     private val dao = database.dailyActivityDao()
     suspend fun saveSnapshot(snapshot: DailyActivitySnapshot) = dao.saveSnapshot(snapshot)
     suspend fun getSnapshotByDate(date: String): DailyActivitySnapshot? = dao.getSnapshotByDate(date)
+    suspend fun getSnapshotsBetween(startDate: String, endDate: String): List<DailyActivitySnapshot> =
+        dao.getSnapshotsBetween(startDate, endDate)
+    suspend fun getAllSnapshots(): List<DailyActivitySnapshot> = dao.getAllSnapshots()
     suspend fun deleteSnapshot(snapshot: DailyActivitySnapshot) = dao.deleteSnapshot(snapshot)
 }
 
@@ -129,6 +135,9 @@ class MobilityRepository internal constructor(database: DailyRebuildDatabase) {
     private val dao = database.mobilitySessionDao()
     suspend fun addSession(session: MobilitySession): Long = dao.addSession(session)
     suspend fun getSessionsForDate(date: String): List<MobilitySession> = dao.getSessionsForDate(date)
+    suspend fun getSessionsBetween(startDate: String, endDate: String): List<MobilitySession> =
+        dao.getSessionsBetween(startDate, endDate)
+    suspend fun getAllSessions(): List<MobilitySession> = dao.getAllSessions()
     suspend fun deleteSession(session: MobilitySession) = dao.deleteSession(session)
     suspend fun deleteSessionsForDate(date: String) = dao.deleteSessionsForDate(date)
 }
@@ -139,6 +148,7 @@ class ShowerRepository internal constructor(database: DailyRebuildDatabase) {
     suspend fun getLogByDate(date: String): ShowerLog? = dao.getLogByDate(date)
     suspend fun getLogsBetween(startDate: String, endDate: String): List<ShowerLog> =
         dao.getLogsBetween(startDate, endDate)
+    suspend fun getAllLogs(): List<ShowerLog> = dao.getAllLogs()
     suspend fun deleteByDate(date: String) = dao.deleteByDate(date)
 }
 

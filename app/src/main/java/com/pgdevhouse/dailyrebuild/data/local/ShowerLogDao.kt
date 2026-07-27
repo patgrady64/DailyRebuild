@@ -30,6 +30,11 @@ interface ShowerLogDao {
     ): List<ShowerLog>
 
     @Query(
+        "SELECT * FROM shower_logs ORDER BY date ASC"
+    )
+    suspend fun getAllLogs(): List<ShowerLog>
+
+    @Query(
         "DELETE FROM shower_logs " +
             "WHERE date = :date"
     )

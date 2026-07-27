@@ -24,6 +24,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -89,6 +90,7 @@ enum class DailyHistoryFilter(
 @Composable
 fun DailyHistoryDialog(
     days: List<DailyHistoryDay>,
+    initialSelectedDate: String? = null,
     selectedFilter: DailyHistoryFilter,
     onFilterChange: (DailyHistoryFilter) -> Unit,
     isLoading: Boolean,
@@ -96,14 +98,26 @@ fun DailyHistoryDialog(
     onDeleteDay: (DailyHistoryDay) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var selectedDate by rememberSaveable {
-        mutableStateOf<String?>(null)
+    var selectedDate by rememberSaveable(initialSelectedDate) {
+        mutableStateOf(initialSelectedDate)
     }
 
-    var visibleMonthText by rememberSaveable {
+    var visibleMonthText by rememberSaveable(initialSelectedDate) {
         mutableStateOf(
-            YearMonth.now().toString()
+            initialSelectedDate
+                ?.let { runCatching { YearMonth.from(LocalDate.parse(it)) }.getOrNull() }
+                ?.toString()
+                ?: YearMonth.now().toString()
         )
+    }
+
+    LaunchedEffect(initialSelectedDate) {
+        if (initialSelectedDate != null) {
+            selectedDate = initialSelectedDate
+            visibleMonthText = runCatching {
+                YearMonth.from(LocalDate.parse(initialSelectedDate)).toString()
+            }.getOrDefault(visibleMonthText)
+        }
     }
 
     var dayPendingDeletion by rememberSaveable {

@@ -111,6 +111,7 @@ import com.pgdevhouse.dailyrebuild.ui.food.LocalSavedFoodChoiceDialog
 import com.pgdevhouse.dailyrebuild.ui.food.OnlineSavedFoodDecisionDialog
 import com.pgdevhouse.dailyrebuild.ui.food.PantryViewModel
 import com.pgdevhouse.dailyrebuild.ui.history.HistoryViewModel
+import com.pgdevhouse.dailyrebuild.ui.stats.StatsViewModel
 import com.pgdevhouse.dailyrebuild.ui.navigation.AppNavigationViewModel
 import com.pgdevhouse.dailyrebuild.ui.state.FeatureLoadFailure
 import com.pgdevhouse.dailyrebuild.ui.state.captureFeatureLoad
@@ -150,6 +151,9 @@ fun DailyRebuildApp(
     )
     val historyViewModel: HistoryViewModel = viewModel(
         factory = HistoryViewModel.factory(repositories)
+    )
+    val statsViewModel: StatsViewModel = viewModel(
+        factory = StatsViewModel.factory(repositories)
     )
 
     val healthConnectManager = remember(
@@ -256,8 +260,6 @@ fun DailyRebuildApp(
     var showQuickPainDialog by rememberSaveable {
         mutableStateOf(false)
     }
-
-    val selectedFoodSection = navigationViewModel.selectedFoodSection
 
     var currentCalorieGoal by remember {
         mutableStateOf<Int?>(null)
@@ -791,6 +793,10 @@ fun DailyRebuildApp(
         mutableStateOf(false)
     }
 
+    var initialDailyHistoryDate by rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+
     val historyState = historyViewModel.state
     val isLoadingDailyHistory = historyState.isLoading
     val isDeletingDailyHistoryDay = historyState.isDeleting
@@ -1048,6 +1054,12 @@ fun DailyRebuildApp(
                 healthProfileDao
                     .getProfile()
                     ?.currentCalorieGoal
+        }
+    }
+
+    LaunchedEffect(selectedMainTab) {
+        if (selectedMainTab == AppNavigationViewModel.STATS_TAB) {
+            statsViewModel.refresh()
         }
     }
 
@@ -2146,7 +2158,11 @@ fun DailyRebuildApp(
         showCareVisitEditorDialog = true
     }
 
-    fun openDailyHistory() {
+    fun openDailyHistory(initialDate: String? = null) {
+        initialDailyHistoryDate = initialDate
+        if (initialDate != null) {
+            historyViewModel.selectFilter(DailyHistoryFilter.ALL)
+        }
         showDailyHistoryDialog = true
         historyViewModel.refresh { message ->
             if (message != null) {
@@ -2819,6 +2835,119 @@ fun DailyRebuildApp(
         pantryViewModel.markNeededPurchased(::showPantryResult)
     }
 
+    val foodHubState = FoodHubState(
+        selectedSection = 0,
+        totalWaterOunces = totalWaterOunces,
+        totalBottleCount =
+            plainReusableBottleCount +
+                mioReusableBottleCount +
+                plainDisposableBottleCount +
+                mioDisposableBottleCount,
+        entries = foodEntries,
+        savedFoodCount = savedProducts.size,
+        savedMealCount = savedMeals.size,
+        lastScannedBarcode = lastScannedBarcode,
+        isScanningBarcode = isScanningBarcode,
+        currentCalorieGoal = currentCalorieGoal,
+        pantryItems = pantryEssentials,
+        isSavingPantry = isSavingPantryEssential
+    )
+
+    val foodHubActions = FoodHubActions(
+        onSectionChange = {},
+        onOpenHistory = { openDailyHistory() },
+        onAddWater = { showQuickWaterDialog = true },
+        onScanFood = {
+            startFoodBarcodeScan(forMealBuilder = false)
+        },
+        onAddFoodManually = {
+            isCreatingFoodForMeal = false
+            scannedFoodPrefill = null
+            showManualFoodDialog = true
+        },
+        onOpenSavedFoods = { openSavedFoodsScreen() },
+        onBuildMeal = { openMealBuilderScreen() },
+        onOpenSavedMeals = { openSavedMealsScreen() },
+        onDeleteEntry = { deleteFoodEntry(it) },
+        onDeleteMealLog = { deleteMealLog(it) },
+        onSavePantryItem = { item -> savePantryEssential(item) },
+        onDeletePantryItem = { item -> deletePantryEssential(item) },
+        onPantryStatusChange = { item, status ->
+            updatePantryEssentialStatus(item, status)
+        },
+        onMarkNeededPurchased = { markNeededPantryPurchased() }
+    )
+
+    val mobilityHubState = MobilityHubState(
+        selectedSection = navigationViewModel.selectedMobilitySection,
+        availability = healthAvailability,
+        hasPermissions = hasHealthPermissions,
+        isLoadingActivity = isLoadingHealthActivity,
+        activity = displayedActivity,
+        sourceLabel = activitySourceLabel,
+        sessions = mobilitySessionsToday,
+        isSaving = isSavingMobility
+    )
+
+    val mobilityHubActions = MobilityHubActions(
+        onSectionChange = { navigationViewModel.selectMobilitySection(it) },
+        onOpenHistory = { openDailyHistory() },
+        onRefresh = {
+            refreshHealthActivity(showFeedback = true)
+        },
+        onManageHealth = {
+            navigationViewModel.selectMainTab(AppNavigationViewModel.HEALTH_TAB)
+        },
+        onSaveSession = { saveMobilitySession(it) },
+        onDeleteSession = { deleteMobilitySession(it) }
+    )
+
+    val healthHubState = HealthHubState(
+        appointments = careAppointments,
+        visits = careVisits,
+        migraineLogs = migraineLogs,
+        availability = healthAvailability,
+        hasPermissions = hasHealthPermissions,
+        isLoadingActivity = isLoadingHealthActivity,
+        activity = displayedActivity,
+        activitySourceLabel = activitySourceLabel
+    )
+
+    val healthHubActions = HealthHubActions(
+        onOpenHistory = { openDailyHistory() },
+        onScheduleAppointment = { openAppointmentStart() },
+        onOpenAppointmentHistory = {
+            appointmentWorkflow.showHistory = true
+        },
+        onViewAppointment = { appointment ->
+            openAppointmentEditor(
+                appointment,
+                returnToHistory = false
+            )
+        },
+        onLogVisit = { showCareVisitStartDialog = true },
+        onOpenVisitHistory = {
+            showCareVisitHistoryDialog = true
+        },
+        onLogMigraine = { showMigraineLogDialog = true },
+        onDeleteMigraine = { deleteMigraineEvent(it) },
+        onLogPain = { showQuickPainDialog = true },
+        onConnectHealth = {
+            healthPermissionsLauncher.launch(
+                HealthConnectManager.permissions
+            )
+        },
+        onRefreshActivity = {
+            refreshHealthActivity(showFeedback = true)
+        },
+        onManageAccess = {
+            healthConnectManager.openHealthConnectSettings()
+        },
+        onInstallOrUpdate = {
+            healthConnectManager.openInstallOrUpdate()
+        }
+    )
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -2847,7 +2976,7 @@ fun DailyRebuildApp(
             )
         } else {
             when (selectedMainTab) {
-                0 -> TodayScreen(
+                AppNavigationViewModel.TODAY_TAB -> TodayScreen(
                     state = TodayScreenState(
                         date = todayDate,
                         completedTasks = completedTasks,
@@ -2878,12 +3007,28 @@ fun DailyRebuildApp(
                     ),
                     actions = TodayScreenActions(
                         onOpenHistory = { openDailyHistory() },
-                        onOpenFood = { navigationViewModel.selectMainTab(1) },
+                        onOpenFood = {
+                            navigationViewModel.openLogSection(
+                                AppNavigationViewModel.LOG_FOOD_SECTION
+                            )
+                        },
                         onOpenWater = { showQuickWaterDialog = true },
-                        onOpenMobility = { navigationViewModel.selectMainTab(2) },
+                        onOpenMobility = {
+                            navigationViewModel.openLogSection(
+                                AppNavigationViewModel.LOG_MOVEMENT_SECTION
+                            )
+                        },
                         onOpenPain = { showQuickPainDialog = true },
-                        onOpenMeetings = { navigationViewModel.selectMainTab(3) },
-                        onOpenHealth = { navigationViewModel.selectMainTab(4) },
+                        onOpenMeetings = {
+                            navigationViewModel.openLogSection(
+                                AppNavigationViewModel.LOG_MEETINGS_SECTION
+                            )
+                        },
+                        onOpenHealth = {
+                            navigationViewModel.selectMainTab(
+                                AppNavigationViewModel.HEALTH_TAB
+                            )
+                        },
                         onScheduleAppointment = { openAppointmentStart() },
                         onViewAppointment = { appointment ->
                             openAppointmentEditor(
@@ -2911,156 +3056,154 @@ fun DailyRebuildApp(
                     modifier = Modifier.padding(innerPadding)
                 )
 
-                1 -> FoodHubScreen(
-                    state = FoodHubState(
-                        selectedSection = selectedFoodSection,
-                        totalWaterOunces = totalWaterOunces,
-                        totalBottleCount =
-                            plainReusableBottleCount +
-                                mioReusableBottleCount +
-                                plainDisposableBottleCount +
-                                mioDisposableBottleCount,
-                        entries = foodEntries,
-                        savedFoodCount = savedProducts.size,
-                        savedMealCount = savedMeals.size,
-                        lastScannedBarcode = lastScannedBarcode,
-                        isScanningBarcode = isScanningBarcode,
-                        currentCalorieGoal = currentCalorieGoal,
-                        pantryItems = pantryEssentials,
-                        isSavingPantry = isSavingPantryEssential
-                    ),
-                    actions = FoodHubActions(
-                        onSectionChange = { navigationViewModel.selectFoodSection(it) },
-                        onOpenHistory = { openDailyHistory() },
-                        onAddWater = { showQuickWaterDialog = true },
-                        onScanFood = {
-                            startFoodBarcodeScan(forMealBuilder = false)
-                        },
-                        onAddFoodManually = {
-                            isCreatingFoodForMeal = false
-                            scannedFoodPrefill = null
-                            showManualFoodDialog = true
-                        },
-                        onOpenSavedFoods = { openSavedFoodsScreen() },
-                        onBuildMeal = { openMealBuilderScreen() },
-                        onOpenSavedMeals = { openSavedMealsScreen() },
-                        onDeleteEntry = { deleteFoodEntry(it) },
-                        onDeleteMealLog = { deleteMealLog(it) },
-                        onSavePantryItem = { item -> savePantryEssential(item) },
-                        onDeletePantryItem = { item -> deletePantryEssential(item) },
-                        onPantryStatusChange = { item, status ->
-                            updatePantryEssentialStatus(item, status)
-                        },
-                        onMarkNeededPurchased = { markNeededPantryPurchased() }
-                    ),
-                    modifier = Modifier.padding(innerPadding)
-                )
-
-                2 -> MobilityHubScreen(
-                    state = MobilityHubState(
-                        selectedSection = navigationViewModel.selectedMobilitySection,
-                        availability = healthAvailability,
-                        hasPermissions = hasHealthPermissions,
-                        isLoadingActivity = isLoadingHealthActivity,
-                        activity = displayedActivity,
-                        sourceLabel = activitySourceLabel,
-                        sessions = mobilitySessionsToday,
-                        isSaving = isSavingMobility
-                    ),
-                    actions = MobilityHubActions(
-                        onSectionChange = { navigationViewModel.selectMobilitySection(it) },
-                        onOpenHistory = { openDailyHistory() },
-                        onRefresh = {
-                            refreshHealthActivity(showFeedback = true)
-                        },
-                        onManageHealth = { navigationViewModel.selectMainTab(4) },
-                        onSaveSession = { saveMobilitySession(it) },
-                        onDeleteSession = { deleteMobilitySession(it) }
-                    ),
-                    modifier = Modifier.padding(innerPadding)
-                )
-
-                3 -> MeetingsHubScreen(
-                    weeklyAttendance = weeklyMeetingAttendance,
-                    isSaving = isSavingMeeting,
+                AppNavigationViewModel.LOG_TAB -> TaskHubFrame(
+                    title = "Log",
+                    subtitle = "Record food, movement, meetings, and occasional health events.",
+                    labels = listOf("Food", "Movement", "Meetings", "Health"),
+                    selectedSection = navigationViewModel.selectedLogSection,
+                    onSectionSelected = navigationViewModel::selectLogSection,
                     onOpenHistory = { openDailyHistory() },
-                    onLogMeeting = { showMeetingPickerDialog = true },
-                    onAddMeeting = {
-                        meetingBeingEdited = null
-                        logAttendanceAfterMeetingSave = false
-                        showMeetingEditorDialog = true
-                    },
-                    onEditAttendance = {
-                        attendanceBeingEdited = it
-                        meetingForAttendance =
-                            it.savedMeetingId?.let { id ->
-                                savedMeetings.firstOrNull { meeting ->
-                                    meeting.id == id
-                                }
-                            }
-                        isOneTimeMeetingAttendance =
-                            it.savedMeetingId == null
-                        showMeetingAttendanceDialog = true
-                    },
-                    onDeleteAttendance = {
-                        meetingAttendancePendingDeletion = it
-                    },
-                    onViewFullHistory = {
-                        showMeetingHistoryDialog = true
-                    },
                     modifier = Modifier.padding(innerPadding)
-                )
+                ) {
+                    when (navigationViewModel.selectedLogSection) {
+                        AppNavigationViewModel.LOG_FOOD_SECTION -> FoodHubScreen(
+                            state = foodHubState.copy(selectedSection = 0),
+                            actions = foodHubActions,
+                            showHeader = false,
+                            showSectionTabs = false
+                        )
 
-                else -> HealthHubScreen(
-                    state = HealthHubState(
-                        appointments = careAppointments,
-                        visits = careVisits,
-                        migraineLogs = migraineLogs,
-                        availability = healthAvailability,
-                        hasPermissions = hasHealthPermissions,
-                        isLoadingActivity = isLoadingHealthActivity,
-                        activity = displayedActivity,
-                        activitySourceLabel = activitySourceLabel
-                    ),
-                    actions = HealthHubActions(
-                        onOpenHistory = { openDailyHistory() },
-                        onScheduleAppointment = { openAppointmentStart() },
-                        onOpenAppointmentHistory = {
-                            appointmentWorkflow.showHistory = true
-                        },
-                        onViewAppointment = { appointment ->
-                            openAppointmentEditor(
-                                appointment,
-                                returnToHistory = false
-                            )
-                        },
-                        onLogVisit = { showCareVisitStartDialog = true },
-                        onOpenVisitHistory = {
-                            showCareVisitHistoryDialog = true
-                        },
-                        onLogMigraine = { showMigraineLogDialog = true },
-                        onDeleteMigraine = { deleteMigraineEvent(it) },
-                        onLogPain = { showQuickPainDialog = true },
-                        onConnectHealth = {
-                            healthPermissionsLauncher.launch(
-                                HealthConnectManager.permissions
-                            )
-                        },
-                        onRefreshActivity = {
-                            refreshHealthActivity(showFeedback = true)
-                        },
-                        onManageAccess = {
-                            healthConnectManager.openHealthConnectSettings()
-                        },
-                        onInstallOrUpdate = {
-                            healthConnectManager.openInstallOrUpdate()
-                        }
-                    ),
+                        AppNavigationViewModel.LOG_MOVEMENT_SECTION -> MobilityHubScreen(
+                            state = mobilityHubState,
+                            actions = mobilityHubActions,
+                            showHeader = false
+                        )
+
+                        AppNavigationViewModel.LOG_MEETINGS_SECTION -> MeetingsHubScreen(
+                            weeklyAttendance = weeklyMeetingAttendance,
+                            isSaving = isSavingMeeting,
+                            onOpenHistory = { openDailyHistory() },
+                            onLogMeeting = { showMeetingPickerDialog = true },
+                            onAddMeeting = {
+                                meetingBeingEdited = null
+                                logAttendanceAfterMeetingSave = false
+                                showMeetingEditorDialog = true
+                            },
+                            onEditAttendance = {
+                                attendanceBeingEdited = it
+                                meetingForAttendance =
+                                    it.savedMeetingId?.let { id ->
+                                        savedMeetings.firstOrNull { meeting ->
+                                            meeting.id == id
+                                        }
+                                    }
+                                isOneTimeMeetingAttendance =
+                                    it.savedMeetingId == null
+                                showMeetingAttendanceDialog = true
+                            },
+                            onDeleteAttendance = {
+                                meetingAttendancePendingDeletion = it
+                            },
+                            onViewFullHistory = {
+                                showMeetingHistoryDialog = true
+                            },
+                            showHeader = false
+                        )
+
+                        else -> HealthQuickLogScreen(
+                            onLogHighestPain = { showQuickPainDialog = true },
+                            onLogMigraine = { showMigraineLogDialog = true },
+                            onLogCareVisit = { showCareVisitStartDialog = true },
+                            onLogShower = { logShowerToday() },
+                            onOpenMeasurements = {
+                                navigationViewModel.selectMainTab(
+                                    AppNavigationViewModel.HEALTH_TAB
+                                )
+                            },
+                            onOpenHealth = {
+                                navigationViewModel.selectMainTab(
+                                    AppNavigationViewModel.HEALTH_TAB
+                                )
+                            }
+                        )
+                    }
+                }
+
+                AppNavigationViewModel.PLAN_TAB -> TaskHubFrame(
+                    title = "Plan",
+                    subtitle = "Prepare meals, pantry needs, shopping, and appointments before they happen.",
+                    labels = listOf("Meals", "Pantry", "Shop", "Appointments"),
+                    selectedSection = navigationViewModel.selectedPlanSection,
+                    onSectionSelected = navigationViewModel::selectPlanSection,
+                    onOpenHistory = { openDailyHistory() },
+                    modifier = Modifier.padding(innerPadding)
+                ) {
+                    when (navigationViewModel.selectedPlanSection) {
+                        AppNavigationViewModel.PLAN_MEALS_SECTION -> FoodHubScreen(
+                            state = foodHubState.copy(selectedSection = 1),
+                            actions = foodHubActions,
+                            showHeader = false,
+                            showSectionTabs = false
+                        )
+
+                        AppNavigationViewModel.PLAN_PANTRY_SECTION -> FoodHubScreen(
+                            state = foodHubState.copy(selectedSection = 2),
+                            actions = foodHubActions,
+                            showHeader = false,
+                            showSectionTabs = false
+                        )
+
+                        AppNavigationViewModel.PLAN_SHOP_SECTION -> FoodHubScreen(
+                            state = foodHubState.copy(selectedSection = 3),
+                            actions = foodHubActions.copy(
+                                onSectionChange = { section ->
+                                    if (section == 2) {
+                                        navigationViewModel.selectPlanSection(
+                                            AppNavigationViewModel.PLAN_PANTRY_SECTION
+                                        )
+                                    }
+                                }
+                            ),
+                            showHeader = false,
+                            showSectionTabs = false
+                        )
+
+                        else -> AppointmentPlanningScreen(
+                            appointments = careAppointments,
+                            onSchedule = { openAppointmentStart() },
+                            onOpenHistory = {
+                                appointmentWorkflow.showHistory = true
+                            },
+                            onViewAppointment = { appointment ->
+                                openAppointmentEditor(
+                                    appointment,
+                                    returnToHistory = false
+                                )
+                            }
+                        )
+                    }
+                }
+
+                AppNavigationViewModel.HEALTH_TAB -> HealthHubScreen(
+                    state = healthHubState,
+                    actions = healthHubActions,
                     profileContent = {
                         key(healthFeatureRefreshKey) {
                             HealthProfileFeature(repositories)
                         }
                     },
+                    modifier = Modifier.padding(innerPadding)
+                )
+
+                else -> StatsScreen(
+                    state = statsViewModel.state,
+                    onRangeSelected = statsViewModel::selectRange,
+                    onFilterSelected = statsViewModel::selectFilter,
+                    onPreviousPeriod = statsViewModel::movePrevious,
+                    onNextPeriod = statsViewModel::moveNext,
+                    onRefresh = statsViewModel::refresh,
+                    onOpenHistory = { openDailyHistory() },
+                    onOpenHistoryDate = { date -> openDailyHistory(date) },
                     modifier = Modifier.padding(innerPadding)
                 )
             }
@@ -4399,6 +4542,7 @@ fun DailyRebuildApp(
     if (showDailyHistoryDialog) {
         DailyHistoryDialog(
             days = dailyHistoryDays,
+            initialSelectedDate = initialDailyHistoryDate,
             selectedFilter = historyState.selectedFilter,
             onFilterChange = historyViewModel::selectFilter,
             isLoading = isLoadingDailyHistory,
@@ -4436,6 +4580,10 @@ fun DailyRebuildApp(
                             if (day.date == todayDate) {
                                 dayReloadToken++
                             }
+
+                            if (selectedMainTab == AppNavigationViewModel.STATS_TAB) {
+                                statsViewModel.refresh()
+                            }
                         }
 
                         snackbarHostState.showSnackbar(message)
@@ -4446,6 +4594,7 @@ fun DailyRebuildApp(
             onDismiss = {
                 if (!isDeletingDailyHistoryDay) {
                     showDailyHistoryDialog = false
+                    initialDailyHistoryDate = null
                 }
             }
         )

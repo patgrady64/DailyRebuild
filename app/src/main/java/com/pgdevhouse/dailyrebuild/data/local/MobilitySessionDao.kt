@@ -26,6 +26,28 @@ interface MobilitySessionDao {
         date: String
     ): List<MobilitySession>
 
+    @Query(
+        """
+        SELECT *
+        FROM mobility_sessions
+        WHERE date BETWEEN :startDate AND :endDate
+        ORDER BY date ASC, createdAt ASC
+        """
+    )
+    suspend fun getSessionsBetween(
+        startDate: String,
+        endDate: String
+    ): List<MobilitySession>
+
+    @Query(
+        """
+        SELECT *
+        FROM mobility_sessions
+        ORDER BY date ASC, createdAt ASC
+        """
+    )
+    suspend fun getAllSessions(): List<MobilitySession>
+
     @Delete
     suspend fun deleteSession(
         session: MobilitySession

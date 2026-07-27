@@ -7,9 +7,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 
 /**
- * Owns durable app navigation independently from feature data and dialogs.
- * Android Back behavior is coordinated by the app shell, while the selected
- * hub and Food subsection survive configuration changes through SavedStateHandle.
+ * Owns the task-based five-tab navigation and each hub's remembered subsection.
+ * Main tabs are Today, Log, Plan, Health, and Stats.
  */
 class AppNavigationViewModel(
     private val savedStateHandle: SavedStateHandle
@@ -20,8 +19,13 @@ class AppNavigationViewModel(
     )
         private set
 
-    var selectedFoodSection by mutableIntStateOf(
-        savedStateHandle[KEY_FOOD_SECTION] ?: FOOD_TODAY_SECTION
+    var selectedLogSection by mutableIntStateOf(
+        savedStateHandle[KEY_LOG_SECTION] ?: LOG_FOOD_SECTION
+    )
+        private set
+
+    var selectedPlanSection by mutableIntStateOf(
+        savedStateHandle[KEY_PLAN_SECTION] ?: PLAN_MEALS_SECTION
     )
         private set
 
@@ -31,18 +35,33 @@ class AppNavigationViewModel(
         private set
 
     fun selectMainTab(index: Int) {
-        selectedMainTab = index.coerceIn(TODAY_TAB, HEALTH_TAB)
+        selectedMainTab = index.coerceIn(TODAY_TAB, STATS_TAB)
         savedStateHandle[KEY_MAIN_TAB] = selectedMainTab
     }
 
-    fun selectFoodSection(index: Int) {
-        selectedFoodSection = index.coerceIn(FOOD_TODAY_SECTION, FOOD_SHOP_SECTION)
-        savedStateHandle[KEY_FOOD_SECTION] = selectedFoodSection
+    fun selectLogSection(index: Int) {
+        selectedLogSection = index.coerceIn(LOG_FOOD_SECTION, LOG_HEALTH_SECTION)
+        savedStateHandle[KEY_LOG_SECTION] = selectedLogSection
+    }
+
+    fun selectPlanSection(index: Int) {
+        selectedPlanSection = index.coerceIn(PLAN_MEALS_SECTION, PLAN_APPOINTMENTS_SECTION)
+        savedStateHandle[KEY_PLAN_SECTION] = selectedPlanSection
     }
 
     fun selectMobilitySection(index: Int) {
         selectedMobilitySection = index.coerceIn(MOBILITY_TODAY_SECTION, MOBILITY_HISTORY_SECTION)
         savedStateHandle[KEY_MOBILITY_SECTION] = selectedMobilitySection
+    }
+
+    fun openLogSection(section: Int) {
+        selectLogSection(section)
+        selectMainTab(LOG_TAB)
+    }
+
+    fun openPlanSection(section: Int) {
+        selectPlanSection(section)
+        selectMainTab(PLAN_TAB)
     }
 
     fun returnToToday(): Boolean {
@@ -53,22 +72,28 @@ class AppNavigationViewModel(
 
     companion object {
         const val TODAY_TAB = 0
-        const val FOOD_TAB = 1
-        const val MOBILITY_TAB = 2
-        const val MEETINGS_TAB = 3
-        const val HEALTH_TAB = 4
+        const val LOG_TAB = 1
+        const val PLAN_TAB = 2
+        const val HEALTH_TAB = 3
+        const val STATS_TAB = 4
 
-        const val FOOD_TODAY_SECTION = 0
-        const val FOOD_PLAN_SECTION = 1
-        const val FOOD_PANTRY_SECTION = 2
-        const val FOOD_SHOP_SECTION = 3
+        const val LOG_FOOD_SECTION = 0
+        const val LOG_MOVEMENT_SECTION = 1
+        const val LOG_MEETINGS_SECTION = 2
+        const val LOG_HEALTH_SECTION = 3
+
+        const val PLAN_MEALS_SECTION = 0
+        const val PLAN_PANTRY_SECTION = 1
+        const val PLAN_SHOP_SECTION = 2
+        const val PLAN_APPOINTMENTS_SECTION = 3
 
         const val MOBILITY_TODAY_SECTION = 0
         const val MOBILITY_ROUTINES_SECTION = 1
         const val MOBILITY_HISTORY_SECTION = 2
 
         private const val KEY_MAIN_TAB = "selected_main_tab"
-        private const val KEY_FOOD_SECTION = "selected_food_section"
+        private const val KEY_LOG_SECTION = "selected_log_section"
+        private const val KEY_PLAN_SECTION = "selected_plan_section"
         private const val KEY_MOBILITY_SECTION = "selected_mobility_section"
     }
 }

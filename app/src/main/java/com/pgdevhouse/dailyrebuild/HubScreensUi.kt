@@ -521,7 +521,9 @@ data class FoodHubActions(
 fun FoodHubScreen(
     state: FoodHubState,
     actions: FoodHubActions,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showHeader: Boolean = true,
+    showSectionTabs: Boolean = true
 ) {
     Column(
         modifier = modifier
@@ -530,17 +532,21 @@ fun FoodHubScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        HubScreenHeader(
-            title = "Food",
-            subtitle = "Today, meal planning, pantry essentials, and Walmart shopping each have a clear home.",
-            onOpenHistory = actions.onOpenHistory
-        )
+        if (showHeader) {
+            HubScreenHeader(
+                title = "Food",
+                subtitle = "Today, meal planning, pantry essentials, and Walmart shopping each have a clear home.",
+                onOpenHistory = actions.onOpenHistory
+            )
+        }
 
-        HubSectionTabs(
-            labels = listOf("Today", "Plan", "Pantry", "Shop"),
-            selected = state.selectedSection,
-            onSelected = actions.onSectionChange
-        )
+        if (showSectionTabs) {
+            HubSectionTabs(
+                labels = listOf("Today", "Plan", "Pantry", "Shop"),
+                selected = state.selectedSection,
+                onSelected = actions.onSectionChange
+            )
+        }
 
         when (state.selectedSection) {
             0 -> {
@@ -648,7 +654,8 @@ data class MobilityHubActions(
 fun MobilityHubScreen(
     state: MobilityHubState,
     actions: MobilityHubActions,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showHeader: Boolean = true
 ) {
     Column(
         modifier = modifier
@@ -657,11 +664,13 @@ fun MobilityHubScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        HubScreenHeader(
-            title = "Mobility",
-            subtitle = "Walking and intentional mobility are together without crowding the screen.",
-            onOpenHistory = actions.onOpenHistory
-        )
+        if (showHeader) {
+            HubScreenHeader(
+                title = "Mobility",
+                subtitle = "Walking and intentional mobility are together without crowding the screen.",
+                onOpenHistory = actions.onOpenHistory
+            )
+        }
         HubSectionTabs(
             labels = listOf("Today", "Routines", "History"),
             selected = state.selectedSection,
@@ -774,7 +783,8 @@ fun MeetingsHubScreen(
     onEditAttendance: (MeetingAttendance) -> Unit,
     onDeleteAttendance: (MeetingAttendance) -> Unit,
     onViewFullHistory: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showHeader: Boolean = true
 ) {
     Column(
         modifier = modifier
@@ -783,11 +793,13 @@ fun MeetingsHubScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        HubScreenHeader(
-            title = "Meetings",
-            subtitle = "A focused weekly goal with only this week’s attendance on the main screen.",
-            onOpenHistory = onOpenHistory
-        )
+        if (showHeader) {
+            HubScreenHeader(
+                title = "Meetings",
+                subtitle = "A focused weekly goal with only this week’s attendance on the main screen.",
+                onOpenHistory = onOpenHistory
+            )
+        }
         MeetingsTab(
             weeklyAttendance = weeklyAttendance,
             isSaving = isSaving,
@@ -834,7 +846,8 @@ fun HealthHubScreen(
     state: HealthHubState,
     actions: HealthHubActions,
     profileContent: @Composable () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showHeader: Boolean = true
 ) {
     var openFeature by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -845,11 +858,13 @@ fun HealthHubScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        HubScreenHeader(
-            title = "Health",
-            subtitle = "Appointments and quick logs first; records and settings open only when needed.",
-            onOpenHistory = actions.onOpenHistory
-        )
+        if (showHeader) {
+            HubScreenHeader(
+                title = "Health",
+                subtitle = "Appointments and quick logs first; records and settings open only when needed.",
+                onOpenHistory = actions.onOpenHistory
+            )
+        }
 
         CareAppointmentTrackerCard(
             appointments = state.appointments,

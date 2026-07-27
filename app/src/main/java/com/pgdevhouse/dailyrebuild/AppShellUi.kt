@@ -28,10 +28,10 @@ private data class DailyRebuildNavigationItem(
 
 private val dailyRebuildNavigationItems = listOf(
     DailyRebuildNavigationItem("Today", "⌂"),
-    DailyRebuildNavigationItem("Food", "F"),
-    DailyRebuildNavigationItem("Mobility", "M"),
-    DailyRebuildNavigationItem("Meetings", "G"),
-    DailyRebuildNavigationItem("Health", "+")
+    DailyRebuildNavigationItem("Log", "+"),
+    DailyRebuildNavigationItem("Plan", "P"),
+    DailyRebuildNavigationItem("Health", "H"),
+    DailyRebuildNavigationItem("Stats", "S")
 )
 
 @Composable
