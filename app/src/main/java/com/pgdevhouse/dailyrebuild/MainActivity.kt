@@ -65,6 +65,7 @@ import com.pgdevhouse.dailyrebuild.data.local.DailyRebuildDatabase
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
+import com.pgdevhouse.dailyrebuild.data.local.ShowerLog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Duration
@@ -143,6 +144,10 @@ fun DailyRebuildApp(
 
     val mobilitySessionDao = remember {
         database.mobilitySessionDao()
+    }
+
+    val showerLogDao = remember {
+        database.showerLogDao()
     }
 
     val healthProfileDao = remember {
@@ -329,8 +334,8 @@ fun DailyRebuildApp(
 
     var mealBeingEdited by remember {
         mutableStateOf<
-                SavedMealWithIngredients?
-                >(null)
+            SavedMealWithIngredients?
+        >(null)
     }
 
     var isCreatingFoodForMeal by rememberSaveable {
@@ -390,6 +395,20 @@ fun DailyRebuildApp(
 
     var isSavingMobility by remember {
         mutableStateOf(false)
+    }
+
+    /*
+     * Showering is a weekly habit, not a daily anchor.
+     * A date can contain at most one shower log.
+     */
+    var showeredToday by remember {
+        mutableStateOf(false)
+    }
+
+    var showerDatesThisWeek by remember {
+        mutableStateOf<List<String>>(
+            emptyList()
+        )
     }
 
     /*
@@ -512,7 +531,7 @@ fun DailyRebuildApp(
 
             if (
                 healthAvailability !=
-                HealthConnectAvailability.AVAILABLE
+                    HealthConnectAvailability.AVAILABLE
             ) {
                 hasHealthPermissions = false
                 hasLiveHealthActivity = false
@@ -649,6 +668,8 @@ fun DailyRebuildApp(
         journalText = ""
         foodEntries = emptyList()
         mobilitySessionsToday = emptyList()
+        showeredToday = false
+        showerDatesThisWeek = emptyList()
         savedActivitySnapshot = null
         hasLiveHealthActivity = false
         liveHealthActivity = HealthActivityData()
@@ -740,6 +761,32 @@ fun DailyRebuildApp(
                 mobilityCompleted = true
             }
 
+            val activeDate =
+                LocalDate.parse(todayDate)
+
+            val weekStart =
+                activeDate.minusDays(
+                    (activeDate.dayOfWeek.value - 1)
+                        .toLong()
+                )
+
+            val weekEnd =
+                weekStart.plusDays(6)
+
+            val weeklyShowerLogs =
+                showerLogDao.getLogsBetween(
+                    weekStart.toString(),
+                    weekEnd.toString()
+                )
+
+            showerDatesThisWeek =
+                weeklyShowerLogs.map { it.date }
+
+            showeredToday =
+                weeklyShowerLogs.any {
+                    it.date == todayDate
+                }
+
             foodEntries =
                 foodDao.getEntriesForDate(
                     todayDate
@@ -815,10 +862,21 @@ fun DailyRebuildApp(
 
     val totalWaterOunces =
         (plainReusableBottleCount + mioReusableBottleCount) * 24.0 +
-                (plainDisposableBottleCount + mioDisposableBottleCount) * 16.9
+            (plainDisposableBottleCount + mioDisposableBottleCount) * 16.9
 
     val totalCaloriesToday =
         foodEntries.sumOf { it.calories }
+
+    val showerCountThisWeek =
+        showerDatesThisWeek.size
+
+    val showerIsDueNow =
+        !showeredToday &&
+            showerCountThisWeek < 2 &&
+            runCatching {
+                LocalDate.parse(todayDate)
+                    .dayOfWeek.value >= 5
+            }.getOrDefault(false)
 
     val displayedActivity =
         when {
@@ -893,11 +951,17 @@ fun DailyRebuildApp(
                                 date
                             )
 
+                    val showerLog =
+                        showerLogDao.getLogByDate(
+                            date
+                        )
+
                     if (
                         record != null ||
                         entries.isNotEmpty() ||
                         activitySnapshot != null ||
-                        mobilitySessions.isNotEmpty()
+                        mobilitySessions.isNotEmpty() ||
+                        showerLog != null
                     ) {
                         loadedDays.add(
                             DailyHistoryDay(
@@ -907,7 +971,9 @@ fun DailyRebuildApp(
                                 activitySnapshot =
                                     activitySnapshot,
                                 mobilitySessions =
-                                    mobilitySessions
+                                    mobilitySessions,
+                                showerLogged =
+                                    showerLog != null
                             )
                         )
                     }
@@ -921,6 +987,62 @@ fun DailyRebuildApp(
                 )
             } finally {
                 isLoadingDailyHistory = false
+            }
+        }
+    }
+
+    fun logShowerToday() {
+        coroutineScope.launch {
+            try {
+                showerLogDao.save(
+                    ShowerLog(
+                        date = todayDate
+                    )
+                )
+
+                showeredToday = true
+
+                if (todayDate !in showerDatesThisWeek) {
+                    showerDatesThisWeek =
+                        (showerDatesThisWeek + todayDate)
+                            .sorted()
+                }
+
+                snackbarHostState.showSnackbar(
+                    message =
+                        "Shower logged for today."
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message =
+                        "Could not log today’s shower."
+                )
+            }
+        }
+    }
+
+    fun removeTodayShower() {
+        coroutineScope.launch {
+            try {
+                showerLogDao.deleteByDate(
+                    todayDate
+                )
+
+                showeredToday = false
+                showerDatesThisWeek =
+                    showerDatesThisWeek.filterNot {
+                        it == todayDate
+                    }
+
+                snackbarHostState.showSnackbar(
+                    message =
+                        "Today’s shower log removed."
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message =
+                        "Could not remove today’s shower."
+                )
             }
         }
     }
@@ -1034,7 +1156,7 @@ fun DailyRebuildApp(
 
                             originalServingSize =
                                 "${existingProduct.servingQuantity} " +
-                                        existingProduct.servingUnit
+                                    existingProduct.servingUnit
                         )
 
                     showManualFoodDialog = true
@@ -1094,7 +1216,7 @@ fun DailyRebuildApp(
                                 .showSnackbar(
                                     message =
                                         "Product not found. " +
-                                                "Enter its label manually."
+                                            "Enter its label manually."
                                 )
                         }
 
@@ -1115,7 +1237,7 @@ fun DailyRebuildApp(
                                 .showSnackbar(
                                     message =
                                         "Lookup failed. " +
-                                                "You can enter the label manually."
+                                            "You can enter the label manually."
                                 )
                         }
                     }
@@ -1223,7 +1345,7 @@ fun DailyRebuildApp(
                 val snapshotToSave =
                     when {
                         hasHealthPermissions &&
-                                hasLiveHealthActivity ->
+                            hasLiveHealthActivity ->
                             DailyActivitySnapshot(
                                 date = todayDate,
                                 steps =
@@ -1579,6 +1701,10 @@ fun DailyRebuildApp(
                                 mobilityCompleted,
                             painRecorded =
                                 painRecorded,
+                            showerDue =
+                                showerIsDueNow,
+                            showersThisWeek =
+                                showerCountThisWeek,
                             completedTasks =
                                 completedTasks,
                             isSaving =
@@ -1594,6 +1720,9 @@ fun DailyRebuildApp(
                             },
                             onOpenPain = {
                                 showQuickPainDialog = true
+                            },
+                            onLogShower = {
+                                logShowerToday()
                             },
                             onOpenAnchors = {
                                 showMoreToday = true
@@ -1623,7 +1752,9 @@ fun DailyRebuildApp(
                             waterOunces =
                                 totalWaterOunces,
                             mobilityCompleted =
-                                mobilityCompleted
+                                mobilityCompleted,
+                            showersThisWeek =
+                                showerCountThisWeek
                         )
 
                         TodayQuickActionsCard(
@@ -1700,12 +1831,12 @@ fun DailyRebuildApp(
                                     "$completedTasks of 4 complete",
                                 expanded =
                                     expandedTodaySection ==
-                                            "anchors",
+                                        "anchors",
                                 onClick = {
                                     expandedTodaySection =
                                         if (
                                             expandedTodaySection ==
-                                            "anchors"
+                                                "anchors"
                                         ) {
                                             null
                                         } else {
@@ -1716,7 +1847,7 @@ fun DailyRebuildApp(
 
                             if (
                                 expandedTodaySection ==
-                                "anchors"
+                                    "anchors"
                             ) {
                                 DailyTasksSection(
                                     foodRecorded =
@@ -1744,17 +1875,56 @@ fun DailyRebuildApp(
 
                             TodayDetailToggleRow(
                                 title =
+                                    "Showering",
+                                summary =
+                                    "$showerCountThisWeek this week · goal 2–3",
+                                expanded =
+                                    expandedTodaySection ==
+                                        "showering",
+                                onClick = {
+                                    expandedTodaySection =
+                                        if (
+                                            expandedTodaySection ==
+                                                "showering"
+                                        ) {
+                                            null
+                                        } else {
+                                            "showering"
+                                        }
+                                }
+                            )
+
+                            if (
+                                expandedTodaySection ==
+                                    "showering"
+                            ) {
+                                WeeklyShowerControls(
+                                    showerDates =
+                                        showerDatesThisWeek,
+                                    showeredToday =
+                                        showeredToday,
+                                    onLogToday = {
+                                        logShowerToday()
+                                    },
+                                    onRemoveToday = {
+                                        removeTodayShower()
+                                    }
+                                )
+                            }
+
+                            TodayDetailToggleRow(
+                                title =
                                     "Medication check-in",
                                 summary =
                                     "Morning and night reference checks",
                                 expanded =
                                     expandedTodaySection ==
-                                            "medication",
+                                        "medication",
                                 onClick = {
                                     expandedTodaySection =
                                         if (
                                             expandedTodaySection ==
-                                            "medication"
+                                                "medication"
                                         ) {
                                             null
                                         } else {
@@ -1765,7 +1935,7 @@ fun DailyRebuildApp(
 
                             if (
                                 expandedTodaySection ==
-                                "medication"
+                                    "medication"
                             ) {
                                 MedicationSection(
                                     morningAspirinTaken =
@@ -1819,12 +1989,12 @@ fun DailyRebuildApp(
                                     },
                                 expanded =
                                     expandedTodaySection ==
-                                            "journal",
+                                        "journal",
                                 onClick = {
                                     expandedTodaySection =
                                         if (
                                             expandedTodaySection ==
-                                            "journal"
+                                                "journal"
                                         ) {
                                             null
                                         } else {
@@ -1835,7 +2005,7 @@ fun DailyRebuildApp(
 
                             if (
                                 expandedTodaySection ==
-                                "journal"
+                                    "journal"
                             ) {
                                 JournalSection(
                                     journalText =
@@ -1884,6 +2054,19 @@ fun DailyRebuildApp(
                             title = "Food",
                             subtitle =
                                 "Log today’s meal, manage saved foods, and build reusable meals."
+                        )
+
+                        FoodHydrationCard(
+                            totalWaterOunces =
+                                totalWaterOunces,
+                            totalBottleCount =
+                                plainReusableBottleCount +
+                                    mioReusableBottleCount +
+                                    plainDisposableBottleCount +
+                                    mioDisposableBottleCount,
+                            onAddWater = {
+                                showQuickWaterDialog = true
+                            }
                         )
 
                         FoodSection(
@@ -2131,7 +2314,6 @@ fun DailyRebuildApp(
                                 plainReusableBottleCount++
                             }
 
-                            foodRecorded = true
                         },
                         modifier =
                             Modifier.fillMaxWidth(),
@@ -2149,7 +2331,6 @@ fun DailyRebuildApp(
                                 plainDisposableBottleCount++
                             }
 
-                            foodRecorded = true
                         },
                         modifier =
                             Modifier.fillMaxWidth(),
@@ -2161,9 +2342,9 @@ fun DailyRebuildApp(
 
                     if (
                         plainReusableBottleCount +
-                        mioReusableBottleCount +
-                        plainDisposableBottleCount +
-                        mioDisposableBottleCount >
+                            mioReusableBottleCount +
+                            plainDisposableBottleCount +
+                            mioDisposableBottleCount >
                         0
                     ) {
                         HorizontalDivider()
@@ -2331,8 +2512,8 @@ fun DailyRebuildApp(
                     Text(
                         text =
                             "Compare this with the digits printed " +
-                                    "under the barcode. Correct any digits " +
-                                    "before looking up the food."
+                                "under the barcode. Correct any digits " +
+                                "before looking up the food."
                     )
 
                     OutlinedTextField(
@@ -2353,8 +2534,8 @@ fun DailyRebuildApp(
                         supportingText = {
                             Text(
                                 "Food barcodes normally contain " +
-                                        "8, 12, or 13 digits. " +
-                                        "This one has ${pendingBarcodeText.length} digits."
+                                    "8, 12, or 13 digits. " +
+                                    "This one has ${pendingBarcodeText.length} digits."
                             )
                         },
 
@@ -2376,8 +2557,8 @@ fun DailyRebuildApp(
                 TextButton(
                     enabled =
                         pendingBarcodeText.length == 8 ||
-                                pendingBarcodeText.length == 12 ||
-                                pendingBarcodeText.length == 13,
+                            pendingBarcodeText.length == 12 ||
+                            pendingBarcodeText.length == 13,
 
                     onClick = {
                         val verifiedBarcode =
@@ -2494,7 +2675,7 @@ fun DailyRebuildApp(
                                                 }
 
                                                 totalAmount /
-                                                        product.servingQuantity
+                                                    product.servingQuantity
                                             }
                                         }
 
@@ -2528,27 +2709,27 @@ fun DailyRebuildApp(
                                         calories =
                                             product
                                                 .caloriesPerServing *
-                                                    servings,
+                                                servings,
 
                                         proteinGrams =
                                             product
                                                 .proteinGramsPerServing *
-                                                    servings,
+                                                servings,
 
                                         carbohydrateGrams =
                                             product
                                                 .carbohydrateGramsPerServing *
-                                                    servings,
+                                                servings,
 
                                         fatGrams =
                                             product
                                                 .fatGramsPerServing *
-                                                    servings,
+                                                servings,
 
                                         sodiumMilligrams =
                                             product
                                                 .sodiumMilligramsPerServing *
-                                                    servings
+                                                servings
                                     )
                                 }
 
@@ -2818,7 +2999,7 @@ fun DailyRebuildApp(
                         snackbarHostState.showSnackbar(
                             message =
                                 "Cannot delete ${product.name}. " +
-                                        "It is used by: $mealNames."
+                                    "It is used by: $mealNames."
                         )
                     } else {
                         savedFoodToDelete = product
@@ -2842,7 +3023,7 @@ fun DailyRebuildApp(
                 Text(
                     text =
                         "${product.name} will be removed from Saved Foods. " +
-                                "Past daily entries will never be deleted."
+                            "Past daily entries will never be deleted."
                 )
             },
 
@@ -2872,7 +3053,7 @@ fun DailyRebuildApp(
                                 snackbarHostState.showSnackbar(
                                     message =
                                         "Cannot delete ${product.name} because " +
-                                                "it is used by a current or past food entry."
+                                            "it is used by a current or past food entry."
                                 )
                             }
                         }
@@ -2931,11 +3112,20 @@ fun DailyRebuildApp(
                                 .deleteSessionsForDate(
                                     day.date
                                 )
+
+                            showerLogDao.deleteByDate(
+                                day.date
+                            )
                         }
 
                         dailyHistoryDays =
                             dailyHistoryDays.filterNot {
                                 it.date == day.date
+                            }
+
+                        showerDatesThisWeek =
+                            showerDatesThisWeek.filterNot {
+                                it == day.date
                             }
 
                         if (day.date == todayDate) {
@@ -2967,6 +3157,7 @@ fun DailyRebuildApp(
                             journalText = ""
                             savedActivitySnapshot = null
                             mobilitySessionsToday = emptyList()
+                            showeredToday = false
                         }
 
                         snackbarHostState.showSnackbar(
@@ -2999,7 +3190,7 @@ fun DailyRebuildApp(
 
             productOnlyMode =
                 isCreatingFoodForMeal ||
-                        isEditingSavedFood,
+                    isEditingSavedFood,
 
             dialogTitle =
                 if (isEditingSavedFood) {
@@ -3109,7 +3300,7 @@ fun DailyRebuildApp(
                                 .showSnackbar(
                                     message =
                                         "Saved food created. " +
-                                                "Choose it as a meal ingredient."
+                                            "Choose it as a meal ingredient."
                                 )
 
                             return@launch
@@ -3186,7 +3377,7 @@ fun DailyRebuildApp(
                                         isCreatingFoodForMeal
                                     ) {
                                         "Could not save food. The barcode may " +
-                                                "already belong to another saved food."
+                                            "already belong to another saved food."
                                     } else {
                                         "Could not add food."
                                     }
@@ -3308,12 +3499,15 @@ private fun TodayNextStepCard(
     waterOunces: Double,
     mobilityCompleted: Boolean,
     painRecorded: Boolean,
+    showerDue: Boolean,
+    showersThisWeek: Int,
     completedTasks: Int,
     isSaving: Boolean,
     onOpenFood: () -> Unit,
     onOpenWater: () -> Unit,
     onOpenMobility: () -> Unit,
     onOpenPain: () -> Unit,
+    onLogShower: () -> Unit,
     onOpenAnchors: () -> Unit,
     onSave: () -> Unit
 ) {
@@ -3353,6 +3547,14 @@ private fun TodayNextStepCard(
                 "A quick back and shin check keeps the day measurable."
             buttonText = "Log Pain"
             onClick = onOpenPain
+        }
+
+        showerDue -> {
+            title = "Shower goal needs attention"
+            description =
+                "$showersThisWeek of 2 minimum showers logged this week."
+            buttonText = "Log Today’s Shower"
+            onClick = onLogShower
         }
 
         completedTasks < 4 -> {
@@ -3412,7 +3614,8 @@ private fun TodayOverviewCard(
     calories: Double,
     calorieGoal: Int?,
     waterOunces: Double,
-    mobilityCompleted: Boolean
+    mobilityCompleted: Boolean,
+    showersThisWeek: Int
 ) {
     val progress =
         if (totalTasks <= 0) {
@@ -3530,9 +3733,9 @@ private fun TodayOverviewCard(
             )
 
             RebuildMetricPill(
-                label = "anchors",
+                label = "showers this week",
                 value =
-                    "$completedTasks / $totalTasks",
+                    "$showersThisWeek / 2 minimum",
                 modifier =
                     Modifier.weight(1f),
                 color =
@@ -3677,7 +3880,7 @@ private fun CompactActivityCard(
             }
 
             availability !=
-                    HealthConnectAvailability.AVAILABLE -> {
+                HealthConnectAvailability.AVAILABLE -> {
                 Text(
                     text =
                         "Health Connect is not currently available. Open More to install, update, or review access.",
@@ -4284,8 +4487,8 @@ private fun ActivitySection(
                     Text(
                         text =
                             "Connect Health Connect to show activity " +
-                                    "recorded by Google Fit, your phone, " +
-                                    "or a compatible wearable.",
+                                "recorded by Google Fit, your phone, " +
+                                "or a compatible wearable.",
                         style =
                             MaterialTheme
                                 .typography
@@ -4309,7 +4512,7 @@ private fun ActivitySection(
                 Text(
                     text =
                         "Health Connect must be installed or updated " +
-                                "before Daily Rebuild can read activity.",
+                            "before Daily Rebuild can read activity.",
                     color =
                         MaterialTheme
                             .colorScheme
@@ -4327,7 +4530,7 @@ private fun ActivitySection(
                 Text(
                     text =
                         "Health Connect is not available on this device. " +
-                                "Daily Rebuild will continue working without it.",
+                            "Daily Rebuild will continue working without it.",
                     color =
                         MaterialTheme
                             .colorScheme
@@ -4339,7 +4542,7 @@ private fun ActivitySection(
         Text(
             text =
                 "Daily Rebuild has read-only access. Save Today stores " +
-                        "a separate snapshot for your calendar and future stats.",
+                    "a separate snapshot for your calendar and future stats.",
             style = MaterialTheme.typography.bodySmall,
             color =
                 MaterialTheme
@@ -4497,7 +4700,7 @@ private fun WaterSection(
         plainDisposableBottleCount + mioDisposableBottleCount
     val totalOunces =
         reusableBottleTotal * 24.0 +
-                disposableBottleTotal * 16.9
+            disposableBottleTotal * 16.9
 
     RebuildSectionCard(
         title = "Hydration",

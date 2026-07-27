@@ -20,9 +20,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HealthMeasurement::class,
         PainActivityLog::class,
         MedicationEntry::class,
-        CalorieGoalChange::class
+        CalorieGoalChange::class,
+        ShowerLog::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class DailyRebuildDatabase :
@@ -211,7 +212,8 @@ abstract class DailyRebuildDatabase :
                                 MIGRATION_4_5,
                                 MIGRATION_5_6,
                                 MIGRATION_6_7,
-                                MIGRATION_7_8
+                                MIGRATION_7_8,
+                                MIGRATION_8_9
                             )
                             .build()
 
@@ -326,4 +328,6 @@ abstract class DailyRebuildDatabase :
     abstract fun mobilitySessionDao(): MobilitySessionDao
 
     abstract fun healthProfileDao(): HealthProfileDao
+
+    abstract fun showerLogDao(): ShowerLogDao
 }

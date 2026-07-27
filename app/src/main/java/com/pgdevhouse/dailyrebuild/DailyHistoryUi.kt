@@ -59,7 +59,8 @@ data class DailyHistoryDay(
     val record: DailyRecord?,
     val foodEntries: List<FoodLogEntry>,
     val activitySnapshot: DailyActivitySnapshot? = null,
-    val mobilitySessions: List<MobilitySession> = emptyList()
+    val mobilitySessions: List<MobilitySession> = emptyList(),
+    val showerLogged: Boolean = false
 )
 
 @Composable
@@ -161,7 +162,7 @@ fun DailyHistoryDialog(
                         "Delete ${formatHistoryDate(pendingDeletionDay.date)}? " +
                             "This permanently removes the saved checklist, " +
                             "water, pain, medications, journal, activity snapshot, " +
-                            "mobility sessions, individual foods, and logged meals for this date. Saved Foods and " +
+                            "mobility sessions, shower log, individual foods, and logged meals for this date. Saved Foods and " +
                             "Saved Meal templates will not be deleted."
                 )
             },
@@ -453,7 +454,8 @@ private fun CalendarDayCell(
     val hasSavedRecord =
         historyDay?.record != null ||
             historyDay?.activitySnapshot != null ||
-            historyDay?.mobilitySessions?.isNotEmpty() == true
+            historyDay?.mobilitySessions?.isNotEmpty() == true ||
+            historyDay?.showerLogged == true
     val hasFood = historyDay?.foodEntries?.isNotEmpty() == true
     val isToday = date == LocalDate.now()
     val containerColor = when {
@@ -542,7 +544,8 @@ private fun DailyHistoryDetailPage(
             val hasSavedData =
                 day.record != null ||
                     day.activitySnapshot != null ||
-                    day.mobilitySessions.isNotEmpty()
+                    day.mobilitySessions.isNotEmpty() ||
+                    day.showerLogged
 
             RebuildStatusBadge(
                 text =
@@ -569,7 +572,7 @@ private fun DailyHistoryDetailPage(
             RebuildInsetPanel {
                 Text("Checklist not saved", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "The daily checklist was not saved, but the day's logged food, activity, or mobility information remains available below.",
+                    "The daily checklist was not saved, but the day's logged food, activity, mobility, or shower information remains available below.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -591,6 +594,10 @@ private fun DailyHistoryDetailPage(
             HistoryMobilityCard(
                 sessions = day.mobilitySessions
             )
+        }
+
+        if (day.showerLogged) {
+            HistoryShowerCard()
         }
 
         HistoryFoodCard(entries = day.foodEntries)
@@ -693,6 +700,36 @@ private fun HistoryActivityCard(
             color =
                 MaterialTheme
                     .colorScheme
+                    .onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun HistoryShowerCard() {
+    HistorySectionCard(
+        title = "Showering"
+    ) {
+        RebuildMetricPill(
+            label = "status",
+            value = "Showered",
+            modifier = Modifier.fillMaxWidth(),
+            color =
+                MaterialTheme.colorScheme
+                    .secondaryContainer,
+            contentColor =
+                MaterialTheme.colorScheme
+                    .onSecondaryContainer
+        )
+
+        Text(
+            text =
+                "This date counts toward the weekly goal of 2–3 showers.",
+            style =
+                MaterialTheme.typography
+                    .bodySmall,
+            color =
+                MaterialTheme.colorScheme
                     .onSurfaceVariant
         )
     }
