@@ -89,6 +89,8 @@ enum class DailyHistoryFilter(
 @Composable
 fun DailyHistoryDialog(
     days: List<DailyHistoryDay>,
+    selectedFilter: DailyHistoryFilter,
+    onFilterChange: (DailyHistoryFilter) -> Unit,
     isLoading: Boolean,
     isDeletingDay: Boolean,
     onDeleteDay: (DailyHistoryDay) -> Unit,
@@ -107,15 +109,6 @@ fun DailyHistoryDialog(
     var dayPendingDeletion by rememberSaveable {
         mutableStateOf<String?>(null)
     }
-
-    var selectedFilterName by rememberSaveable {
-        mutableStateOf(DailyHistoryFilter.ALL.name)
-    }
-
-    val selectedFilter =
-        runCatching {
-            DailyHistoryFilter.valueOf(selectedFilterName)
-        }.getOrDefault(DailyHistoryFilter.ALL)
 
     val filteredDays =
         days.filter { day ->
@@ -152,7 +145,7 @@ fun DailyHistoryDialog(
                     allDayCount = days.size,
                     selectedFilter = selectedFilter,
                     onFilterChange = { filter ->
-                        selectedFilterName = filter.name
+                        onFilterChange(filter)
                         selectedDate = null
                     },
                     isLoading = isLoading,

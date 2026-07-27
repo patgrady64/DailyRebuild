@@ -34,6 +34,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.pgdevhouse.dailyrebuild.data.local.PantryEssential
 import com.pgdevhouse.dailyrebuild.data.local.PantryEssentialStatus
+import com.pgdevhouse.dailyrebuild.domain.WALMART_ORDER_MINIMUM_DOLLARS
+import com.pgdevhouse.dailyrebuild.domain.summarizePantryShopping
 import java.util.Locale
 
 private val pantryCategories = listOf(
@@ -462,9 +464,10 @@ fun PantryShopStagingSection(
     onOpenPantry: () -> Unit,
     onMarkAllPurchased: () -> Unit
 ) {
-    val needed = items.filter { it.isNeeded }
-    val knownTotal = needed.mapNotNull { it.expectedPrice }.sum()
-    val unknownPriceCount = needed.count { it.expectedPrice == null }
+    val shoppingSummary = summarizePantryShopping(items)
+    val needed = shoppingSummary.requiredItems
+    val knownTotal = shoppingSummary.knownRequiredCost
+    val unknownPriceCount = shoppingSummary.unknownPriceCount
 
     Column(
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -500,12 +503,12 @@ fun PantryShopStagingSection(
                 )
             }
 
-            val remaining = (35.0 - knownTotal).coerceAtLeast(0.0)
+            val remaining = shoppingSummary.dollarsRemainingBeforeMinimum
             Text(
                 text = if (needed.isEmpty()) {
                     "No pantry essentials are currently required."
                 } else if (remaining > 0.0) {
-                    "Known required items leave ${String.format(Locale.US, "$%.2f", remaining)} before the $35 order minimum. Meal foods will fill the rest after the optimizer is added."
+                    "Known required items leave ${String.format(Locale.US, "$%.2f", remaining)} before the ${String.format(Locale.US, "$%.0f", WALMART_ORDER_MINIMUM_DOLLARS)} order minimum. Meal foods will fill the rest after the optimizer is added."
                 } else {
                     "Known required essentials already meet the $35 order minimum."
                 },

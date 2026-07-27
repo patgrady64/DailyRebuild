@@ -136,4 +136,14 @@ interface FoodDao {
     suspend fun deleteFoodEntriesByMealLogId(
         mealLogId: String
     )
+
+    @Query(
+        """
+        DELETE FROM food_log_entries
+        WHERE date = :date
+        """
+    )
+    suspend fun deleteEntriesForDate(
+        date: String
+    )
 }

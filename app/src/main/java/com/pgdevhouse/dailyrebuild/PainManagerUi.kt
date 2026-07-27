@@ -21,7 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import kotlin.math.max
+import com.pgdevhouse.dailyrebuild.domain.recordDailyHighestPain
 
 @Composable
 fun HighestPainDialog(
@@ -99,7 +99,7 @@ fun HighestPainDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    onSave(max(currentHighestPain, selectedPain))
+                    onSave(recordDailyHighestPain(currentHighestPain, selectedPain))
                 }
             ) {
                 Text(if (wasRecordedToday) "Update Highest" else "Save")

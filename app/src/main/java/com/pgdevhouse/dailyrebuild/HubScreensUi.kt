@@ -47,9 +47,9 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /*
- * Screen models keep the large MainActivity state holder from also becoming
- * the renderer for every feature. MainActivity owns data and orchestration;
- * these files own layout and interaction hierarchy.
+ * Screen models keep the app coordinator from also becoming the renderer for
+ * every feature. ViewModels and repositories own durable feature state and
+ * data access; these files own layout and interaction hierarchy.
  */
 data class TodayScreenState(
     val date: String,
@@ -625,6 +625,7 @@ private fun FoodPlanSection(
 
 /* MOBILITY */
 data class MobilityHubState(
+    val selectedSection: Int,
     val availability: HealthConnectAvailability,
     val hasPermissions: Boolean,
     val isLoadingActivity: Boolean,
@@ -635,6 +636,7 @@ data class MobilityHubState(
 )
 
 data class MobilityHubActions(
+    val onSectionChange: (Int) -> Unit,
     val onOpenHistory: () -> Unit,
     val onRefresh: () -> Unit,
     val onManageHealth: () -> Unit,
@@ -648,8 +650,6 @@ fun MobilityHubScreen(
     actions: MobilityHubActions,
     modifier: Modifier = Modifier
 ) {
-    var section by rememberSaveable { mutableStateOf(0) }
-
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -664,11 +664,11 @@ fun MobilityHubScreen(
         )
         HubSectionTabs(
             labels = listOf("Today", "Routines", "History"),
-            selected = section,
-            onSelected = { section = it }
+            selected = state.selectedSection,
+            onSelected = actions.onSectionChange
         )
 
-        when (section) {
+        when (state.selectedSection) {
             0 -> {
                 MobilityActivitySummary(state, actions)
                 RebuildSectionCard(
@@ -683,7 +683,7 @@ fun MobilityHubScreen(
                         }
                     )
                     Button(
-                        onClick = { section = 1 },
+                        onClick = { actions.onSectionChange(1) },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Start or Quick Log Mobility") }
                 }

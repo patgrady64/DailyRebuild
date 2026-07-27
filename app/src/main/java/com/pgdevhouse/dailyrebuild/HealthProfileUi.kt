@@ -17,12 +17,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,20 +35,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.pgdevhouse.dailyrebuild.data.local.CalorieGoalChange
-import com.pgdevhouse.dailyrebuild.data.local.DailyRebuildDatabase
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurementType
 import com.pgdevhouse.dailyrebuild.data.local.HealthProfile
-import com.pgdevhouse.dailyrebuild.data.local.HealthProfileDao
 import com.pgdevhouse.dailyrebuild.data.local.MedicationEntry
-import com.pgdevhouse.dailyrebuild.data.local.PainActivityLog
+import com.pgdevhouse.dailyrebuild.data.repository.DailyRebuildRepositories
+import com.pgdevhouse.dailyrebuild.data.repository.FoodRepository
+import com.pgdevhouse.dailyrebuild.data.repository.HealthProfileRepository
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.Period
@@ -61,7 +58,6 @@ import kotlin.math.roundToInt
 private data class HealthFeatureData(
     val profile: HealthProfile,
     val measurements: List<HealthMeasurement>,
-    val painLogs: List<PainActivityLog>,
     val medications: List<MedicationEntry>,
     val goalChanges: List<CalorieGoalChange>,
     val averageCalories: Int?,
@@ -74,14 +70,11 @@ private val healthDisplayDateFormatter =
     DateTimeFormatter.ofPattern("MMM d, yyyy")
 
 @Composable
-fun HealthProfileFeature() {
-    val context = LocalContext.current
-    val database = remember {
-        DailyRebuildDatabase.getDatabase(context)
-    }
-    val healthDao = remember {
-        database.healthProfileDao()
-    }
+fun HealthProfileFeature(
+    repositories: DailyRebuildRepositories
+) {
+    val healthRepository = repositories.healthProfile
+    val foodRepository = repositories.food
     val scope = rememberCoroutineScope()
 
     var showProfile by rememberSaveable {
@@ -101,8 +94,8 @@ fun HealthProfileFeature() {
         scope.launch {
             isLoading = true
             data = loadHealthFeatureData(
-                healthDao = healthDao,
-                database = database
+                healthRepository = healthRepository,
+                foodRepository = foodRepository
             )
             isLoading = false
         }
@@ -199,8 +192,8 @@ fun HealthProfileFeature() {
     if (showProfile && data != null) {
         HealthProfileDialog(
             initialData = data!!,
-            healthDao = healthDao,
-            database = database,
+            healthRepository = healthRepository,
+            foodRepository = foodRepository,
             onDismiss = {
                 showProfile = false
                 refreshKey++
@@ -213,17 +206,17 @@ fun HealthProfileFeature() {
 }
 
 private suspend fun loadHealthFeatureData(
-    healthDao: HealthProfileDao,
-    database: DailyRebuildDatabase
+    healthRepository: HealthProfileRepository,
+    foodRepository: FoodRepository
 ): HealthFeatureData {
-    var profile = healthDao.getProfile()
+    var profile = healthRepository.getProfile()
         ?: HealthProfile().also {
-            healthDao.saveProfile(it)
+            healthRepository.saveProfile(it)
         }
 
     if (!profile.medicationImportCompleted) {
-        if (healthDao.countMedications() == 0) {
-            healthDao.saveMedications(
+        if (healthRepository.countMedications() == 0) {
+            healthRepository.saveMedications(
                 defaultMedicationEntries()
             )
         }
@@ -232,13 +225,12 @@ private suspend fun loadHealthFeatureData(
             medicationImportCompleted = true,
             updatedAt = System.currentTimeMillis()
         )
-        healthDao.saveProfile(profile)
+        healthRepository.saveProfile(profile)
     }
 
-    val measurements = healthDao.getAllMeasurements()
-    val painLogs = healthDao.getPainActivityLogs()
-    val medications = healthDao.getMedications()
-    val goalChanges = healthDao.getCalorieGoalChanges()
+    val measurements = healthRepository.getAllMeasurements()
+    val medications = healthRepository.getMedications()
+    val goalChanges = healthRepository.getCalorieGoalChanges()
 
     var totalCalories = 0.0
     var loggedDays = 0
@@ -246,7 +238,7 @@ private suspend fun loadHealthFeatureData(
 
     for (offset in 0L until 7L) {
         val date = today.minusDays(offset).toString()
-        val entries = database.foodDao().getEntriesForDate(date)
+        val entries = foodRepository.getEntriesForDate(date)
 
         if (entries.isNotEmpty()) {
             loggedDays++
@@ -270,7 +262,6 @@ private suspend fun loadHealthFeatureData(
     return HealthFeatureData(
         profile = profile,
         measurements = measurements,
-        painLogs = painLogs,
         medications = medications,
         goalChanges = goalChanges,
         averageCalories = averageCalories,
@@ -308,8 +299,8 @@ private fun calculateWeeklyWeightChange(
 @Composable
 private fun HealthProfileDialog(
     initialData: HealthFeatureData,
-    healthDao: HealthProfileDao,
-    database: DailyRebuildDatabase,
+    healthRepository: HealthProfileRepository,
+    foodRepository: FoodRepository,
     onDismiss: () -> Unit,
     onDataChanged: () -> Unit
 ) {
@@ -327,9 +318,6 @@ private fun HealthProfileDialog(
     var showMeasurementType by remember {
         mutableStateOf<String?>(null)
     }
-    var showPainLogEditor by remember {
-        mutableStateOf(false)
-    }
     var medicationBeingEdited by remember {
         mutableStateOf<MedicationEntry?>(null)
     }
@@ -341,9 +329,6 @@ private fun HealthProfileDialog(
     }
     var measurementPendingDelete by remember {
         mutableStateOf<HealthMeasurement?>(null)
-    }
-    var painLogPendingDelete by remember {
-        mutableStateOf<PainActivityLog?>(null)
     }
 
     var birthDate by rememberSaveable {
@@ -392,8 +377,8 @@ private fun HealthProfileDialog(
         scope.launch {
             isWorking = true
             data = loadHealthFeatureData(
-                healthDao = healthDao,
-                database = database
+                healthRepository = healthRepository,
+                foodRepository = foodRepository
             )
             statusMessage = message
             isWorking = false
@@ -495,7 +480,7 @@ private fun HealthProfileDialog(
                             } else {
                                 scope.launch {
                                     isWorking = true
-                                    healthDao.saveProfile(
+                                    healthRepository.saveProfile(
                                         data.profile.copy(
                                             birthDate = birthDate,
                                             heightInches = parsedHeight,
@@ -533,13 +518,13 @@ private fun HealthProfileDialog(
                                 scope.launch {
                                     isWorking = true
                                     val previous = data.profile.currentCalorieGoal
-                                    healthDao.saveProfile(
+                                    healthRepository.saveProfile(
                                         data.profile.copy(
                                             currentCalorieGoal = newGoal,
                                             updatedAt = System.currentTimeMillis()
                                         )
                                     )
-                                    healthDao.addCalorieGoalChange(
+                                    healthRepository.addCalorieGoalChange(
                                         CalorieGoalChange(
                                             changedDate = LocalDate.now().toString(),
                                             previousGoal = previous,
@@ -606,24 +591,9 @@ private fun HealthProfileDialog(
             },
             onSave = { measurement ->
                 scope.launch {
-                    healthDao.addMeasurement(measurement)
+                    healthRepository.addMeasurement(measurement)
                     showMeasurementType = null
                     reload("Measurement saved.")
-                }
-            }
-        )
-    }
-
-    if (showPainLogEditor) {
-        PainActivityEditorDialog(
-            onDismiss = {
-                showPainLogEditor = false
-            },
-            onSave = { log ->
-                scope.launch {
-                    healthDao.addPainActivityLog(log)
-                    showPainLogEditor = false
-                    reload("Pain and activity entry saved.")
                 }
             }
         )
@@ -638,7 +608,7 @@ private fun HealthProfileDialog(
             },
             onSave = { medication ->
                 scope.launch {
-                    healthDao.saveMedication(medication)
+                    healthRepository.saveMedication(medication)
                     showMedicationEditor = false
                     medicationBeingEdited = null
                     reload("Medication reference saved.")
@@ -664,7 +634,7 @@ private fun HealthProfileDialog(
                 TextButton(
                     onClick = {
                         scope.launch {
-                            healthDao.deleteMedication(medication)
+                            healthRepository.deleteMedication(medication)
                             medicationPendingDelete = null
                             reload("Medication reference deleted.")
                         }
@@ -700,7 +670,7 @@ private fun HealthProfileDialog(
                 TextButton(
                     onClick = {
                         scope.launch {
-                            healthDao.deleteMeasurement(measurement)
+                            healthRepository.deleteMeasurement(measurement)
                             measurementPendingDelete = null
                             reload("Measurement deleted.")
                         }
@@ -721,41 +691,7 @@ private fun HealthProfileDialog(
         )
     }
 
-    painLogPendingDelete?.let { log ->
-        AlertDialog(
-            onDismissRequest = {
-                painLogPendingDelete = null
-            },
-            title = {
-                Text("Delete pain entry?")
-            },
-            text = {
-                Text("This removes the selected local activity comparison.")
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        scope.launch {
-                            healthDao.deletePainActivityLog(log)
-                            painLogPendingDelete = null
-                            reload("Pain entry deleted.")
-                        }
-                    }
-                ) {
-                    Text("Delete")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        painLogPendingDelete = null
-                    }
-                ) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
+
 }
 
 @Composable
@@ -1177,77 +1113,6 @@ private fun MeasurementSection(
 }
 
 @Composable
-private fun PainActivitySection(
-    logs: List<PainActivityLog>,
-    onAdd: () -> Unit,
-    onDelete: (PainActivityLog) -> Unit
-) {
-    RebuildSectionCard(
-        title = "Pain before and after activity",
-        subtitle =
-            "Compare mobility, walking, showering, dishes, sweeping, mopping, or another difficult activity.",
-        accentColor = RebuildAmber
-    ) {
-        Button(
-            onClick = onAdd,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Text("Log activity and pain")
-        }
-
-        if (logs.isEmpty()) {
-            Text(
-                text = "No before-and-after comparisons recorded yet.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            logs.take(10).forEach { log ->
-                RebuildInsetPanel {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text =
-                                    "${log.activityType}: ${log.painBefore}/10 → ${log.painAfter}/10",
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text =
-                                    listOfNotNull(
-                                        log.bodyArea.takeIf { it.isNotBlank() },
-                                        log.durationMinutes?.let { "$it min" },
-                                        displayHealthDate(log.recordedDate)
-                                    ).joinToString(" • "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            if (log.notes.isNotBlank()) {
-                                Text(
-                                    text = log.notes,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        }
-                        TextButton(
-                            onClick = {
-                                onDelete(log)
-                            }
-                        ) {
-                            Text("Delete")
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun MedicationReferenceSection(
     medications: List<MedicationEntry>,
     onAdd: () -> Unit,
@@ -1517,221 +1382,6 @@ private fun NumericField(
             keyboardType = KeyboardType.Decimal
         )
     )
-}
-
-@Composable
-private fun PainActivityEditorDialog(
-    onDismiss: () -> Unit,
-    onSave: (PainActivityLog) -> Unit
-) {
-    val presetActivities = listOf(
-        "Mobility",
-        "Walking",
-        "Showering",
-        "Dishes",
-        "Sweeping",
-        "Mopping",
-        "Other"
-    )
-
-    var date by rememberSaveable {
-        mutableStateOf(LocalDate.now().toString())
-    }
-    var activityType by rememberSaveable {
-        mutableStateOf("Mobility")
-    }
-    var customActivity by rememberSaveable {
-        mutableStateOf("")
-    }
-    var bodyArea by rememberSaveable {
-        mutableStateOf("Back and legs")
-    }
-    var painBefore by rememberSaveable {
-        mutableIntStateOf(0)
-    }
-    var painAfter by rememberSaveable {
-        mutableIntStateOf(0)
-    }
-    var duration by rememberSaveable {
-        mutableStateOf("")
-    }
-    var notes by rememberSaveable {
-        mutableStateOf("")
-    }
-    var error by remember {
-        mutableStateOf<String?>(null)
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Pain before and after activity") },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedTextField(
-                    value = date,
-                    onValueChange = { date = it },
-                    label = { Text("Date") },
-                    supportingText = { Text("YYYY-MM-DD") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-
-                Text(
-                    text = "Activity",
-                    fontWeight = FontWeight.SemiBold
-                )
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    presetActivities.chunked(3).forEach { rowItems ->
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            rowItems.forEach { item ->
-                                FilterChip(
-                                    selected = activityType == item,
-                                    onClick = {
-                                        activityType = item
-                                    },
-                                    label = { Text(item) }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                if (activityType == "Other") {
-                    OutlinedTextField(
-                        value = customActivity,
-                        onValueChange = { customActivity = it },
-                        label = { Text("Activity name") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                OutlinedTextField(
-                    value = bodyArea,
-                    onValueChange = { bodyArea = it },
-                    label = { Text("Pain area") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                PainComparisonSlider(
-                    label = "Pain before",
-                    value = painBefore,
-                    onValueChange = { painBefore = it }
-                )
-                PainComparisonSlider(
-                    label = "Pain after",
-                    value = painAfter,
-                    onValueChange = { painAfter = it }
-                )
-
-                OutlinedTextField(
-                    value = duration,
-                    onValueChange = { duration = it },
-                    label = { Text("Duration minutes (optional)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number
-                    )
-                )
-
-                OutlinedTextField(
-                    value = notes,
-                    onValueChange = { notes = it },
-                    label = { Text("Notes (optional)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 2
-                )
-
-                error?.let {
-                    Text(
-                        text = it,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val validDate = runCatching {
-                        LocalDate.parse(date)
-                    }.getOrNull()
-                    val resolvedActivity =
-                        if (activityType == "Other") {
-                            customActivity.trim()
-                        } else {
-                            activityType
-                        }
-
-                    when {
-                        validDate == null -> {
-                            error = "Use YYYY-MM-DD for the date."
-                        }
-                        resolvedActivity.isBlank() -> {
-                            error = "Enter an activity name."
-                        }
-                        else -> {
-                            onSave(
-                                PainActivityLog(
-                                    recordedDate = date,
-                                    activityType = resolvedActivity,
-                                    bodyArea = bodyArea.trim(),
-                                    painBefore = painBefore,
-                                    painAfter = painAfter,
-                                    durationMinutes = duration.toIntOrNull(),
-                                    notes = notes.trim()
-                                )
-                            )
-                        }
-                    }
-                }
-            ) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-@Composable
-private fun PainComparisonSlider(
-    label: String,
-    value: Int,
-    onValueChange: (Int) -> Unit
-) {
-    Column {
-        Row(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = label,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                text = "$value/10",
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-        Slider(
-            value = value.toFloat(),
-            onValueChange = {
-                onValueChange(it.roundToInt())
-            },
-            valueRange = 0f..10f,
-            steps = 9
-        )
-    }
 }
 
 @Composable
