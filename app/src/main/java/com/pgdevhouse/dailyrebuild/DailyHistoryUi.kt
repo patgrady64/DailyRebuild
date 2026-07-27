@@ -40,6 +40,7 @@ import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
+import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -64,7 +65,8 @@ data class DailyHistoryDay(
     val activitySnapshot: DailyActivitySnapshot? = null,
     val mobilitySessions: List<MobilitySession> = emptyList(),
     val showerLogged: Boolean = false,
-    val migraineLogs: List<MigraineLog> = emptyList()
+    val migraineLogs: List<MigraineLog> = emptyList(),
+    val meetingAttendance: List<MeetingAttendance> = emptyList()
 )
 
 @Composable
@@ -166,7 +168,7 @@ fun DailyHistoryDialog(
                         "Delete ${formatHistoryDate(pendingDeletionDay.date)}? " +
                             "This permanently removes the saved checklist, " +
                             "water, pain, medications, journal, activity snapshot, " +
-                            "mobility sessions, shower log, migraine events, individual foods, and logged meals for this date. Saved Foods and " +
+                            "mobility sessions, shower log, migraine events, meeting attendance, individual foods, and logged meals for this date. Saved Foods and " +
                             "Saved Meal templates will not be deleted."
                 )
             },
@@ -460,7 +462,8 @@ private fun CalendarDayCell(
             historyDay?.activitySnapshot != null ||
             historyDay?.mobilitySessions?.isNotEmpty() == true ||
             historyDay?.showerLogged == true ||
-            historyDay?.migraineLogs?.isNotEmpty() == true
+            historyDay?.migraineLogs?.isNotEmpty() == true ||
+            historyDay?.meetingAttendance?.isNotEmpty() == true
     val hasFood = historyDay?.foodEntries?.isNotEmpty() == true
     val isToday = date == LocalDate.now()
     val containerColor = when {
@@ -551,7 +554,8 @@ private fun DailyHistoryDetailPage(
                     day.activitySnapshot != null ||
                     day.mobilitySessions.isNotEmpty() ||
                     day.showerLogged ||
-                    day.migraineLogs.isNotEmpty()
+                    day.migraineLogs.isNotEmpty() ||
+                    day.meetingAttendance.isNotEmpty()
 
             RebuildStatusBadge(
                 text =
@@ -578,7 +582,7 @@ private fun DailyHistoryDetailPage(
             RebuildInsetPanel {
                 Text("Checklist not saved", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "The daily checklist was not saved, but the day's logged food, activity, mobility, shower, or migraine information remains available below.",
+                    "The daily checklist was not saved, but the day's logged food, activity, mobility, shower, migraine, or meeting information remains available below.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -609,6 +613,12 @@ private fun DailyHistoryDetailPage(
         if (day.migraineLogs.isNotEmpty()) {
             HistoryMigraineCard(
                 logs = day.migraineLogs
+            )
+        }
+
+        if (day.meetingAttendance.isNotEmpty()) {
+            HistoryMeetingCard(
+                attendance = day.meetingAttendance
             )
         }
 
@@ -774,6 +784,55 @@ private fun HistoryMigraineCard(
                     if (log.notes.isNotBlank()) {
                         Text(
                             text = log.notes,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+    }
+}
+
+@Composable
+private fun HistoryMeetingCard(
+    attendance: List<MeetingAttendance>
+) {
+    HistorySectionCard(
+        title = "Recovery Meetings"
+    ) {
+        attendance.sortedBy { it.startedAt }
+            .forEach { item ->
+                RebuildInsetPanel {
+                    Text(
+                        text = item.meetingName,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Text(
+                        text = formatMeetingHistoryTime(item.startedAt) +
+                            " · ${item.durationMinutes} minutes · ${item.role}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    val location = listOf(
+                        item.address,
+                        listOf(item.city, item.state, item.zipCode)
+                            .filter(String::isNotBlank)
+                            .joinToString(" ")
+                    ).filter(String::isNotBlank).joinToString(" · ")
+
+                    if (location.isNotBlank()) {
+                        Text(
+                            text = location,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    if (item.notes.isNotBlank()) {
+                        Text(
+                            text = item.notes,
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -1275,6 +1334,19 @@ private fun calculateHistoryWaterOunces(
 
     return reusableCount * 24.0 +
         disposableCount * 16.9
+}
+
+private fun formatMeetingHistoryTime(
+    startedAt: Long
+): String {
+    return Instant.ofEpochMilli(startedAt)
+        .atZone(ZoneId.systemDefault())
+        .format(
+            DateTimeFormatter.ofPattern(
+                "h:mm a",
+                Locale.US
+            )
+        )
 }
 
 private fun formatMigraineHistoryTime(

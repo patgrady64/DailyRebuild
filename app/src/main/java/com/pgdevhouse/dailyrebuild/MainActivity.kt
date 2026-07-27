@@ -39,6 +39,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -67,6 +69,8 @@ import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import com.pgdevhouse.dailyrebuild.data.local.ShowerLog
 import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
+import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
+import com.pgdevhouse.dailyrebuild.data.local.SavedMeeting
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Duration
@@ -153,6 +157,10 @@ fun DailyRebuildApp(
 
     val migraineLogDao = remember {
         database.migraineLogDao()
+    }
+
+    val meetingDao = remember {
+        database.meetingDao()
     }
 
     val healthProfileDao = remember {
@@ -428,6 +436,67 @@ fun DailyRebuildApp(
     }
 
     var showMigraineLogDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    /*
+     * Recovery meetings are weekly support events rather than daily anchors.
+     * SavedMeeting stores reusable location details; MeetingAttendance stores
+     * one historical attendance snapshot.
+     */
+    var savedMeetings by remember {
+        mutableStateOf<List<SavedMeeting>>(emptyList())
+    }
+
+    var meetingAttendanceHistory by remember {
+        mutableStateOf<List<MeetingAttendance>>(emptyList())
+    }
+
+    var showMeetingPickerDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var showMeetingEditorDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var meetingBeingEdited by remember {
+        mutableStateOf<SavedMeeting?>(null)
+    }
+
+    var logAttendanceAfterMeetingSave by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var showMeetingAttendanceDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var meetingForAttendance by remember {
+        mutableStateOf<SavedMeeting?>(null)
+    }
+
+    var attendanceBeingEdited by remember {
+        mutableStateOf<MeetingAttendance?>(null)
+    }
+
+    var isOneTimeMeetingAttendance by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var showMeetingHistoryDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var meetingAttendancePendingDeletion by remember {
+        mutableStateOf<MeetingAttendance?>(null)
+    }
+
+    var isSavingMeeting by remember {
+        mutableStateOf(false)
+    }
+
+    var isDeletingMeetingAttendance by remember {
         mutableStateOf(false)
     }
 
@@ -810,6 +879,12 @@ fun DailyRebuildApp(
             migraineLogs =
                 migraineLogDao.getAllLogs()
 
+            savedMeetings =
+                meetingDao.getActiveMeetings()
+
+            meetingAttendanceHistory =
+                meetingDao.getAllAttendance()
+
             foodEntries =
                 foodDao.getEntriesForDate(
                     todayDate
@@ -901,6 +976,60 @@ fun DailyRebuildApp(
                     .dayOfWeek.value >= 5
             }.getOrDefault(false)
 
+    val meetingWeekStart =
+        runCatching {
+            val activeDate = LocalDate.parse(todayDate)
+            activeDate.minusDays(
+                (activeDate.dayOfWeek.value - 1).toLong()
+            )
+        }.getOrDefault(LocalDate.now())
+
+    val meetingWeekEnd =
+        meetingWeekStart.plusDays(6)
+
+    val weeklyMeetingAttendance =
+        meetingAttendanceHistory
+            .filter {
+                it.date >= meetingWeekStart.toString() &&
+                    it.date <= meetingWeekEnd.toString()
+            }
+            .sortedByDescending { it.startedAt }
+
+    val meetingCountThisWeek =
+        weeklyMeetingAttendance.size
+
+    val meetingGoalNeedsAttention =
+        meetingCountThisWeek < DEFAULT_WEEKLY_MEETING_GOAL &&
+            runCatching {
+                LocalDate.parse(todayDate)
+                    .dayOfWeek.value >= 5
+            }.getOrDefault(false)
+
+    val recentMeetingsForPicker =
+        remember(
+            savedMeetings,
+            meetingAttendanceHistory
+        ) {
+            val lastAttendanceByMeetingId =
+                meetingAttendanceHistory
+                    .filter { it.savedMeetingId != null }
+                    .groupBy { it.savedMeetingId }
+                    .mapValues { (_, attendance) ->
+                        attendance.maxOf { it.startedAt }
+                    }
+
+            savedMeetings.sortedWith(
+                compareByDescending<SavedMeeting> {
+                    lastAttendanceByMeetingId[it.id]
+                        ?: Long.MIN_VALUE
+                }.thenByDescending {
+                    it.favorite
+                }.thenBy {
+                    it.name.lowercase(Locale.US)
+                }
+            )
+        }
+
     val displayedActivity =
         when {
             hasLiveHealthActivity ->
@@ -934,6 +1063,232 @@ fun DailyRebuildApp(
             else ->
                 null
         }
+
+    fun refreshMeetingData() {
+        coroutineScope.launch {
+            try {
+                savedMeetings =
+                    meetingDao.getActiveMeetings()
+
+                meetingAttendanceHistory =
+                    meetingDao.getAllAttendance()
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not refresh meeting information."
+                )
+            }
+        }
+    }
+
+    fun saveMeeting(
+        draft: SavedMeetingDraft
+    ) {
+        coroutineScope.launch {
+            isSavingMeeting = true
+
+            try {
+                val now = System.currentTimeMillis()
+                val existing =
+                    draft.id.takeIf { it > 0L }
+                        ?.let { meetingDao.getMeetingById(it) }
+
+                val savedId =
+                    if (existing == null) {
+                        meetingDao.insertMeeting(
+                            SavedMeeting(
+                                name = draft.name,
+                                address = draft.address,
+                                city = draft.city,
+                                state = draft.state,
+                                zipCode = draft.zipCode,
+                                typicalDurationMinutes =
+                                    draft.typicalDurationMinutes,
+                                favorite = draft.favorite,
+                                notes = draft.notes,
+                                createdAt = draft.createdAt,
+                                updatedAt = now
+                            )
+                        )
+                    } else {
+                        meetingDao.updateMeeting(
+                            existing.copy(
+                                name = draft.name,
+                                address = draft.address,
+                                city = draft.city,
+                                state = draft.state,
+                                zipCode = draft.zipCode,
+                                typicalDurationMinutes =
+                                    draft.typicalDurationMinutes,
+                                favorite = draft.favorite,
+                                notes = draft.notes,
+                                updatedAt = now
+                            )
+                        )
+                        existing.id
+                    }
+
+                savedMeetings =
+                    meetingDao.getActiveMeetings()
+
+                val savedMeeting =
+                    meetingDao.getMeetingById(savedId)
+
+                showMeetingEditorDialog = false
+                meetingBeingEdited = null
+
+                if (
+                    logAttendanceAfterMeetingSave &&
+                    savedMeeting != null
+                ) {
+                    meetingForAttendance = savedMeeting
+                    attendanceBeingEdited = null
+                    isOneTimeMeetingAttendance = false
+                    showMeetingAttendanceDialog = true
+                }
+
+                logAttendanceAfterMeetingSave = false
+
+                snackbarHostState.showSnackbar(
+                    message =
+                        if (existing == null) {
+                            "Meeting saved."
+                        } else {
+                            "Meeting updated."
+                        }
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not save the meeting."
+                )
+            } finally {
+                isSavingMeeting = false
+            }
+        }
+    }
+
+    fun saveMeetingAttendance(
+        draft: MeetingAttendanceDraft
+    ) {
+        coroutineScope.launch {
+            isSavingMeeting = true
+
+            try {
+                val duplicate =
+                    meetingDao.findPotentialDuplicate(
+                        date = draft.date,
+                        meetingName = draft.meetingName,
+                        startedAt = draft.startedAt,
+                        excludedId = draft.id
+                    )
+
+                if (duplicate != null) {
+                    snackbarHostState.showSnackbar(
+                        message =
+                            "A similar meeting is already logged within 30 minutes."
+                    )
+                    return@launch
+                }
+
+                val attendance =
+                    MeetingAttendance(
+                        id = draft.id,
+                        savedMeetingId = draft.savedMeetingId,
+                        date = draft.date,
+                        startedAt = draft.startedAt,
+                        durationMinutes = draft.durationMinutes,
+                        meetingName = draft.meetingName,
+                        address = draft.address,
+                        city = draft.city,
+                        state = draft.state,
+                        zipCode = draft.zipCode,
+                        role = draft.role,
+                        notes = draft.notes,
+                        createdAt = draft.createdAt
+                    )
+
+                val savedAttendanceId =
+                    if (draft.id == 0L) {
+                        meetingDao.insertAttendance(attendance)
+                    } else {
+                        meetingDao.updateAttendance(attendance)
+                        draft.id
+                    }
+
+                meetingAttendanceHistory =
+                    meetingDao.getAllAttendance()
+
+                showMeetingAttendanceDialog = false
+                showMeetingPickerDialog = false
+                attendanceBeingEdited = null
+                meetingForAttendance = null
+                isOneTimeMeetingAttendance = false
+                isSavingMeeting = false
+
+                val snackbarResult =
+                    snackbarHostState.showSnackbar(
+                        message =
+                            if (draft.id == 0L) {
+                                "Meeting attendance logged."
+                            } else {
+                                "Meeting attendance updated."
+                            },
+                        actionLabel =
+                            if (draft.id == 0L) {
+                                "Undo"
+                            } else {
+                                null
+                            },
+                        withDismissAction = true,
+                        duration = SnackbarDuration.Long
+                    )
+
+                if (
+                    draft.id == 0L &&
+                    snackbarResult == SnackbarResult.ActionPerformed
+                ) {
+                    meetingDao.deleteAttendanceById(
+                        savedAttendanceId
+                    )
+                    meetingAttendanceHistory =
+                        meetingDao.getAllAttendance()
+                    snackbarHostState.showSnackbar(
+                        message = "Meeting attendance undone."
+                    )
+                }
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not save meeting attendance."
+                )
+            } finally {
+                isSavingMeeting = false
+            }
+        }
+    }
+
+    fun deleteMeetingAttendance(
+        attendance: MeetingAttendance
+    ) {
+        coroutineScope.launch {
+            isDeletingMeetingAttendance = true
+
+            try {
+                meetingDao.deleteAttendanceById(attendance.id)
+                meetingAttendanceHistory =
+                    meetingDao.getAllAttendance()
+                meetingAttendancePendingDeletion = null
+
+                snackbarHostState.showSnackbar(
+                    message = "Meeting attendance removed."
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not remove meeting attendance."
+                )
+            } finally {
+                isDeletingMeetingAttendance = false
+            }
+        }
+    }
 
     fun openDailyHistory() {
         showDailyHistoryDialog = true
@@ -984,13 +1339,19 @@ fun DailyRebuildApp(
                             date
                         )
 
+                    val meetingAttendance =
+                        meetingDao.getAttendanceForDate(
+                            date
+                        )
+
                     if (
                         record != null ||
                         entries.isNotEmpty() ||
                         activitySnapshot != null ||
                         mobilitySessions.isNotEmpty() ||
                         showerLog != null ||
-                        migraineEvents.isNotEmpty()
+                        migraineEvents.isNotEmpty() ||
+                        meetingAttendance.isNotEmpty()
                     ) {
                         loadedDays.add(
                             DailyHistoryDay(
@@ -1004,7 +1365,9 @@ fun DailyRebuildApp(
                                 showerLogged =
                                     showerLog != null,
                                 migraineLogs =
-                                    migraineEvents
+                                    migraineEvents,
+                                meetingAttendance =
+                                    meetingAttendance
                             )
                         )
                     }
@@ -1786,7 +2149,10 @@ fun DailyRebuildApp(
                             Arrangement.spacedBy(16.dp)
                     ) {
                         HeaderSection(
-                            todayDate = todayDate
+                            todayDate = todayDate,
+                            onOpenHistory = {
+                                openDailyHistory()
+                            }
                         )
 
                         TodayNextStepCard(
@@ -1802,6 +2168,10 @@ fun DailyRebuildApp(
                                 showerIsDueNow,
                             showersThisWeek =
                                 showerCountThisWeek,
+                            meetingDue =
+                                meetingGoalNeedsAttention,
+                            meetingsThisWeek =
+                                meetingCountThisWeek,
                             completedTasks =
                                 completedTasks,
                             isSaving =
@@ -1820,6 +2190,9 @@ fun DailyRebuildApp(
                             },
                             onLogShower = {
                                 logShowerToday()
+                            },
+                            onOpenMeetings = {
+                                selectedMainTab = 3
                             },
                             onOpenAnchors = {
                                 showMoreToday = true
@@ -1852,6 +2225,17 @@ fun DailyRebuildApp(
                                 mobilityCompleted,
                             showersThisWeek =
                                 showerCountThisWeek
+                        )
+
+                        HomeMeetingsCard(
+                            meetingsThisWeek =
+                                meetingCountThisWeek,
+                            onOpenMeetings = {
+                                selectedMainTab = 3
+                            },
+                            onLogMeeting = {
+                                showMeetingPickerDialog = true
+                            }
                         )
 
                         TodayQuickActionsCard(
@@ -2150,7 +2534,10 @@ fun DailyRebuildApp(
                         TabScreenHeader(
                             title = "Food",
                             subtitle =
-                                "Log today’s meal, manage saved foods, and build reusable meals."
+                                "Log today’s meal, manage saved foods, and build reusable meals.",
+                            onOpenHistory = {
+                                openDailyHistory()
+                            }
                         )
 
                         FoodHydrationCard(
@@ -2228,7 +2615,10 @@ fun DailyRebuildApp(
                         TabScreenHeader(
                             title = "Mobility",
                             subtitle =
-                                "See today’s walking, generate a balanced routine, or record independent stretching."
+                                "See today’s walking, generate a balanced routine, or record independent stretching.",
+                            onOpenHistory = {
+                                openDailyHistory()
+                            }
                         )
 
                         MobilityWalkingCard(
@@ -2285,18 +2675,47 @@ fun DailyRebuildApp(
                             Arrangement.spacedBy(16.dp)
                     ) {
                         TabScreenHeader(
-                            title = "History",
+                            title = "Meetings",
                             subtitle =
-                                "Review saved days without crowding the Today dashboard."
-                        )
-
-                        HistoryHubCard(
-                            isLoading =
-                                isLoadingDailyHistory,
-                            onOpenCalendar = {
+                                "Track a goal of at least three recovery meetings each week.",
+                            onOpenHistory = {
                                 openDailyHistory()
                             }
                         )
+
+                        MeetingsTab(
+                            weeklyAttendance =
+                                weeklyMeetingAttendance,
+                            isSaving =
+                                isSavingMeeting,
+                            onLogMeeting = {
+                                showMeetingPickerDialog = true
+                            },
+                            onAddMeeting = {
+                                meetingBeingEdited = null
+                                logAttendanceAfterMeetingSave = false
+                                showMeetingEditorDialog = true
+                            },
+                            onEditAttendance = {
+                                attendanceBeingEdited = it
+                                meetingForAttendance =
+                                    it.savedMeetingId?.let { id ->
+                                        savedMeetings.firstOrNull { meeting ->
+                                            meeting.id == id
+                                        }
+                                    }
+                                isOneTimeMeetingAttendance =
+                                    it.savedMeetingId == null
+                                showMeetingAttendanceDialog = true
+                            },
+                            onDeleteAttendance = {
+                                meetingAttendancePendingDeletion = it
+                            },
+                            onViewFullHistory = {
+                                showMeetingHistoryDialog = true
+                            }
+                        )
+
                         Spacer(
                             modifier =
                                 Modifier.height(12.dp)
@@ -2319,7 +2738,10 @@ fun DailyRebuildApp(
                         TabScreenHeader(
                             title = "Health",
                             subtitle =
-                                "Profile, measurements, medication reference, health events, and connected activity."
+                                "Profile, measurements, medication reference, health events, and connected activity.",
+                            onOpenHistory = {
+                                openDailyHistory()
+                            }
                         )
 
                         MigraineTrackerCard(
@@ -2383,6 +2805,120 @@ fun DailyRebuildApp(
             },
             onSave = {
                 saveMigraineEvent(it)
+            }
+        )
+    }
+
+    if (showMeetingPickerDialog) {
+        MeetingPickerDialog(
+            recentMeetings =
+                recentMeetingsForPicker,
+            onSelectMeeting = { meeting ->
+                meetingForAttendance = meeting
+                attendanceBeingEdited = null
+                isOneTimeMeetingAttendance = false
+                showMeetingPickerDialog = false
+                showMeetingAttendanceDialog = true
+            },
+            onEditMeeting = { meeting ->
+                meetingBeingEdited = meeting
+                logAttendanceAfterMeetingSave = false
+                showMeetingPickerDialog = false
+                showMeetingEditorDialog = true
+            },
+            onAddMeeting = {
+                meetingBeingEdited = null
+                logAttendanceAfterMeetingSave = true
+                showMeetingPickerDialog = false
+                showMeetingEditorDialog = true
+            },
+            onLogOneTime = {
+                meetingForAttendance = null
+                attendanceBeingEdited = null
+                isOneTimeMeetingAttendance = true
+                showMeetingPickerDialog = false
+                showMeetingAttendanceDialog = true
+            },
+            onDismiss = {
+                showMeetingPickerDialog = false
+            }
+        )
+    }
+
+    if (showMeetingEditorDialog) {
+        MeetingEditorDialog(
+            existingMeeting = meetingBeingEdited,
+            isSaving = isSavingMeeting,
+            onSave = {
+                saveMeeting(it)
+            },
+            onDismiss = {
+                if (!isSavingMeeting) {
+                    showMeetingEditorDialog = false
+                    meetingBeingEdited = null
+                    logAttendanceAfterMeetingSave = false
+                }
+            }
+        )
+    }
+
+    if (showMeetingAttendanceDialog) {
+        MeetingAttendanceDialog(
+            savedMeeting = meetingForAttendance,
+            existingAttendance = attendanceBeingEdited,
+            isOneTimeMeeting =
+                isOneTimeMeetingAttendance,
+            isSaving = isSavingMeeting,
+            onSave = {
+                saveMeetingAttendance(it)
+            },
+            onDismiss = {
+                if (!isSavingMeeting) {
+                    showMeetingAttendanceDialog = false
+                    meetingForAttendance = null
+                    attendanceBeingEdited = null
+                    isOneTimeMeetingAttendance = false
+                }
+            }
+        )
+    }
+
+    if (showMeetingHistoryDialog) {
+        MeetingHistoryDialog(
+            attendance = meetingAttendanceHistory,
+            onEdit = { attendance ->
+                attendanceBeingEdited = attendance
+                meetingForAttendance =
+                    attendance.savedMeetingId?.let { id ->
+                        savedMeetings.firstOrNull { meeting ->
+                            meeting.id == id
+                        }
+                    }
+                isOneTimeMeetingAttendance =
+                    attendance.savedMeetingId == null
+                showMeetingHistoryDialog = false
+                showMeetingAttendanceDialog = true
+            },
+            onDelete = {
+                meetingAttendancePendingDeletion = it
+            },
+            onDismiss = {
+                showMeetingHistoryDialog = false
+            }
+        )
+    }
+
+    meetingAttendancePendingDeletion?.let { attendance ->
+        DeleteMeetingAttendanceDialog(
+            attendance = attendance,
+            isDeleting = isDeletingMeetingAttendance,
+            onConfirm = {
+                deleteMeetingAttendance(attendance)
+            },
+            onDismiss = {
+                if (!isDeletingMeetingAttendance) {
+                    meetingAttendancePendingDeletion = null
+                }
             }
         )
     }
@@ -3259,6 +3795,10 @@ fun DailyRebuildApp(
                             migraineLogDao.deleteByDate(
                                 day.date
                             )
+
+                            meetingDao.deleteAttendanceByDate(
+                                day.date
+                            )
                         }
 
                         dailyHistoryDays =
@@ -3273,6 +3813,11 @@ fun DailyRebuildApp(
 
                         migraineLogs =
                             migraineLogs.filterNot {
+                                it.date == day.date
+                            }
+
+                        meetingAttendanceHistory =
+                            meetingAttendanceHistory.filterNot {
                                 it.date == day.date
                             }
 
@@ -3560,8 +4105,8 @@ private val dailyRebuildNavigationItems =
             symbol = "M"
         ),
         DailyRebuildNavigationItem(
-            label = "History",
-            symbol = "↺"
+            label = "Meetings",
+            symbol = "G"
         ),
         DailyRebuildNavigationItem(
             label = "Health",
@@ -3609,7 +4154,8 @@ private fun DailyRebuildBottomNavigation(
 @Composable
 private fun TabScreenHeader(
     title: String,
-    subtitle: String
+    subtitle: String,
+    onOpenHistory: () -> Unit
 ) {
     Column(
         modifier =
@@ -3622,12 +4168,24 @@ private fun TabScreenHeader(
         verticalArrangement =
             Arrangement.spacedBy(4.dp)
     ) {
-        Text(
-            text = title,
-            style =
-                MaterialTheme.typography
-                    .headlineMedium
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                style =
+                    MaterialTheme.typography
+                        .headlineMedium,
+                modifier = Modifier.weight(1f)
+            )
+
+            TextButton(
+                onClick = onOpenHistory
+            ) {
+                Text("History")
+            }
+        }
 
         Text(
             text = subtitle,
@@ -3649,6 +4207,8 @@ private fun TodayNextStepCard(
     painRecorded: Boolean,
     showerDue: Boolean,
     showersThisWeek: Int,
+    meetingDue: Boolean,
+    meetingsThisWeek: Int,
     completedTasks: Int,
     isSaving: Boolean,
     onOpenFood: () -> Unit,
@@ -3656,6 +4216,7 @@ private fun TodayNextStepCard(
     onOpenMobility: () -> Unit,
     onOpenPain: () -> Unit,
     onLogShower: () -> Unit,
+    onOpenMeetings: () -> Unit,
     onOpenAnchors: () -> Unit,
     onSave: () -> Unit
 ) {
@@ -3703,6 +4264,14 @@ private fun TodayNextStepCard(
                 "$showersThisWeek of 2 minimum showers logged this week."
             buttonText = "Log Today’s Shower"
             onClick = onLogShower
+        }
+
+        meetingDue -> {
+            title = "Weekly meeting goal"
+            description =
+                "$meetingsThisWeek of $DEFAULT_WEEKLY_MEETING_GOAL meetings logged this week."
+            buttonText = "Open Meetings"
+            onClick = onOpenMeetings
         }
 
         completedTasks < 4 -> {
@@ -4531,7 +5100,8 @@ private fun LoadingScreen(
 
 @Composable
 private fun HeaderSection(
-    todayDate: String
+    todayDate: String,
+    onOpenHistory: () -> Unit
 ) {
     val today = remember(todayDate) {
         LocalDate.parse(todayDate)
@@ -4552,50 +5122,64 @@ private fun HeaderSection(
         contentColor = Color.White,
         shadowElevation = 5.dp
     ) {
-        Column(
+        Row(
             modifier =
                 Modifier.padding(
                     horizontal = 22.dp,
                     vertical = 18.dp
                 ),
-            verticalArrangement =
-                Arrangement.spacedBy(6.dp)
+            verticalAlignment = Alignment.Top
         ) {
-            Text(
-                text = "Daily Rebuild",
-                style =
-                    MaterialTheme.typography
-                        .headlineMedium,
-                color = Color.White
-            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement =
+                    Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "Daily Rebuild",
+                    style =
+                        MaterialTheme.typography
+                            .headlineMedium,
+                    color = Color.White
+                )
 
-            Text(
-                text =
-                    today.format(
-                        dayFormatter
-                    ),
-                style =
-                    MaterialTheme.typography
-                        .titleMedium,
-                color =
-                    Color.White.copy(
-                        alpha = 0.94f
-                    )
-            )
+                Text(
+                    text =
+                        today.format(
+                            dayFormatter
+                        ),
+                    style =
+                        MaterialTheme.typography
+                            .titleMedium,
+                    color =
+                        Color.White.copy(
+                            alpha = 0.94f
+                        )
+                )
 
-            Text(
-                text =
-                    today.format(
-                        dateFormatter
-                    ),
-                style =
-                    MaterialTheme.typography
-                        .bodyLarge,
-                color =
-                    Color.White.copy(
-                        alpha = 0.78f
-                    )
-            )
+                Text(
+                    text =
+                        today.format(
+                            dateFormatter
+                        ),
+                    style =
+                        MaterialTheme.typography
+                            .bodyLarge,
+                    color =
+                        Color.White.copy(
+                            alpha = 0.78f
+                        )
+                )
+            }
+
+            TextButton(
+                onClick = onOpenHistory
+            ) {
+                Text(
+                    text = "History",
+                    color = Color.White
+                )
+            }
         }
     }
 }
