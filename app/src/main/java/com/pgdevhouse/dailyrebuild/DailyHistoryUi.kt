@@ -41,6 +41,7 @@ import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
 import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
+import com.pgdevhouse.dailyrebuild.data.local.CareVisit
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -66,7 +67,8 @@ data class DailyHistoryDay(
     val mobilitySessions: List<MobilitySession> = emptyList(),
     val showerLogged: Boolean = false,
     val migraineLogs: List<MigraineLog> = emptyList(),
-    val meetingAttendance: List<MeetingAttendance> = emptyList()
+    val meetingAttendance: List<MeetingAttendance> = emptyList(),
+    val careVisits: List<CareVisit> = emptyList()
 )
 
 @Composable
@@ -555,7 +557,8 @@ private fun DailyHistoryDetailPage(
                     day.mobilitySessions.isNotEmpty() ||
                     day.showerLogged ||
                     day.migraineLogs.isNotEmpty() ||
-                    day.meetingAttendance.isNotEmpty()
+                    day.meetingAttendance.isNotEmpty() ||
+                    day.careVisits.isNotEmpty()
 
             RebuildStatusBadge(
                 text =
@@ -582,7 +585,7 @@ private fun DailyHistoryDetailPage(
             RebuildInsetPanel {
                 Text("Checklist not saved", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "The daily checklist was not saved, but the day's logged food, activity, mobility, shower, migraine, or meeting information remains available below.",
+                    "The daily checklist was not saved, but the day's logged food, activity, mobility, shower, migraine, meeting, or care-visit information remains available below.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -619,6 +622,12 @@ private fun DailyHistoryDetailPage(
         if (day.meetingAttendance.isNotEmpty()) {
             HistoryMeetingCard(
                 attendance = day.meetingAttendance
+            )
+        }
+
+        if (day.careVisits.isNotEmpty()) {
+            HistoryCareVisitCard(
+                visits = day.careVisits
             )
         }
 
@@ -838,6 +847,150 @@ private fun HistoryMeetingCard(
                     }
                 }
             }
+    }
+}
+
+@Composable
+private fun HistoryCareVisitCard(
+    visits: List<CareVisit>
+) {
+    HistorySectionCard(
+        title = "Care Visits"
+    ) {
+        visits.sortedBy { it.startedAt }
+            .forEach { visit ->
+                RebuildInsetPanel {
+                    Text(
+                        text = visit.placeName,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Text(
+                        text = formatCareVisitDateTime(visit.startedAt) +
+                            " · ${visit.visitCategory} · ${visit.visitFormat}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    val provider = listOf(
+                        listOf(
+                            visit.providerName,
+                            visit.providerCredentials
+                        ).filter(String::isNotBlank)
+                            .joinToString(", "),
+                        visit.providerSpecialty
+                    ).filter(String::isNotBlank)
+                        .joinToString(" · ")
+
+                    if (provider.isNotBlank()) {
+                        Text(
+                            text = provider,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+
+                    val location = careLocationText(
+                        visit.address,
+                        visit.city,
+                        visit.state,
+                        visit.zipCode
+                    )
+                    if (location.isNotBlank()) {
+                        Text(
+                            text = location,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Text(
+                        text = "Reason: ${visit.reasonForVisit}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+
+                    if (visit.visitSummary.isNotBlank()) {
+                        Text(
+                            text = visit.visitSummary,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
+                    careVisitDetailLine(
+                        label = "Tests / procedures",
+                        value = visit.testsProcedures
+                    )
+                    careVisitDetailLine(
+                        label = "Results",
+                        value = visit.resultsDiscussed
+                    )
+                    careVisitDetailLine(
+                        label = "Instructions",
+                        value = visit.instructions
+                    )
+                    careVisitDetailLine(
+                        label = "Medication changes",
+                        value = visit.medicationChanges
+                    )
+                    careVisitDetailLine(
+                        label = "Referrals",
+                        value = visit.referrals
+                    )
+                    visit.followUpDate?.let {
+                        careVisitDetailLine(
+                            label = "Follow-up",
+                            value = formatHistoryDate(it)
+                        )
+                    }
+                    careVisitDetailLine(
+                        label = "Notes",
+                        value = visit.notes
+                    )
+
+                    val measurements = buildList {
+                        visit.weightPounds?.let {
+                            add("Weight ${formatHistoryNumber(it)} lb")
+                        }
+                        if (
+                            visit.systolic != null &&
+                            visit.diastolic != null
+                        ) {
+                            add("BP ${visit.systolic}/${visit.diastolic}")
+                        }
+                        visit.a1c?.let {
+                            add("A1C ${formatHistoryNumber(it)}%")
+                        }
+                        visit.bloodGlucose?.let {
+                            add("Glucose ${formatHistoryNumber(it)}")
+                        }
+                        visit.cholesterolTotal?.let {
+                            add("Total cholesterol ${formatHistoryNumber(it)}")
+                        }
+                    }
+
+                    if (measurements.isNotEmpty()) {
+                        Text(
+                            text = measurements.joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+    }
+}
+
+@Composable
+private fun careVisitDetailLine(
+    label: String,
+    value: String
+) {
+    if (value.isNotBlank()) {
+        Text(
+            text = "$label: $value",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

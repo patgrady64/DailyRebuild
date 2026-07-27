@@ -46,6 +46,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,6 +72,11 @@ import com.pgdevhouse.dailyrebuild.data.local.ShowerLog
 import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
 import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
 import com.pgdevhouse.dailyrebuild.data.local.SavedMeeting
+import com.pgdevhouse.dailyrebuild.data.local.CarePlace
+import com.pgdevhouse.dailyrebuild.data.local.CareProvider
+import com.pgdevhouse.dailyrebuild.data.local.CareVisit
+import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
+import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurementType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Duration
@@ -161,6 +167,10 @@ fun DailyRebuildApp(
 
     val meetingDao = remember {
         database.meetingDao()
+    }
+
+    val careVisitDao = remember {
+        database.careVisitDao()
     }
 
     val healthProfileDao = remember {
@@ -498,6 +508,99 @@ fun DailyRebuildApp(
 
     var isDeletingMeetingAttendance by remember {
         mutableStateOf(false)
+    }
+
+    /*
+     * Completed care visits live in Health and never affect daily anchors.
+     * Places and providers are reusable; every visit stores a historical
+     * snapshot so future directory edits cannot rewrite the past.
+     */
+    var carePlaces by remember {
+        mutableStateOf<List<CarePlace>>(emptyList())
+    }
+
+    var careProviders by remember {
+        mutableStateOf<List<CareProvider>>(emptyList())
+    }
+
+    var careVisits by remember {
+        mutableStateOf<List<CareVisit>>(emptyList())
+    }
+
+    var showCareVisitStartDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var showCareProviderPickerDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var showCarePlaceEditorDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var showCareProviderEditorDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var showCareVisitEditorDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var showCareVisitHistoryDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var selectedCarePlaceForVisit by remember {
+        mutableStateOf<CarePlace?>(null)
+    }
+
+    var selectedCareProviderForVisit by remember {
+        mutableStateOf<CareProvider?>(null)
+    }
+
+    var carePlaceBeingEdited by remember {
+        mutableStateOf<CarePlace?>(null)
+    }
+
+    var careProviderBeingEdited by remember {
+        mutableStateOf<CareProvider?>(null)
+    }
+
+    var careVisitBeingEdited by remember {
+        mutableStateOf<CareVisit?>(null)
+    }
+
+    var careVisitPendingDeletion by remember {
+        mutableStateOf<CareVisit?>(null)
+    }
+
+    var continueVisitAfterPlaceSave by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var continueVisitAfterProviderSave by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var returnToCareHistoryAfterVisitSave by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var isOneTimeCareVisit by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var isSavingCareVisit by remember {
+        mutableStateOf(false)
+    }
+
+    var isDeletingCareVisit by remember {
+        mutableStateOf(false)
+    }
+
+    var healthFeatureRefreshKey by remember {
+        mutableIntStateOf(0)
     }
 
     /*
@@ -885,6 +988,15 @@ fun DailyRebuildApp(
             meetingAttendanceHistory =
                 meetingDao.getAllAttendance()
 
+            carePlaces =
+                careVisitDao.getActivePlaces()
+
+            careProviders =
+                careVisitDao.getActiveProviders()
+
+            careVisits =
+                careVisitDao.getAllVisits()
+
             foodEntries =
                 foodDao.getEntriesForDate(
                     todayDate
@@ -1028,6 +1140,57 @@ fun DailyRebuildApp(
                     it.name.lowercase(Locale.US)
                 }
             )
+        }
+
+    val recentCarePlaces =
+        remember(carePlaces, careVisits) {
+            val lastVisitByPlaceId =
+                careVisits
+                    .filter { it.placeId != null }
+                    .groupBy { it.placeId }
+                    .mapValues { (_, visits) ->
+                        visits.maxOf { it.startedAt }
+                    }
+
+            carePlaces.sortedWith(
+                compareByDescending<CarePlace> {
+                    lastVisitByPlaceId[it.id]
+                        ?: Long.MIN_VALUE
+                }.thenBy {
+                    it.name.lowercase(Locale.US)
+                }
+            )
+        }
+
+    val providersForSelectedCarePlace =
+        remember(
+            selectedCarePlaceForVisit,
+            careProviders,
+            careVisits
+        ) {
+            val placeId = selectedCarePlaceForVisit?.id
+            if (placeId == null) {
+                emptyList()
+            } else {
+                val lastVisitByProviderId =
+                    careVisits
+                        .filter { it.providerId != null }
+                        .groupBy { it.providerId }
+                        .mapValues { (_, visits) ->
+                            visits.maxOf { it.startedAt }
+                        }
+
+                careProviders
+                    .filter { it.placeId == placeId }
+                    .sortedWith(
+                        compareByDescending<CareProvider> {
+                            lastVisitByProviderId[it.id]
+                                ?: Long.MIN_VALUE
+                        }.thenBy {
+                            it.name.lowercase(Locale.US)
+                        }
+                    )
+            }
         }
 
     val displayedActivity =
@@ -1290,6 +1453,363 @@ fun DailyRebuildApp(
         }
     }
 
+    fun saveCarePlace(
+        draft: CarePlaceDraft
+    ) {
+        coroutineScope.launch {
+            isSavingCareVisit = true
+
+            try {
+                val now = System.currentTimeMillis()
+                val existing =
+                    draft.id.takeIf { it > 0L }
+                        ?.let { careVisitDao.getPlaceById(it) }
+
+                val savedId =
+                    if (existing == null) {
+                        careVisitDao.insertPlace(
+                            CarePlace(
+                                name = draft.name,
+                                placeCategory = draft.placeCategory,
+                                address = draft.address,
+                                city = draft.city,
+                                state = draft.state,
+                                zipCode = draft.zipCode,
+                                phone = draft.phone,
+                                website = draft.website,
+                                patientPortal = draft.patientPortal,
+                                notes = draft.notes,
+                                active = draft.active,
+                                createdAt = draft.createdAt,
+                                updatedAt = now
+                            )
+                        )
+                    } else {
+                        careVisitDao.updatePlace(
+                            existing.copy(
+                                name = draft.name,
+                                placeCategory = draft.placeCategory,
+                                address = draft.address,
+                                city = draft.city,
+                                state = draft.state,
+                                zipCode = draft.zipCode,
+                                phone = draft.phone,
+                                website = draft.website,
+                                patientPortal = draft.patientPortal,
+                                notes = draft.notes,
+                                active = draft.active,
+                                updatedAt = now
+                            )
+                        )
+                        existing.id
+                    }
+
+                carePlaces = careVisitDao.getActivePlaces()
+                val savedPlace = careVisitDao.getPlaceById(savedId)
+
+                showCarePlaceEditorDialog = false
+                carePlaceBeingEdited = null
+
+                if (
+                    continueVisitAfterPlaceSave &&
+                    savedPlace != null
+                ) {
+                    selectedCarePlaceForVisit = savedPlace
+                    selectedCareProviderForVisit = null
+                    showCareVisitStartDialog = false
+                    showCareProviderPickerDialog = true
+                } else {
+                    showCareVisitStartDialog = true
+                }
+
+                continueVisitAfterPlaceSave = false
+                snackbarHostState.showSnackbar(
+                    message =
+                        if (existing == null) {
+                            "Care place saved."
+                        } else {
+                            "Care place updated."
+                        }
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not save the care place."
+                )
+            } finally {
+                isSavingCareVisit = false
+            }
+        }
+    }
+
+    fun saveCareProvider(
+        draft: CareProviderDraft
+    ) {
+        coroutineScope.launch {
+            isSavingCareVisit = true
+
+            try {
+                val now = System.currentTimeMillis()
+                val existing =
+                    draft.id.takeIf { it > 0L }
+                        ?.let { careVisitDao.getProviderById(it) }
+
+                val savedId =
+                    if (existing == null) {
+                        careVisitDao.insertProvider(
+                            CareProvider(
+                                placeId = draft.placeId,
+                                name = draft.name,
+                                credentials = draft.credentials,
+                                specialty = draft.specialty,
+                                phone = draft.phone,
+                                notes = draft.notes,
+                                active = draft.active,
+                                createdAt = draft.createdAt,
+                                updatedAt = now
+                            )
+                        )
+                    } else {
+                        careVisitDao.updateProvider(
+                            existing.copy(
+                                placeId = draft.placeId,
+                                name = draft.name,
+                                credentials = draft.credentials,
+                                specialty = draft.specialty,
+                                phone = draft.phone,
+                                notes = draft.notes,
+                                active = draft.active,
+                                updatedAt = now
+                            )
+                        )
+                        existing.id
+                    }
+
+                careProviders = careVisitDao.getActiveProviders()
+                val savedProvider = careVisitDao.getProviderById(savedId)
+
+                showCareProviderEditorDialog = false
+                careProviderBeingEdited = null
+
+                if (
+                    continueVisitAfterProviderSave &&
+                    savedProvider != null
+                ) {
+                    selectedCareProviderForVisit = savedProvider
+                    careVisitBeingEdited = null
+                    isOneTimeCareVisit = false
+                    showCareProviderPickerDialog = false
+                    showCareVisitEditorDialog = true
+                } else {
+                    showCareProviderPickerDialog = true
+                }
+
+                continueVisitAfterProviderSave = false
+                snackbarHostState.showSnackbar(
+                    message =
+                        if (existing == null) {
+                            "Provider saved."
+                        } else {
+                            "Provider updated."
+                        }
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not save the provider."
+                )
+            } finally {
+                isSavingCareVisit = false
+            }
+        }
+    }
+
+    fun saveCareVisit(
+        draft: CareVisitDraft
+    ) {
+        coroutineScope.launch {
+            isSavingCareVisit = true
+
+            try {
+                val duplicate =
+                    careVisitDao.findPotentialDuplicate(
+                        date = draft.date,
+                        placeName = draft.placeName,
+                        providerName = draft.providerName,
+                        startedAt = draft.startedAt,
+                        excludedId = draft.id
+                    )
+
+                if (duplicate != null) {
+                    snackbarHostState.showSnackbar(
+                        message =
+                            "A similar care visit is already logged within 30 minutes."
+                    )
+                    return@launch
+                }
+
+                val now = System.currentTimeMillis()
+                val visit =
+                    CareVisit(
+                        id = draft.id,
+                        placeId = draft.placeId,
+                        providerId = draft.providerId,
+                        date = draft.date,
+                        startedAt = draft.startedAt,
+                        visitCategory = draft.visitCategory,
+                        visitFormat = draft.visitFormat,
+                        placeName = draft.placeName,
+                        placeCategory = draft.placeCategory,
+                        providerName = draft.providerName,
+                        providerCredentials = draft.providerCredentials,
+                        providerSpecialty = draft.providerSpecialty,
+                        address = draft.address,
+                        city = draft.city,
+                        state = draft.state,
+                        zipCode = draft.zipCode,
+                        placePhone = draft.placePhone,
+                        providerPhone = draft.providerPhone,
+                        reasonForVisit = draft.reasonForVisit,
+                        visitSummary = draft.visitSummary,
+                        testsProcedures = draft.testsProcedures,
+                        resultsDiscussed = draft.resultsDiscussed,
+                        instructions = draft.instructions,
+                        medicationChanges = draft.medicationChanges,
+                        referrals = draft.referrals,
+                        followUpDate = draft.followUpDate,
+                        notes = draft.notes,
+                        weightPounds = draft.weightPounds,
+                        systolic = draft.systolic,
+                        diastolic = draft.diastolic,
+                        a1c = draft.a1c,
+                        bloodGlucose = draft.bloodGlucose,
+                        cholesterolTotal = draft.cholesterolTotal,
+                        cholesterolLdl = draft.cholesterolLdl,
+                        cholesterolHdl = draft.cholesterolHdl,
+                        triglycerides = draft.triglycerides,
+                        createdAt = draft.createdAt,
+                        updatedAt = now
+                    )
+
+                database.withTransaction {
+                    if (draft.id == 0L) {
+                        careVisitDao.insertVisit(visit)
+                    } else {
+                        careVisitDao.updateVisit(visit)
+                    }
+
+                    if (draft.copyCompatibleMeasurements) {
+                        val measurementNote =
+                            "Recorded during ${draft.visitCategory.lowercase(Locale.US)} visit at ${draft.placeName}."
+
+                        draft.weightPounds?.let { value ->
+                            healthProfileDao.addMeasurement(
+                                HealthMeasurement(
+                                    recordedDate = draft.date,
+                                    type = HealthMeasurementType.WEIGHT,
+                                    primaryValue = value,
+                                    notes = measurementNote
+                                )
+                            )
+                        }
+
+                        if (
+                            draft.systolic != null &&
+                            draft.diastolic != null
+                        ) {
+                            healthProfileDao.addMeasurement(
+                                HealthMeasurement(
+                                    recordedDate = draft.date,
+                                    type = HealthMeasurementType.BLOOD_PRESSURE,
+                                    primaryValue = draft.systolic.toDouble(),
+                                    secondaryValue = draft.diastolic.toDouble(),
+                                    notes = measurementNote
+                                )
+                            )
+                        }
+
+                        draft.a1c?.let { value ->
+                            healthProfileDao.addMeasurement(
+                                HealthMeasurement(
+                                    recordedDate = draft.date,
+                                    type = HealthMeasurementType.A1C,
+                                    primaryValue = value,
+                                    notes = measurementNote
+                                )
+                            )
+                        }
+
+                        draft.cholesterolTotal?.let { total ->
+                            healthProfileDao.addMeasurement(
+                                HealthMeasurement(
+                                    recordedDate = draft.date,
+                                    type = HealthMeasurementType.CHOLESTEROL,
+                                    primaryValue = total,
+                                    secondaryValue = draft.cholesterolLdl,
+                                    tertiaryValue = draft.cholesterolHdl,
+                                    quaternaryValue = draft.triglycerides,
+                                    notes = measurementNote
+                                )
+                            )
+                        }
+                    }
+                }
+
+                careVisits = careVisitDao.getAllVisits()
+                healthFeatureRefreshKey++
+
+                showCareVisitEditorDialog = false
+                showCareVisitStartDialog = false
+                showCareProviderPickerDialog = false
+                selectedCarePlaceForVisit = null
+                selectedCareProviderForVisit = null
+                careVisitBeingEdited = null
+                isOneTimeCareVisit = false
+
+                if (returnToCareHistoryAfterVisitSave) {
+                    showCareVisitHistoryDialog = true
+                }
+                returnToCareHistoryAfterVisitSave = false
+
+                snackbarHostState.showSnackbar(
+                    message =
+                        if (draft.id == 0L) {
+                            "Care visit logged."
+                        } else {
+                            "Care visit updated."
+                        }
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not save the care visit."
+                )
+            } finally {
+                isSavingCareVisit = false
+            }
+        }
+    }
+
+    fun deleteCareVisit(
+        visit: CareVisit
+    ) {
+        coroutineScope.launch {
+            isDeletingCareVisit = true
+
+            try {
+                careVisitDao.deleteVisitById(visit.id)
+                careVisits = careVisitDao.getAllVisits()
+                careVisitPendingDeletion = null
+                snackbarHostState.showSnackbar(
+                    message = "Care visit removed."
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not remove the care visit."
+                )
+            } finally {
+                isDeletingCareVisit = false
+            }
+        }
+    }
+
     fun openDailyHistory() {
         showDailyHistoryDialog = true
         isLoadingDailyHistory = true
@@ -1344,6 +1864,11 @@ fun DailyRebuildApp(
                             date
                         )
 
+                    val careVisitsForDate =
+                        careVisitDao.getVisitsForDate(
+                            date
+                        )
+
                     if (
                         record != null ||
                         entries.isNotEmpty() ||
@@ -1351,7 +1876,8 @@ fun DailyRebuildApp(
                         mobilitySessions.isNotEmpty() ||
                         showerLog != null ||
                         migraineEvents.isNotEmpty() ||
-                        meetingAttendance.isNotEmpty()
+                        meetingAttendance.isNotEmpty() ||
+                        careVisitsForDate.isNotEmpty()
                     ) {
                         loadedDays.add(
                             DailyHistoryDay(
@@ -1367,7 +1893,9 @@ fun DailyRebuildApp(
                                 migraineLogs =
                                     migraineEvents,
                                 meetingAttendance =
-                                    meetingAttendance
+                                    meetingAttendance,
+                                careVisits =
+                                    careVisitsForDate
                             )
                         )
                     }
@@ -2738,9 +3266,19 @@ fun DailyRebuildApp(
                         TabScreenHeader(
                             title = "Health",
                             subtitle =
-                                "Profile, measurements, medication reference, health events, and connected activity.",
+                                "Care visits, profile, measurements, medication reference, health events, and connected activity.",
                             onOpenHistory = {
                                 openDailyHistory()
+                            }
+                        )
+
+                        CareVisitTrackerCard(
+                            visits = careVisits,
+                            onLogVisit = {
+                                showCareVisitStartDialog = true
+                            },
+                            onOpenHistory = {
+                                showCareVisitHistoryDialog = true
                             }
                         )
 
@@ -2754,7 +3292,9 @@ fun DailyRebuildApp(
                             }
                         )
 
-                        HealthProfileFeature()
+                        key(healthFeatureRefreshKey) {
+                            HealthProfileFeature()
+                        }
 
                         ActivitySection(
                             availability =
@@ -2796,6 +3336,198 @@ fun DailyRebuildApp(
                 }
             }
         }
+    }
+
+    if (showCareVisitStartDialog) {
+        CareVisitStartDialog(
+            recentPlaces = recentCarePlaces,
+            visits = careVisits,
+            onSelectPlace = { place ->
+                selectedCarePlaceForVisit = place
+                selectedCareProviderForVisit = null
+                showCareVisitStartDialog = false
+                showCareProviderPickerDialog = true
+            },
+            onEditPlace = { place ->
+                carePlaceBeingEdited = place
+                continueVisitAfterPlaceSave = false
+                showCareVisitStartDialog = false
+                showCarePlaceEditorDialog = true
+            },
+            onAddPlace = {
+                carePlaceBeingEdited = null
+                continueVisitAfterPlaceSave = true
+                showCareVisitStartDialog = false
+                showCarePlaceEditorDialog = true
+            },
+            onOneTimeVisit = {
+                selectedCarePlaceForVisit = null
+                selectedCareProviderForVisit = null
+                careVisitBeingEdited = null
+                isOneTimeCareVisit = true
+                returnToCareHistoryAfterVisitSave = false
+                showCareVisitStartDialog = false
+                showCareVisitEditorDialog = true
+            },
+            onDismiss = {
+                showCareVisitStartDialog = false
+            }
+        )
+    }
+
+    if (
+        showCareProviderPickerDialog &&
+        selectedCarePlaceForVisit != null
+    ) {
+        CareProviderPickerDialog(
+            place = selectedCarePlaceForVisit!!,
+            providers = providersForSelectedCarePlace,
+            onSelectProvider = { provider ->
+                selectedCareProviderForVisit = provider
+                careVisitBeingEdited = null
+                isOneTimeCareVisit = false
+                returnToCareHistoryAfterVisitSave = false
+                showCareProviderPickerDialog = false
+                showCareVisitEditorDialog = true
+            },
+            onEditProvider = { provider ->
+                careProviderBeingEdited = provider
+                continueVisitAfterProviderSave = false
+                showCareProviderPickerDialog = false
+                showCareProviderEditorDialog = true
+            },
+            onAddProvider = {
+                careProviderBeingEdited = null
+                continueVisitAfterProviderSave = true
+                showCareProviderPickerDialog = false
+                showCareProviderEditorDialog = true
+            },
+            onContinueWithoutProvider = {
+                selectedCareProviderForVisit = null
+                careVisitBeingEdited = null
+                isOneTimeCareVisit = false
+                returnToCareHistoryAfterVisitSave = false
+                showCareProviderPickerDialog = false
+                showCareVisitEditorDialog = true
+            },
+            onBack = {
+                showCareProviderPickerDialog = false
+                selectedCarePlaceForVisit = null
+                showCareVisitStartDialog = true
+            },
+            onDismiss = {
+                showCareProviderPickerDialog = false
+                selectedCarePlaceForVisit = null
+            }
+        )
+    }
+
+    if (showCarePlaceEditorDialog) {
+        CarePlaceEditorDialog(
+            existingPlace = carePlaceBeingEdited,
+            isSaving = isSavingCareVisit,
+            onSave = {
+                saveCarePlace(it)
+            },
+            onDismiss = {
+                if (!isSavingCareVisit) {
+                    showCarePlaceEditorDialog = false
+                    carePlaceBeingEdited = null
+                    continueVisitAfterPlaceSave = false
+                    showCareVisitStartDialog = true
+                }
+            }
+        )
+    }
+
+    if (
+        showCareProviderEditorDialog &&
+        selectedCarePlaceForVisit != null
+    ) {
+        CareProviderEditorDialog(
+            place = selectedCarePlaceForVisit!!,
+            existingProvider = careProviderBeingEdited,
+            isSaving = isSavingCareVisit,
+            onSave = {
+                saveCareProvider(it)
+            },
+            onDismiss = {
+                if (!isSavingCareVisit) {
+                    showCareProviderEditorDialog = false
+                    careProviderBeingEdited = null
+                    continueVisitAfterProviderSave = false
+                    showCareProviderPickerDialog = true
+                }
+            }
+        )
+    }
+
+    if (showCareVisitEditorDialog) {
+        CareVisitEditorDialog(
+            savedPlace = selectedCarePlaceForVisit,
+            savedProvider = selectedCareProviderForVisit,
+            existingVisit = careVisitBeingEdited,
+            isOneTimeVisit = isOneTimeCareVisit,
+            isSaving = isSavingCareVisit,
+            onSave = {
+                saveCareVisit(it)
+            },
+            onDismiss = {
+                if (!isSavingCareVisit) {
+                    showCareVisitEditorDialog = false
+                    careVisitBeingEdited = null
+                    selectedCarePlaceForVisit = null
+                    selectedCareProviderForVisit = null
+                    isOneTimeCareVisit = false
+                    if (returnToCareHistoryAfterVisitSave) {
+                        showCareVisitHistoryDialog = true
+                    }
+                    returnToCareHistoryAfterVisitSave = false
+                }
+            }
+        )
+    }
+
+    if (showCareVisitHistoryDialog) {
+        CareVisitHistoryDialog(
+            visits = careVisits,
+            onEdit = { visit ->
+                careVisitBeingEdited = visit
+                selectedCarePlaceForVisit =
+                    visit.placeId?.let { id ->
+                        carePlaces.firstOrNull { it.id == id }
+                    }
+                selectedCareProviderForVisit =
+                    visit.providerId?.let { id ->
+                        careProviders.firstOrNull { it.id == id }
+                    }
+                isOneTimeCareVisit = visit.placeId == null
+                returnToCareHistoryAfterVisitSave = true
+                showCareVisitHistoryDialog = false
+                showCareVisitEditorDialog = true
+            },
+            onDelete = {
+                careVisitPendingDeletion = it
+            },
+            onDismiss = {
+                showCareVisitHistoryDialog = false
+            }
+        )
+    }
+
+    careVisitPendingDeletion?.let { visit ->
+        DeleteCareVisitDialog(
+            visit = visit,
+            isDeleting = isDeletingCareVisit,
+            onConfirm = {
+                deleteCareVisit(visit)
+            },
+            onDismiss = {
+                if (!isDeletingCareVisit) {
+                    careVisitPendingDeletion = null
+                }
+            }
+        )
     }
 
     if (showMigraineLogDialog) {
@@ -3799,6 +4531,10 @@ fun DailyRebuildApp(
                             meetingDao.deleteAttendanceByDate(
                                 day.date
                             )
+
+                            careVisitDao.deleteVisitsByDate(
+                                day.date
+                            )
                         }
 
                         dailyHistoryDays =
@@ -3818,6 +4554,11 @@ fun DailyRebuildApp(
 
                         meetingAttendanceHistory =
                             meetingAttendanceHistory.filterNot {
+                                it.date == day.date
+                            }
+
+                        careVisits =
+                            careVisits.filterNot {
                                 it.date == day.date
                             }
 
