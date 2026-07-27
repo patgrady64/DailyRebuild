@@ -3,6 +3,7 @@ package com.pgdevhouse.dailyrebuild
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,6 +28,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -140,6 +145,10 @@ fun DailyRebuildApp(
         database.mobilitySessionDao()
     }
 
+    val healthProfileDao = remember {
+        database.healthProfileDao()
+    }
+
     val healthConnectManager = remember(
         context
     ) {
@@ -216,6 +225,46 @@ fun DailyRebuildApp(
         mutableStateOf(false)
     }
 
+    /*
+     * Main navigation and compact Home interactions.
+     */
+    var selectedMainTab by rememberSaveable {
+        mutableIntStateOf(0)
+    }
+
+    var showMoreToday by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var expandedTodaySection by rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+
+    var showQuickWaterDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var showQuickPainDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var currentCalorieGoal by remember {
+        mutableStateOf<Int?>(null)
+    }
+
+    val homeScrollState =
+        rememberScrollState()
+
+    BackHandler(
+        enabled = selectedMainTab != 0
+    ) {
+        selectedMainTab = 0
+
+        coroutineScope.launch {
+            homeScrollState.animateScrollTo(0)
+        }
+    }
+
     var isAddingFood by remember {
         mutableStateOf(false)
     }
@@ -280,8 +329,8 @@ fun DailyRebuildApp(
 
     var mealBeingEdited by remember {
         mutableStateOf<
-            SavedMealWithIngredients?
-        >(null)
+                SavedMealWithIngredients?
+                >(null)
     }
 
     var isCreatingFoodForMeal by rememberSaveable {
@@ -463,7 +512,7 @@ fun DailyRebuildApp(
 
             if (
                 healthAvailability !=
-                    HealthConnectAvailability.AVAILABLE
+                HealthConnectAvailability.AVAILABLE
             ) {
                 hasHealthPermissions = false
                 hasLiveHealthActivity = false
@@ -738,6 +787,22 @@ fun DailyRebuildApp(
         refreshHealthActivity()
     }
 
+    /*
+     * Refresh the active calorie goal when Home is opened again after
+     * editing Health Profile & Goals in the More tab.
+     */
+    LaunchedEffect(
+        selectedMainTab,
+        todayDate
+    ) {
+        if (selectedMainTab == 0) {
+            currentCalorieGoal =
+                healthProfileDao
+                    .getProfile()
+                    ?.currentCalorieGoal
+        }
+    }
+
     val completedTasks = listOf(
         foodRecorded,
         walkCompleted,
@@ -750,7 +815,7 @@ fun DailyRebuildApp(
 
     val totalWaterOunces =
         (plainReusableBottleCount + mioReusableBottleCount) * 24.0 +
-            (plainDisposableBottleCount + mioDisposableBottleCount) * 16.9
+                (plainDisposableBottleCount + mioDisposableBottleCount) * 16.9
 
     val totalCaloriesToday =
         foodEntries.sumOf { it.calories }
@@ -969,7 +1034,7 @@ fun DailyRebuildApp(
 
                             originalServingSize =
                                 "${existingProduct.servingQuantity} " +
-                                    existingProduct.servingUnit
+                                        existingProduct.servingUnit
                         )
 
                     showManualFoodDialog = true
@@ -1029,7 +1094,7 @@ fun DailyRebuildApp(
                                 .showSnackbar(
                                     message =
                                         "Product not found. " +
-                                            "Enter its label manually."
+                                                "Enter its label manually."
                                 )
                         }
 
@@ -1050,7 +1115,7 @@ fun DailyRebuildApp(
                                 .showSnackbar(
                                     message =
                                         "Lookup failed. " +
-                                            "You can enter the label manually."
+                                                "You can enter the label manually."
                                 )
                         }
                     }
@@ -1158,7 +1223,7 @@ fun DailyRebuildApp(
                 val snapshotToSave =
                     when {
                         hasHealthPermissions &&
-                            hasLiveHealthActivity ->
+                                hasLiveHealthActivity ->
                             DailyActivitySnapshot(
                                 date = todayDate,
                                 steps =
@@ -1212,16 +1277,264 @@ fun DailyRebuildApp(
         }
     }
 
+
+    fun saveMobilitySession(
+        draft: MobilitySessionDraft
+    ) {
+        coroutineScope.launch {
+            isSavingMobility = true
+
+            try {
+                val session =
+                    MobilitySession(
+                        date = todayDate,
+                        routineName =
+                            draft.routineName,
+                        plannedMovementIds =
+                            encodeMovementIds(
+                                draft.plannedMovementIds
+                            ),
+                        completedMovementIds =
+                            encodeMovementIds(
+                                draft.completedMovementIds
+                            ),
+                        skippedMovementIds =
+                            encodeMovementIds(
+                                draft.skippedMovementIds
+                            ),
+                        movementSeconds =
+                            draft.movementSeconds,
+                        elapsedSeconds =
+                            draft.elapsedSeconds,
+                        notes = draft.notes
+                    )
+
+                val sessionId =
+                    mobilitySessionDao
+                        .addSession(
+                            session
+                        )
+
+                mobilitySessionsToday =
+                    listOf(
+                        session.copy(
+                            id = sessionId
+                        )
+                    ) + mobilitySessionsToday
+
+                mobilityCompleted = true
+
+                snackbarHostState
+                    .showSnackbar(
+                        message =
+                            "Mobility session saved."
+                    )
+            } catch (
+                exception: Exception
+            ) {
+                snackbarHostState
+                    .showSnackbar(
+                        message =
+                            "Could not save mobility session."
+                    )
+            } finally {
+                isSavingMobility = false
+            }
+        }
+    }
+
+    fun deleteMobilitySession(
+        session: MobilitySession
+    ) {
+        coroutineScope.launch {
+            isSavingMobility = true
+
+            try {
+                mobilitySessionDao
+                    .deleteSession(
+                        session
+                    )
+
+                mobilitySessionsToday =
+                    mobilitySessionsToday
+                        .filterNot {
+                            it.id == session.id
+                        }
+
+                if (
+                    mobilitySessionsToday.isEmpty()
+                ) {
+                    mobilityCompleted = false
+                }
+
+                snackbarHostState
+                    .showSnackbar(
+                        message =
+                            "Mobility session deleted."
+                    )
+            } catch (
+                exception: Exception
+            ) {
+                snackbarHostState
+                    .showSnackbar(
+                        message =
+                            "Could not delete mobility session."
+                    )
+            } finally {
+                isSavingMobility = false
+            }
+        }
+    }
+
+    fun openSavedFoodsScreen() {
+        coroutineScope.launch {
+            try {
+                savedProducts =
+                    foodDao.getAllProducts()
+
+                showSavedFoodsDialog = true
+            } catch (
+                exception: Exception
+            ) {
+                snackbarHostState.showSnackbar(
+                    message =
+                        "Could not load saved foods."
+                )
+            }
+        }
+    }
+
+    fun openMealBuilderScreen() {
+        mealBeingEdited = null
+
+        coroutineScope.launch {
+            try {
+                savedProducts =
+                    foodDao.getAllProducts()
+
+                if (savedProducts.isEmpty()) {
+                    snackbarHostState.showSnackbar(
+                        message =
+                            "Create or scan a Saved Food first."
+                    )
+                } else {
+                    showMealBuilderDialog = true
+                }
+            } catch (
+                exception: Exception
+            ) {
+                snackbarHostState.showSnackbar(
+                    message =
+                        "Could not open the Meal Builder."
+                )
+            }
+        }
+    }
+
+    fun openSavedMealsScreen() {
+        coroutineScope.launch {
+            try {
+                savedMeals =
+                    mealDao
+                        .getAllMealsWithIngredients()
+
+                savedProducts =
+                    foodDao.getAllProducts()
+
+                showSavedMealsDialog = true
+            } catch (
+                exception: Exception
+            ) {
+                snackbarHostState.showSnackbar(
+                    message =
+                        "Could not load saved meals."
+                )
+            }
+        }
+    }
+
+    fun deleteFoodEntry(
+        entry: FoodLogEntry
+    ) {
+        coroutineScope.launch {
+            try {
+                foodDao
+                    .deleteFoodEntryById(
+                        entry.id
+                    )
+
+                foodEntries =
+                    foodDao
+                        .getEntriesForDate(
+                            todayDate
+                        )
+
+                snackbarHostState
+                    .showSnackbar(
+                        message =
+                            "Food entry deleted."
+                    )
+            } catch (
+                exception: Exception
+            ) {
+                snackbarHostState
+                    .showSnackbar(
+                        message =
+                            "Could not delete food."
+                    )
+            }
+        }
+    }
+
+    fun deleteMealLog(
+        mealLogId: String
+    ) {
+        coroutineScope.launch {
+            try {
+                foodDao
+                    .deleteFoodEntriesByMealLogId(
+                        mealLogId
+                    )
+
+                foodEntries =
+                    foodDao
+                        .getEntriesForDate(
+                            todayDate
+                        )
+
+                snackbarHostState
+                    .showSnackbar(
+                        message =
+                            "Meal deleted from today."
+                    )
+            } catch (
+                exception: Exception
+            ) {
+                snackbarHostState
+                    .showSnackbar(
+                        message =
+                            "Could not delete meal."
+                    )
+            }
+        }
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             if (!isLoading) {
-                DailyActionBar(
-                    isSaving = isSaving,
-                    onSave = saveToday,
-                    onOpenHistory = {
-                        openDailyHistory()
+                DailyRebuildBottomNavigation(
+                    selectedTab = selectedMainTab,
+                    onTabSelected = {
+                        selectedMainTab = it
+
+                        if (it == 0) {
+                            coroutineScope.launch {
+                                homeScrollState
+                                    .animateScrollTo(0)
+                            }
+                        }
                     }
                 )
             }
@@ -1240,516 +1553,763 @@ fun DailyRebuildApp(
                     .padding(innerPadding)
             )
         } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .verticalScroll(
-                        rememberScrollState()
-                    )
-                    .padding(16.dp),
-                verticalArrangement =
-                    Arrangement.spacedBy(16.dp)
-            ) {
-                HeaderSection(
-                    todayDate = todayDate
-                )
-
-                ProgressSection(
-                    completedTasks = completedTasks,
-                    progressPercent = progressPercent,
-                    waterOunces = totalWaterOunces,
-                    calories = totalCaloriesToday,
-                    backPain = backPain
-                )
-
-                HealthProfileFeature()
-
-                ActivitySection(
-                    availability = healthAvailability,
-                    hasPermissions = hasHealthPermissions,
-                    isLoading = isLoadingHealthActivity,
-                    activity = displayedActivity,
-                    sourceLabel = activitySourceLabel,
-                    onConnect = {
-                        healthPermissionsLauncher.launch(
-                            HealthConnectManager.permissions
+            when (selectedMainTab) {
+                0 -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                            .verticalScroll(
+                                homeScrollState
+                            )
+                            .padding(16.dp),
+                        verticalArrangement =
+                            Arrangement.spacedBy(16.dp)
+                    ) {
+                        HeaderSection(
+                            todayDate = todayDate
                         )
-                    },
-                    onRefresh = {
-                        refreshHealthActivity(
-                            showFeedback = true
-                        )
-                    },
-                    onManageAccess = {
-                        healthConnectManager
-                            .openHealthConnectSettings()
-                    },
-                    onInstallOrUpdate = {
-                        healthConnectManager
-                            .openInstallOrUpdate()
-                    }
-                )
 
-                DailyTasksSection(
-                    foodRecorded =
-                        foodRecorded,
+                        TodayNextStepCard(
+                            foodRecorded =
+                                foodEntries.isNotEmpty(),
+                            waterOunces =
+                                totalWaterOunces,
+                            mobilityCompleted =
+                                mobilityCompleted,
+                            painRecorded =
+                                painRecorded,
+                            completedTasks =
+                                completedTasks,
+                            isSaving =
+                                isSaving,
+                            onOpenFood = {
+                                selectedMainTab = 1
+                            },
+                            onOpenWater = {
+                                showQuickWaterDialog = true
+                            },
+                            onOpenMobility = {
+                                selectedMainTab = 2
+                            },
+                            onOpenPain = {
+                                showQuickPainDialog = true
+                            },
+                            onOpenAnchors = {
+                                showMoreToday = true
+                                expandedTodaySection =
+                                    "anchors"
 
-                    onFoodRecordedChange = {
-                        foodRecorded = it
-                    },
-
-                    walkCompleted =
-                        walkCompleted,
-
-                    onWalkCompletedChange = {
-                        walkCompleted = it
-                    },
-
-                    painRecorded =
-                        painRecorded,
-
-                    onPainRecordedChange = {
-                        painRecorded = it
-                    },
-
-                    mobilityCompleted =
-                        mobilityCompleted,
-
-                    onMobilityCompletedChange = {
-                        mobilityCompleted = it
-                    }
-                )
-
-                MobilitySection(
-                    sessions =
-                        mobilitySessionsToday,
-                    isSaving =
-                        isSavingMobility,
-                    onSaveSession = { draft ->
-                        coroutineScope.launch {
-                            isSavingMobility = true
-
-                            try {
-                                val session =
-                                    MobilitySession(
-                                        date = todayDate,
-                                        routineName =
-                                            draft.routineName,
-                                        plannedMovementIds =
-                                            encodeMovementIds(
-                                                draft.plannedMovementIds
-                                            ),
-                                        completedMovementIds =
-                                            encodeMovementIds(
-                                                draft.completedMovementIds
-                                            ),
-                                        skippedMovementIds =
-                                            encodeMovementIds(
-                                                draft.skippedMovementIds
-                                            ),
-                                        movementSeconds =
-                                            draft.movementSeconds,
-                                        elapsedSeconds =
-                                            draft.elapsedSeconds,
-                                        notes = draft.notes
-                                    )
-
-                                val sessionId =
-                                    mobilitySessionDao
-                                        .addSession(
-                                            session
+                                coroutineScope.launch {
+                                    delay(120)
+                                    homeScrollState
+                                        .animateScrollTo(
+                                            homeScrollState
+                                                .maxValue
                                         )
-
-                                mobilitySessionsToday =
-                                    listOf(
-                                        session.copy(
-                                            id = sessionId
-                                        )
-                                    ) + mobilitySessionsToday
-
-                                mobilityCompleted = true
-
-                                snackbarHostState
-                                    .showSnackbar(
-                                        message =
-                                            "Mobility session saved."
-                                    )
-                            } catch (
-                                exception: Exception
-                            ) {
-                                snackbarHostState
-                                    .showSnackbar(
-                                        message =
-                                            "Could not save mobility session."
-                                    )
-                            } finally {
-                                isSavingMobility = false
-                            }
-                        }
-                    },
-                    onDeleteSession = { session ->
-                        coroutineScope.launch {
-                            isSavingMobility = true
-
-                            try {
-                                mobilitySessionDao
-                                    .deleteSession(
-                                        session
-                                    )
-
-                                mobilitySessionsToday =
-                                    mobilitySessionsToday
-                                        .filterNot {
-                                            it.id == session.id
-                                        }
-
-                                if (
-                                    mobilitySessionsToday.isEmpty()
-                                ) {
-                                    mobilityCompleted = false
                                 }
-
-                                snackbarHostState
-                                    .showSnackbar(
-                                        message =
-                                            "Mobility session deleted."
-                                    )
-                            } catch (
-                                exception: Exception
-                            ) {
-                                snackbarHostState
-                                    .showSnackbar(
-                                        message =
-                                            "Could not delete mobility session."
-                                    )
-                            } finally {
-                                isSavingMobility = false
-                            }
-                        }
-                    }
-                )
-
-                /*
-                 * Main food card from FoodUi.kt.
-                 */
-                FoodSection(
-                    entries =
-                        foodEntries,
-
-                    savedFoodCount =
-                        savedProducts.size,
-
-                    savedMealCount =
-                        savedMeals.size,
-
-                    lastScannedBarcode =
-                        lastScannedBarcode,
-
-                    isScanningBarcode =
-                        isScanningBarcode,
-
-                    onScanFood = {
-                        startFoodBarcodeScan(
-                            forMealBuilder = false
+                            },
+                            onSave = saveToday
                         )
-                    },
 
-                    onAddFoodManually = {
-                        isCreatingFoodForMeal = false
-                        scannedFoodPrefill = null
-                        showManualFoodDialog = true
-                    },
-                    onOpenSavedFoods = {
-                        coroutineScope.launch {
-                            try {
-                                savedProducts =
-                                    foodDao.getAllProducts()
+                        TodayOverviewCard(
+                            completedTasks =
+                                completedTasks,
+                            totalTasks = 4,
+                            calories =
+                                totalCaloriesToday,
+                            calorieGoal =
+                                currentCalorieGoal,
+                            waterOunces =
+                                totalWaterOunces,
+                            mobilityCompleted =
+                                mobilityCompleted
+                        )
 
-                                showSavedFoodsDialog = true
-                            } catch (
-                                exception: Exception
-                            ) {
-                                snackbarHostState.showSnackbar(
-                                    message =
-                                        "Could not load saved foods."
+                        TodayQuickActionsCard(
+                            onAddFood = {
+                                selectedMainTab = 1
+                            },
+                            onLogWater = {
+                                showQuickWaterDialog = true
+                            },
+                            onOpenMobility = {
+                                selectedMainTab = 2
+                            },
+                            onLogPain = {
+                                showQuickPainDialog = true
+                            }
+                        )
+
+                        CompactActivityCard(
+                            availability =
+                                healthAvailability,
+                            hasPermissions =
+                                hasHealthPermissions,
+                            isLoading =
+                                isLoadingHealthActivity,
+                            activity =
+                                displayedActivity,
+                            sourceLabel =
+                                activitySourceLabel,
+                            onOpenActivitySettings = {
+                                selectedMainTab = 4
+                            }
+                        )
+
+                        Button(
+                            onClick = saveToday,
+                            enabled = !isSaving,
+                            modifier =
+                                Modifier.fillMaxWidth(),
+                            shape =
+                                RoundedCornerShape(18.dp)
+                        ) {
+                            if (isSaving) {
+                                CircularProgressIndicator(
+                                    modifier =
+                                        Modifier.size(18.dp),
+                                    strokeWidth = 2.dp
+                                )
+
+                                Spacer(
+                                    Modifier.width(10.dp)
                                 )
                             }
-                        }
-                    },
 
-                    onBuildMeal = {
-                        mealBeingEdited = null
-
-                        coroutineScope.launch {
-                            try {
-                                savedProducts =
-                                    foodDao.getAllProducts()
-
-                                if (savedProducts.isEmpty()) {
-                                    snackbarHostState.showSnackbar(
-                                        message =
-                                            "Create or scan a Saved Food first."
-                                    )
+                            Text(
+                                if (isSaving) {
+                                    "Saving today…"
                                 } else {
-                                    showMealBuilderDialog = true
+                                    "Save Today"
                                 }
-                            } catch (
-                                exception: Exception
+                            )
+                        }
+
+                        TodayDetailsCard(
+                            expanded = showMoreToday,
+                            onToggle = {
+                                showMoreToday =
+                                    !showMoreToday
+                            }
+                        ) {
+                            TodayDetailToggleRow(
+                                title =
+                                    "Daily anchors",
+                                summary =
+                                    "$completedTasks of 4 complete",
+                                expanded =
+                                    expandedTodaySection ==
+                                            "anchors",
+                                onClick = {
+                                    expandedTodaySection =
+                                        if (
+                                            expandedTodaySection ==
+                                            "anchors"
+                                        ) {
+                                            null
+                                        } else {
+                                            "anchors"
+                                        }
+                                }
+                            )
+
+                            if (
+                                expandedTodaySection ==
+                                "anchors"
                             ) {
-                                snackbarHostState.showSnackbar(
-                                    message =
-                                        "Could not open the Meal Builder."
+                                DailyTasksSection(
+                                    foodRecorded =
+                                        foodRecorded,
+                                    onFoodRecordedChange = {
+                                        foodRecorded = it
+                                    },
+                                    walkCompleted =
+                                        walkCompleted,
+                                    onWalkCompletedChange = {
+                                        walkCompleted = it
+                                    },
+                                    painRecorded =
+                                        painRecorded,
+                                    onPainRecordedChange = {
+                                        painRecorded = it
+                                    },
+                                    mobilityCompleted =
+                                        mobilityCompleted,
+                                    onMobilityCompletedChange = {
+                                        mobilityCompleted = it
+                                    }
+                                )
+                            }
+
+                            TodayDetailToggleRow(
+                                title =
+                                    "Medication check-in",
+                                summary =
+                                    "Morning and night reference checks",
+                                expanded =
+                                    expandedTodaySection ==
+                                            "medication",
+                                onClick = {
+                                    expandedTodaySection =
+                                        if (
+                                            expandedTodaySection ==
+                                            "medication"
+                                        ) {
+                                            null
+                                        } else {
+                                            "medication"
+                                        }
+                                }
+                            )
+
+                            if (
+                                expandedTodaySection ==
+                                "medication"
+                            ) {
+                                MedicationSection(
+                                    morningAspirinTaken =
+                                        morningAspirinTaken,
+                                    onMorningAspirinChange = {
+                                        morningAspirinTaken = it
+                                    },
+                                    morningIbuprofenTaken =
+                                        morningIbuprofenTaken,
+                                    onMorningIbuprofenChange = {
+                                        morningIbuprofenTaken = it
+                                    },
+                                    morningNaproxenTaken =
+                                        morningNaproxenTaken,
+                                    onMorningNaproxenChange = {
+                                        morningNaproxenTaken = it
+                                    },
+                                    morningAcetaminophenTaken =
+                                        morningAcetaminophenTaken,
+                                    onMorningAcetaminophenChange = {
+                                        morningAcetaminophenTaken = it
+                                    },
+                                    nightIbuprofenTaken =
+                                        nightIbuprofenTaken,
+                                    onNightIbuprofenChange = {
+                                        nightIbuprofenTaken = it
+                                    },
+                                    nightNaproxenTaken =
+                                        nightNaproxenTaken,
+                                    onNightNaproxenChange = {
+                                        nightNaproxenTaken = it
+                                    },
+                                    nightAcetaminophenTaken =
+                                        nightAcetaminophenTaken,
+                                    onNightAcetaminophenChange = {
+                                        nightAcetaminophenTaken = it
+                                    }
+                                )
+                            }
+
+                            TodayDetailToggleRow(
+                                title =
+                                    "Journal",
+                                summary =
+                                    if (
+                                        journalText.isBlank()
+                                    ) {
+                                        "No note yet"
+                                    } else {
+                                        "Today has a note"
+                                    },
+                                expanded =
+                                    expandedTodaySection ==
+                                            "journal",
+                                onClick = {
+                                    expandedTodaySection =
+                                        if (
+                                            expandedTodaySection ==
+                                            "journal"
+                                        ) {
+                                            null
+                                        } else {
+                                            "journal"
+                                        }
+                                }
+                            )
+
+                            if (
+                                expandedTodaySection ==
+                                "journal"
+                            ) {
+                                JournalSection(
+                                    journalText =
+                                        journalText,
+                                    onJournalTextChange = {
+                                        journalText = it
+                                    }
                                 )
                             }
                         }
-                    },
 
-                    onOpenSavedMeals = {
-                        coroutineScope.launch {
-                            try {
-                                savedMeals =
-                                    mealDao
-                                        .getAllMealsWithIngredients()
-
-                                savedProducts =
-                                    foodDao.getAllProducts()
-
-                                showSavedMealsDialog = true
-                            } catch (
-                                exception: Exception
-                            ) {
-                                snackbarHostState.showSnackbar(
-                                    message =
-                                        "Could not load saved meals."
+                        Text(
+                            text =
+                                "Food, mobility, history, and health tools now live in their own tabs below.",
+                            style =
+                                MaterialTheme.typography.bodySmall,
+                            color =
+                                MaterialTheme.colorScheme
+                                    .onSurfaceVariant,
+                            modifier =
+                                Modifier.padding(
+                                    horizontal = 6.dp
                                 )
+                        )
+
+                        Spacer(
+                            modifier =
+                                Modifier.height(12.dp)
+                        )
+                    }
+                }
+
+                1 -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                            .verticalScroll(
+                                rememberScrollState()
+                            )
+                            .padding(16.dp),
+                        verticalArrangement =
+                            Arrangement.spacedBy(16.dp)
+                    ) {
+                        TabScreenHeader(
+                            title = "Food",
+                            subtitle =
+                                "Log today’s meal, manage saved foods, and build reusable meals."
+                        )
+
+                        FoodSection(
+                            entries =
+                                foodEntries,
+                            savedFoodCount =
+                                savedProducts.size,
+                            savedMealCount =
+                                savedMeals.size,
+                            lastScannedBarcode =
+                                lastScannedBarcode,
+                            isScanningBarcode =
+                                isScanningBarcode,
+                            onScanFood = {
+                                startFoodBarcodeScan(
+                                    forMealBuilder = false
+                                )
+                            },
+                            onAddFoodManually = {
+                                isCreatingFoodForMeal =
+                                    false
+                                scannedFoodPrefill = null
+                                showManualFoodDialog =
+                                    true
+                            },
+                            onOpenSavedFoods = {
+                                openSavedFoodsScreen()
+                            },
+                            onBuildMeal = {
+                                openMealBuilderScreen()
+                            },
+                            onOpenSavedMeals = {
+                                openSavedMealsScreen()
+                            },
+                            onDeleteEntry = {
+                                deleteFoodEntry(it)
+                            },
+                            onDeleteMealLog = {
+                                deleteMealLog(it)
                             }
-                        }
-                    },
+                        )
 
-                    onDeleteEntry = { entry ->
-                        coroutineScope.launch {
-                            try {
-                                foodDao
-                                    .deleteFoodEntryById(
-                                        entry.id
-                                    )
+                        Spacer(
+                            modifier =
+                                Modifier.height(12.dp)
+                        )
+                    }
+                }
 
-                                foodEntries =
-                                    foodDao
-                                        .getEntriesForDate(
-                                            todayDate
-                                        )
+                2 -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                            .verticalScroll(
+                                rememberScrollState()
+                            )
+                            .padding(16.dp),
+                        verticalArrangement =
+                            Arrangement.spacedBy(16.dp)
+                    ) {
+                        TabScreenHeader(
+                            title = "Mobility",
+                            subtitle =
+                                "Generate a balanced routine or quickly record independent stretching."
+                        )
 
-                                snackbarHostState
-                                    .showSnackbar(
-                                        message =
-                                            "Food entry deleted."
-                                    )
-                            } catch (
-                                exception: Exception
-                            ) {
-                                snackbarHostState
-                                    .showSnackbar(
-                                        message =
-                                            "Could not delete food."
-                                    )
+                        MobilitySection(
+                            sessions =
+                                mobilitySessionsToday,
+                            isSaving =
+                                isSavingMobility,
+                            onSaveSession = {
+                                saveMobilitySession(it)
+                            },
+                            onDeleteSession = {
+                                deleteMobilitySession(it)
                             }
-                        }
-                    },
+                        )
 
-                    onDeleteMealLog = { mealLogId ->
-                        coroutineScope.launch {
-                            try {
-                                foodDao
-                                    .deleteFoodEntriesByMealLogId(
-                                        mealLogId
-                                    )
+                        Spacer(
+                            modifier =
+                                Modifier.height(12.dp)
+                        )
+                    }
+                }
 
-                                foodEntries =
-                                    foodDao
-                                        .getEntriesForDate(
-                                            todayDate
-                                        )
+                3 -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                            .verticalScroll(
+                                rememberScrollState()
+                            )
+                            .padding(16.dp),
+                        verticalArrangement =
+                            Arrangement.spacedBy(16.dp)
+                    ) {
+                        TabScreenHeader(
+                            title = "History",
+                            subtitle =
+                                "Review saved days without crowding the Today dashboard."
+                        )
 
-                                snackbarHostState
-                                    .showSnackbar(
-                                        message =
-                                            "Meal deleted from today."
-                                    )
-                            } catch (
-                                exception: Exception
-                            ) {
-                                snackbarHostState
-                                    .showSnackbar(
-                                        message =
-                                            "Could not delete meal."
-                                    )
+                        HistoryHubCard(
+                            isLoading =
+                                isLoadingDailyHistory,
+                            onOpenCalendar = {
+                                openDailyHistory()
                             }
-                        }
+                        )
+                        Spacer(
+                            modifier =
+                                Modifier.height(12.dp)
+                        )
                     }
-                )
+                }
 
-                WaterSection(
-                    nextBottleHasMio =
-                        nextBottleHasMio,
+                else -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                            .verticalScroll(
+                                rememberScrollState()
+                            )
+                            .padding(16.dp),
+                        verticalArrangement =
+                            Arrangement.spacedBy(16.dp)
+                    ) {
+                        TabScreenHeader(
+                            title = "More",
+                            subtitle =
+                                "Profile, goals, measurements, medication reference, and connected activity settings."
+                        )
 
-                    onNextBottleHasMioChange = {
-                        nextBottleHasMio = it
-                    },
+                        HealthProfileFeature()
 
-                    plainReusableBottleCount =
-                        plainReusableBottleCount,
-
-                    mioReusableBottleCount =
-                        mioReusableBottleCount,
-
-                    plainDisposableBottleCount =
-                        plainDisposableBottleCount,
-
-                    mioDisposableBottleCount =
-                        mioDisposableBottleCount,
-
-                    onAddReusableBottle = {
-                        if (nextBottleHasMio) {
-                            mioReusableBottleCount++
-                        } else {
-                            plainReusableBottleCount++
-                        }
-
-                        foodRecorded = true
-                    },
-
-                    onAddDisposableBottle = {
-                        if (nextBottleHasMio) {
-                            mioDisposableBottleCount++
-                        } else {
-                            plainDisposableBottleCount++
-                        }
-
-                        foodRecorded = true
-                    },
-
-                    onRemovePlainReusableBottle = {
-                        if (
-                            plainReusableBottleCount > 0
-                        ) {
-                            plainReusableBottleCount--
-                        }
-                    },
-
-                    onRemoveMioReusableBottle = {
-                        if (
-                            mioReusableBottleCount > 0
-                        ) {
-                            mioReusableBottleCount--
-                        }
-                    },
-
-                    onRemovePlainDisposableBottle = {
-                        if (
-                            plainDisposableBottleCount > 0
-                        ) {
-                            plainDisposableBottleCount--
-                        }
-                    },
-
-                    onRemoveMioDisposableBottle = {
-                        if (
-                            mioDisposableBottleCount > 0
-                        ) {
-                            mioDisposableBottleCount--
-                        }
+                        ActivitySection(
+                            availability =
+                                healthAvailability,
+                            hasPermissions =
+                                hasHealthPermissions,
+                            isLoading =
+                                isLoadingHealthActivity,
+                            activity =
+                                displayedActivity,
+                            sourceLabel =
+                                activitySourceLabel,
+                            onConnect = {
+                                healthPermissionsLauncher
+                                    .launch(
+                                        HealthConnectManager
+                                            .permissions
+                                    )
+                            },
+                            onRefresh = {
+                                refreshHealthActivity(
+                                    showFeedback = true
+                                )
+                            },
+                            onManageAccess = {
+                                healthConnectManager
+                                    .openHealthConnectSettings()
+                            },
+                            onInstallOrUpdate = {
+                                healthConnectManager
+                                    .openInstallOrUpdate()
+                            }
+                        )
+                        Spacer(
+                            modifier =
+                                Modifier.height(12.dp)
+                        )
                     }
-                )
-
-                PainSection(
-                    backPain = backPain,
-
-                    onBackPainChange = {
-                        backPain = it
-                        painRecorded = true
-                    },
-
-                    shinPain = shinPain,
-
-                    onShinPainChange = {
-                        shinPain = it
-                        painRecorded = true
-                    }
-                )
-
-                MedicationSection(
-                    morningAspirinTaken =
-                        morningAspirinTaken,
-
-                    onMorningAspirinChange = {
-                        morningAspirinTaken = it
-                    },
-
-                    morningIbuprofenTaken =
-                        morningIbuprofenTaken,
-
-                    onMorningIbuprofenChange = {
-                        morningIbuprofenTaken = it
-                    },
-
-                    morningNaproxenTaken =
-                        morningNaproxenTaken,
-
-                    onMorningNaproxenChange = {
-                        morningNaproxenTaken = it
-                    },
-
-                    morningAcetaminophenTaken =
-                        morningAcetaminophenTaken,
-
-                    onMorningAcetaminophenChange = {
-                        morningAcetaminophenTaken = it
-                    },
-
-                    nightIbuprofenTaken =
-                        nightIbuprofenTaken,
-
-                    onNightIbuprofenChange = {
-                        nightIbuprofenTaken = it
-                    },
-
-                    nightNaproxenTaken =
-                        nightNaproxenTaken,
-
-                    onNightNaproxenChange = {
-                        nightNaproxenTaken = it
-                    },
-
-                    nightAcetaminophenTaken =
-                        nightAcetaminophenTaken,
-
-                    onNightAcetaminophenChange = {
-                        nightAcetaminophenTaken = it
-                    }
-                )
-
-                JournalSection(
-                    journalText = journalText,
-
-                    onJournalTextChange = {
-                        journalText = it
-                    }
-                )
-
-                Text(
-                    text = "Your changes stay editable until you save. Use the action bar below whenever today is ready.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 6.dp)
-                )
-
-                Spacer(
-                    modifier = Modifier.height(12.dp)
-                )
+                }
             }
         }
+    }
+
+    if (showQuickWaterDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showQuickWaterDialog = false
+            },
+            title = {
+                Text("Log Water")
+            },
+            text = {
+                Column(
+                    modifier =
+                        Modifier
+                            .heightIn(max = 520.dp)
+                            .verticalScroll(
+                                rememberScrollState()
+                            ),
+                    verticalArrangement =
+                        Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text =
+                            "${formatOunces(totalWaterOunces)} oz recorded today",
+                        style =
+                            MaterialTheme.typography.titleMedium
+                    )
+
+                    Row(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(
+                                    RoundedCornerShape(16.dp)
+                                )
+                                .clickable {
+                                    nextBottleHasMio =
+                                        !nextBottleHasMio
+                                }
+                                .padding(8.dp),
+                        verticalAlignment =
+                            Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked =
+                                nextBottleHasMio,
+                            onCheckedChange = {
+                                nextBottleHasMio = it
+                            }
+                        )
+
+                        Text(
+                            text =
+                                "The next bottle has MiO",
+                            style =
+                                MaterialTheme.typography
+                                    .bodyMedium
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            if (nextBottleHasMio) {
+                                mioReusableBottleCount++
+                            } else {
+                                plainReusableBottleCount++
+                            }
+
+                            foodRecorded = true
+                        },
+                        modifier =
+                            Modifier.fillMaxWidth(),
+                        shape =
+                            RoundedCornerShape(16.dp)
+                    ) {
+                        Text("Add 24 oz reusable bottle")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            if (nextBottleHasMio) {
+                                mioDisposableBottleCount++
+                            } else {
+                                plainDisposableBottleCount++
+                            }
+
+                            foodRecorded = true
+                        },
+                        modifier =
+                            Modifier.fillMaxWidth(),
+                        shape =
+                            RoundedCornerShape(16.dp)
+                    ) {
+                        Text("Add 16.9 oz disposable bottle")
+                    }
+
+                    if (
+                        plainReusableBottleCount +
+                        mioReusableBottleCount +
+                        plainDisposableBottleCount +
+                        mioDisposableBottleCount >
+                        0
+                    ) {
+                        HorizontalDivider()
+
+                        Text(
+                            text = "Today’s bottles",
+                            style =
+                                MaterialTheme.typography
+                                    .titleMedium
+                        )
+
+                        if (
+                            plainReusableBottleCount >
+                            0
+                        ) {
+                            WaterCountRow(
+                                label =
+                                    "24 oz plain water",
+                                count =
+                                    plainReusableBottleCount,
+                                onRemoveOne = {
+                                    plainReusableBottleCount--
+                                }
+                            )
+                        }
+
+                        if (
+                            mioReusableBottleCount >
+                            0
+                        ) {
+                            WaterCountRow(
+                                label =
+                                    "24 oz MiO water",
+                                count =
+                                    mioReusableBottleCount,
+                                onRemoveOne = {
+                                    mioReusableBottleCount--
+                                }
+                            )
+                        }
+
+                        if (
+                            plainDisposableBottleCount >
+                            0
+                        ) {
+                            WaterCountRow(
+                                label =
+                                    "16.9 oz plain water",
+                                count =
+                                    plainDisposableBottleCount,
+                                onRemoveOne = {
+                                    plainDisposableBottleCount--
+                                }
+                            )
+                        }
+
+                        if (
+                            mioDisposableBottleCount >
+                            0
+                        ) {
+                            WaterCountRow(
+                                label =
+                                    "16.9 oz MiO water",
+                                count =
+                                    mioDisposableBottleCount,
+                                onRemoveOne = {
+                                    mioDisposableBottleCount--
+                                }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showQuickWaterDialog = false
+                    }
+                ) {
+                    Text("Done")
+                }
+            }
+        )
+    }
+
+    if (showQuickPainDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showQuickPainDialog = false
+            },
+            title = {
+                Text("Record Pain")
+            },
+            text = {
+                Column(
+                    modifier =
+                        Modifier
+                            .heightIn(max = 520.dp)
+                            .verticalScroll(
+                                rememberScrollState()
+                            ),
+                    verticalArrangement =
+                        Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text =
+                            "Record what is true right now. You can change it later before saving today.",
+                        style =
+                            MaterialTheme.typography.bodyMedium,
+                        color =
+                            MaterialTheme.colorScheme
+                                .onSurfaceVariant
+                    )
+
+                    PainSlider(
+                        label = "Back pain",
+                        painValue =
+                            backPain,
+                        onPainValueChange = {
+                            backPain = it
+                            painRecorded = true
+                        }
+                    )
+
+                    PainSlider(
+                        label = "Shin pain",
+                        painValue =
+                            shinPain,
+                        onPainValueChange = {
+                            shinPain = it
+                            painRecorded = true
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        painRecorded = true
+                        showQuickPainDialog = false
+                    }
+                ) {
+                    Text("Done")
+                }
+            }
+        )
     }
 
     if (showBarcodeVerificationDialog) {
@@ -1771,8 +2331,8 @@ fun DailyRebuildApp(
                     Text(
                         text =
                             "Compare this with the digits printed " +
-                                "under the barcode. Correct any digits " +
-                                "before looking up the food."
+                                    "under the barcode. Correct any digits " +
+                                    "before looking up the food."
                     )
 
                     OutlinedTextField(
@@ -1793,8 +2353,8 @@ fun DailyRebuildApp(
                         supportingText = {
                             Text(
                                 "Food barcodes normally contain " +
-                                    "8, 12, or 13 digits. " +
-                                    "This one has ${pendingBarcodeText.length} digits."
+                                        "8, 12, or 13 digits. " +
+                                        "This one has ${pendingBarcodeText.length} digits."
                             )
                         },
 
@@ -1816,8 +2376,8 @@ fun DailyRebuildApp(
                 TextButton(
                     enabled =
                         pendingBarcodeText.length == 8 ||
-                            pendingBarcodeText.length == 12 ||
-                            pendingBarcodeText.length == 13,
+                                pendingBarcodeText.length == 12 ||
+                                pendingBarcodeText.length == 13,
 
                     onClick = {
                         val verifiedBarcode =
@@ -1934,7 +2494,7 @@ fun DailyRebuildApp(
                                                 }
 
                                                 totalAmount /
-                                                    product.servingQuantity
+                                                        product.servingQuantity
                                             }
                                         }
 
@@ -1968,27 +2528,27 @@ fun DailyRebuildApp(
                                         calories =
                                             product
                                                 .caloriesPerServing *
-                                                servings,
+                                                    servings,
 
                                         proteinGrams =
                                             product
                                                 .proteinGramsPerServing *
-                                                servings,
+                                                    servings,
 
                                         carbohydrateGrams =
                                             product
                                                 .carbohydrateGramsPerServing *
-                                                servings,
+                                                    servings,
 
                                         fatGrams =
                                             product
                                                 .fatGramsPerServing *
-                                                servings,
+                                                    servings,
 
                                         sodiumMilligrams =
                                             product
                                                 .sodiumMilligramsPerServing *
-                                                servings
+                                                    servings
                                     )
                                 }
 
@@ -2258,7 +2818,7 @@ fun DailyRebuildApp(
                         snackbarHostState.showSnackbar(
                             message =
                                 "Cannot delete ${product.name}. " +
-                                    "It is used by: $mealNames."
+                                        "It is used by: $mealNames."
                         )
                     } else {
                         savedFoodToDelete = product
@@ -2282,7 +2842,7 @@ fun DailyRebuildApp(
                 Text(
                     text =
                         "${product.name} will be removed from Saved Foods. " +
-                            "Past daily entries will never be deleted."
+                                "Past daily entries will never be deleted."
                 )
             },
 
@@ -2312,7 +2872,7 @@ fun DailyRebuildApp(
                                 snackbarHostState.showSnackbar(
                                     message =
                                         "Cannot delete ${product.name} because " +
-                                            "it is used by a current or past food entry."
+                                                "it is used by a current or past food entry."
                                 )
                             }
                         }
@@ -2439,7 +2999,7 @@ fun DailyRebuildApp(
 
             productOnlyMode =
                 isCreatingFoodForMeal ||
-                    isEditingSavedFood,
+                        isEditingSavedFood,
 
             dialogTitle =
                 if (isEditingSavedFood) {
@@ -2549,7 +3109,7 @@ fun DailyRebuildApp(
                                 .showSnackbar(
                                     message =
                                         "Saved food created. " +
-                                            "Choose it as a meal ingredient."
+                                                "Choose it as a meal ingredient."
                                 )
 
                             return@launch
@@ -2626,7 +3186,7 @@ fun DailyRebuildApp(
                                         isCreatingFoodForMeal
                                     ) {
                                         "Could not save food. The barcode may " +
-                                            "already belong to another saved food."
+                                                "already belong to another saved food."
                                     } else {
                                         "Could not add food."
                                     }
@@ -2636,6 +3196,750 @@ fun DailyRebuildApp(
                     }
                 }
             }
+        )
+    }
+}
+
+
+private data class DailyRebuildNavigationItem(
+    val label: String,
+    val symbol: String
+)
+
+private val dailyRebuildNavigationItems =
+    listOf(
+        DailyRebuildNavigationItem(
+            label = "Home",
+            symbol = "⌂"
+        ),
+        DailyRebuildNavigationItem(
+            label = "Food",
+            symbol = "F"
+        ),
+        DailyRebuildNavigationItem(
+            label = "Mobility",
+            symbol = "M"
+        ),
+        DailyRebuildNavigationItem(
+            label = "History",
+            symbol = "↺"
+        ),
+        DailyRebuildNavigationItem(
+            label = "More",
+            symbol = "•••"
+        )
+    )
+
+@Composable
+private fun DailyRebuildBottomNavigation(
+    selectedTab: Int,
+    onTabSelected: (Int) -> Unit
+) {
+    NavigationBar(
+        containerColor =
+            MaterialTheme.colorScheme.surface,
+        tonalElevation = 6.dp
+    ) {
+        dailyRebuildNavigationItems
+            .forEachIndexed { index, item ->
+                NavigationBarItem(
+                    selected =
+                        selectedTab == index,
+                    onClick = {
+                        onTabSelected(index)
+                    },
+                    icon = {
+                        Text(
+                            text = item.symbol,
+                            style =
+                                MaterialTheme.typography
+                                    .titleMedium,
+                            fontWeight =
+                                FontWeight.Bold
+                        )
+                    },
+                    label = {
+                        Text(item.label)
+                    },
+                    alwaysShowLabel = true
+                )
+            }
+    }
+}
+
+@Composable
+private fun TabScreenHeader(
+    title: String,
+    subtitle: String
+) {
+    Column(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(
+                    horizontal = 4.dp,
+                    vertical = 4.dp
+                ),
+        verticalArrangement =
+            Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = title,
+            style =
+                MaterialTheme.typography
+                    .headlineMedium
+        )
+
+        Text(
+            text = subtitle,
+            style =
+                MaterialTheme.typography
+                    .bodyMedium,
+            color =
+                MaterialTheme.colorScheme
+                    .onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun TodayNextStepCard(
+    foodRecorded: Boolean,
+    waterOunces: Double,
+    mobilityCompleted: Boolean,
+    painRecorded: Boolean,
+    completedTasks: Int,
+    isSaving: Boolean,
+    onOpenFood: () -> Unit,
+    onOpenWater: () -> Unit,
+    onOpenMobility: () -> Unit,
+    onOpenPain: () -> Unit,
+    onOpenAnchors: () -> Unit,
+    onSave: () -> Unit
+) {
+    val title: String
+    val description: String
+    val buttonText: String
+    val onClick: () -> Unit
+
+    when {
+        !foodRecorded -> {
+            title = "Log today’s food"
+            description =
+                "Start with the meal or food you actually ate."
+            buttonText = "Open Food"
+            onClick = onOpenFood
+        }
+
+        waterOunces <= 0.0 -> {
+            title = "Start today’s water"
+            description =
+                "Record the first bottle without opening the full daily form."
+            buttonText = "Log Water"
+            onClick = onOpenWater
+        }
+
+        !mobilityCompleted -> {
+            title = "Complete mobility"
+            description =
+                "Generate a seated or bed-compatible routine."
+            buttonText = "Open Mobility"
+            onClick = onOpenMobility
+        }
+
+        !painRecorded -> {
+            title = "Record current pain"
+            description =
+                "A quick back and shin check keeps the day measurable."
+            buttonText = "Log Pain"
+            onClick = onOpenPain
+        }
+
+        completedTasks < 4 -> {
+            title = "Review daily anchors"
+            description =
+                "One or more daily checks still need your attention."
+            buttonText = "Review Anchors"
+            onClick = onOpenAnchors
+        }
+
+        else -> {
+            title = "Today is ready"
+            description =
+                "Review anything you need, then save the day."
+            buttonText =
+                if (isSaving) {
+                    "Saving…"
+                } else {
+                    "Save Today"
+                }
+            onClick = onSave
+        }
+    }
+
+    RebuildSectionCard(
+        title = "Next step",
+        subtitle = title,
+        accentColor = RebuildAmber
+    ) {
+        Text(
+            text = description,
+            style =
+                MaterialTheme.typography
+                    .bodyMedium,
+            color =
+                MaterialTheme.colorScheme
+                    .onSurfaceVariant
+        )
+
+        Button(
+            onClick = onClick,
+            enabled = !isSaving,
+            modifier =
+                Modifier.fillMaxWidth(),
+            shape =
+                RoundedCornerShape(16.dp)
+        ) {
+            Text(buttonText)
+        }
+    }
+}
+
+@Composable
+private fun TodayOverviewCard(
+    completedTasks: Int,
+    totalTasks: Int,
+    calories: Double,
+    calorieGoal: Int?,
+    waterOunces: Double,
+    mobilityCompleted: Boolean
+) {
+    val progress =
+        if (totalTasks <= 0) {
+            0f
+        } else {
+            completedTasks
+                .toFloat()
+                .div(totalTasks.toFloat())
+                .coerceIn(0f, 1f)
+        }
+
+    RebuildSectionCard(
+        title = "Today",
+        subtitle =
+            "A compact view of the information you use most.",
+        accentColor = RebuildBlue
+    ) {
+        Row(
+            modifier =
+                Modifier.fillMaxWidth(),
+            horizontalArrangement =
+                Arrangement.SpaceBetween,
+            verticalAlignment =
+                Alignment.CenterVertically
+        ) {
+            Text(
+                text =
+                    "$completedTasks of $totalTasks anchors",
+                style =
+                    MaterialTheme.typography
+                        .titleMedium
+            )
+
+            Text(
+                text =
+                    "${(progress * 100).toInt()}%",
+                style =
+                    MaterialTheme.typography
+                        .labelLarge,
+                color =
+                    MaterialTheme.colorScheme
+                        .primary
+            )
+        }
+
+        LinearProgressIndicator(
+            progress = progress,
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(
+                        RoundedCornerShape(50)
+                    )
+        )
+
+        Row(
+            modifier =
+                Modifier.fillMaxWidth(),
+            horizontalArrangement =
+                Arrangement.spacedBy(8.dp)
+        ) {
+            RebuildMetricPill(
+                label = "calories",
+                value =
+                    if (calorieGoal != null) {
+                        "${calories.toInt()} / $calorieGoal"
+                    } else {
+                        calories.toInt().toString()
+                    },
+                modifier =
+                    Modifier.weight(1f),
+                color =
+                    MaterialTheme.colorScheme
+                        .tertiaryContainer,
+                contentColor =
+                    MaterialTheme.colorScheme
+                        .onTertiaryContainer
+            )
+
+            RebuildMetricPill(
+                label = "water",
+                value =
+                    "${formatOunces(waterOunces)} oz",
+                modifier =
+                    Modifier.weight(1f),
+                color =
+                    MaterialTheme.colorScheme
+                        .primaryContainer
+            )
+        }
+
+        Row(
+            modifier =
+                Modifier.fillMaxWidth(),
+            horizontalArrangement =
+                Arrangement.spacedBy(8.dp)
+        ) {
+            RebuildMetricPill(
+                label = "mobility",
+                value =
+                    if (mobilityCompleted) {
+                        "Done"
+                    } else {
+                        "Not yet"
+                    },
+                modifier =
+                    Modifier.weight(1f),
+                color =
+                    MaterialTheme.colorScheme
+                        .secondaryContainer,
+                contentColor =
+                    MaterialTheme.colorScheme
+                        .onSecondaryContainer
+            )
+
+            RebuildMetricPill(
+                label = "anchors",
+                value =
+                    "$completedTasks / $totalTasks",
+                modifier =
+                    Modifier.weight(1f),
+                color =
+                    MaterialTheme.colorScheme
+                        .surfaceVariant,
+                contentColor =
+                    MaterialTheme.colorScheme
+                        .onSurfaceVariant
+            )
+        }
+
+        if (calorieGoal == null) {
+            Text(
+                text =
+                    "No calorie goal is set yet. Add one under More → Health profile & goals after enough days are logged.",
+                style =
+                    MaterialTheme.typography
+                        .bodySmall,
+                color =
+                    MaterialTheme.colorScheme
+                        .onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun TodayQuickActionsCard(
+    onAddFood: () -> Unit,
+    onLogWater: () -> Unit,
+    onOpenMobility: () -> Unit,
+    onLogPain: () -> Unit
+) {
+    RebuildSectionCard(
+        title = "Quick actions",
+        subtitle =
+            "Open the right tool without searching through the entire page.",
+        accentColor = RebuildGreen
+    ) {
+        Row(
+            modifier =
+                Modifier.fillMaxWidth(),
+            horizontalArrangement =
+                Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onAddFood,
+                modifier =
+                    Modifier.weight(1f),
+                shape =
+                    RoundedCornerShape(16.dp)
+            ) {
+                Text("Add Food")
+            }
+
+            OutlinedButton(
+                onClick = onLogWater,
+                modifier =
+                    Modifier.weight(1f),
+                shape =
+                    RoundedCornerShape(16.dp)
+            ) {
+                Text("Water")
+            }
+        }
+
+        Row(
+            modifier =
+                Modifier.fillMaxWidth(),
+            horizontalArrangement =
+                Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = onOpenMobility,
+                modifier =
+                    Modifier.weight(1f),
+                shape =
+                    RoundedCornerShape(16.dp)
+            ) {
+                Text("Mobility")
+            }
+
+            OutlinedButton(
+                onClick = onLogPain,
+                modifier =
+                    Modifier.weight(1f),
+                shape =
+                    RoundedCornerShape(16.dp)
+            ) {
+                Text("Log Pain")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactActivityCard(
+    availability: HealthConnectAvailability,
+    hasPermissions: Boolean,
+    isLoading: Boolean,
+    activity: HealthActivityData,
+    sourceLabel: String?,
+    onOpenActivitySettings: () -> Unit
+) {
+    RebuildSectionCard(
+        title = "Today’s activity",
+        subtitle =
+            sourceLabel
+                ?: "Steps, miles, and recorded activity time.",
+        accentColor = RebuildTeal,
+        trailing = {
+            TextButton(
+                onClick =
+                    onOpenActivitySettings
+            ) {
+                Text("Manage")
+            }
+        }
+    ) {
+        when {
+            isLoading -> {
+                Row(
+                    verticalAlignment =
+                        Alignment.CenterVertically,
+                    horizontalArrangement =
+                        Arrangement.spacedBy(12.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier =
+                            Modifier.size(24.dp),
+                        strokeWidth = 3.dp
+                    )
+
+                    Text(
+                        text =
+                            "Refreshing activity…",
+                        style =
+                            MaterialTheme.typography
+                                .bodyMedium
+                    )
+                }
+            }
+
+            availability !=
+                    HealthConnectAvailability.AVAILABLE -> {
+                Text(
+                    text =
+                        "Health Connect is not currently available. Open More to install, update, or review access.",
+                    style =
+                        MaterialTheme.typography
+                            .bodyMedium,
+                    color =
+                        MaterialTheme.colorScheme
+                            .onSurfaceVariant
+                )
+            }
+
+            !hasPermissions -> {
+                Text(
+                    text =
+                        "Activity access is not connected. Open More when you are ready to connect it.",
+                    style =
+                        MaterialTheme.typography
+                            .bodyMedium,
+                    color =
+                        MaterialTheme.colorScheme
+                            .onSurfaceVariant
+                )
+            }
+
+            else -> {
+                Row(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    horizontalArrangement =
+                        Arrangement.spacedBy(8.dp)
+                ) {
+                    RebuildMetricPill(
+                        label = "steps",
+                        value =
+                            String.format(
+                                Locale.US,
+                                "%,d",
+                                activity.steps
+                            ),
+                        modifier =
+                            Modifier.weight(1f)
+                    )
+
+                    RebuildMetricPill(
+                        label = "miles",
+                        value =
+                            formatActivityMiles(
+                                activity.distanceMiles
+                            ),
+                        modifier =
+                            Modifier.weight(1f),
+                        color =
+                            MaterialTheme.colorScheme
+                                .secondaryContainer,
+                        contentColor =
+                            MaterialTheme.colorScheme
+                                .onSecondaryContainer
+                    )
+
+                    RebuildMetricPill(
+                        label = "time",
+                        value =
+                            formatActivityTime(
+                                activity.activityMinutes
+                            ),
+                        modifier =
+                            Modifier.weight(1f),
+                        color =
+                            MaterialTheme.colorScheme
+                                .tertiaryContainer,
+                        contentColor =
+                            MaterialTheme.colorScheme
+                                .onTertiaryContainer
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TodayDetailsCard(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    Column(
+        verticalArrangement =
+            Arrangement.spacedBy(12.dp)
+    ) {
+        RebuildSectionCard(
+            title = "More today",
+            subtitle =
+                if (expanded) {
+                    "Daily anchors, medication checks, and journal."
+                } else {
+                    "Less-frequent daily controls stay out of the way until needed."
+                },
+            accentColor =
+                MaterialTheme.colorScheme
+                    .outline,
+            trailing = {
+                TextButton(
+                    onClick = onToggle
+                ) {
+                    Text(
+                        if (expanded) {
+                            "Hide"
+                        } else {
+                            "Expand"
+                        }
+                    )
+                }
+            }
+        ) {
+            if (!expanded) {
+                Text(
+                    text =
+                        "Expand only when you need the detailed daily controls.",
+                    style =
+                        MaterialTheme.typography
+                            .bodySmall,
+                    color =
+                        MaterialTheme.colorScheme
+                            .onSurfaceVariant
+                )
+            }
+        }
+
+        if (expanded) {
+            Column(
+                verticalArrangement =
+                    Arrangement.spacedBy(12.dp)
+            ) {
+                content()
+            }
+        }
+    }
+}
+
+@Composable
+private fun TodayDetailToggleRow(
+    title: String,
+    summary: String,
+    expanded: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clip(
+                    RoundedCornerShape(18.dp)
+                )
+                .clickable(
+                    onClick = onClick
+                ),
+        shape =
+            RoundedCornerShape(18.dp),
+        color =
+            MaterialTheme.colorScheme
+                .surfaceVariant
+                .copy(alpha = 0.56f)
+    ) {
+        Row(
+            modifier =
+                Modifier.padding(16.dp),
+            verticalAlignment =
+                Alignment.CenterVertically
+        ) {
+            Column(
+                modifier =
+                    Modifier.weight(1f),
+                verticalArrangement =
+                    Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = title,
+                    style =
+                        MaterialTheme.typography
+                            .titleMedium
+                )
+
+                Text(
+                    text = summary,
+                    style =
+                        MaterialTheme.typography
+                            .bodySmall,
+                    color =
+                        MaterialTheme.colorScheme
+                            .onSurfaceVariant
+                )
+            }
+
+            Text(
+                text =
+                    if (expanded) {
+                        "−"
+                    } else {
+                        "+"
+                    },
+                style =
+                    MaterialTheme.typography
+                        .headlineMedium,
+                color =
+                    MaterialTheme.colorScheme
+                        .primary
+            )
+        }
+    }
+}
+
+@Composable
+private fun HistoryHubCard(
+    isLoading: Boolean,
+    onOpenCalendar: () -> Unit
+) {
+    RebuildSectionCard(
+        title = "Calendar & day details",
+        subtitle =
+            "Open any saved day to review food, activity, mobility, water, pain, medication checks, and journal entries.",
+        accentColor = RebuildBlue
+    ) {
+        Button(
+            onClick = onOpenCalendar,
+            enabled = !isLoading,
+            modifier =
+                Modifier.fillMaxWidth(),
+            shape =
+                RoundedCornerShape(16.dp)
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier =
+                        Modifier.size(18.dp),
+                    strokeWidth = 2.dp
+                )
+
+                Spacer(
+                    Modifier.width(10.dp)
+                )
+            }
+
+            Text(
+                if (isLoading) {
+                    "Loading history…"
+                } else {
+                    "Open Calendar"
+                }
+            )
+        }
+
+        Text(
+            text =
+                "Deleting an entire day remains inside the calendar details screen with confirmation.",
+            style =
+                MaterialTheme.typography
+                    .bodySmall,
+            color =
+                MaterialTheme.colorScheme
+                    .onSurfaceVariant
         )
     }
 }
@@ -2716,42 +4020,65 @@ private fun HeaderSection(
     val today = remember(todayDate) {
         LocalDate.parse(todayDate)
     }
-    val dayFormatter = DateTimeFormatter.ofPattern("EEEE")
-    val dateFormatter = DateTimeFormatter.ofPattern("MMMM d, yyyy")
+    val dayFormatter =
+        DateTimeFormatter.ofPattern("EEEE")
+    val dateFormatter =
+        DateTimeFormatter.ofPattern(
+            "MMMM d, yyyy"
+        )
 
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(30.dp),
+        modifier =
+            Modifier.fillMaxWidth(),
+        shape =
+            RoundedCornerShape(28.dp),
         color = RebuildNavy,
         contentColor = Color.White,
-        shadowElevation = 6.dp
+        shadowElevation = 5.dp
     ) {
         Column(
-            modifier = Modifier.padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier =
+                Modifier.padding(
+                    horizontal = 22.dp,
+                    vertical = 18.dp
+                ),
+            verticalArrangement =
+                Arrangement.spacedBy(6.dp)
         ) {
             Text(
                 text = "Daily Rebuild",
-                style = MaterialTheme.typography.headlineLarge,
+                style =
+                    MaterialTheme.typography
+                        .headlineMedium,
                 color = Color.White
             )
 
-            RebuildStatusBadge(
-                text = today.format(dayFormatter),
-                backgroundColor = Color.White.copy(alpha = 0.14f),
-                contentColor = Color.White
+            Text(
+                text =
+                    today.format(
+                        dayFormatter
+                    ),
+                style =
+                    MaterialTheme.typography
+                        .titleMedium,
+                color =
+                    Color.White.copy(
+                        alpha = 0.94f
+                    )
             )
 
             Text(
-                text = today.format(dateFormatter),
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White.copy(alpha = 0.86f)
-            )
-
-            Text(
-                text = "Small actions count. Record what happened, keep what helps, and build from there.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.78f)
+                text =
+                    today.format(
+                        dateFormatter
+                    ),
+                style =
+                    MaterialTheme.typography
+                        .bodyLarge,
+                color =
+                    Color.White.copy(
+                        alpha = 0.78f
+                    )
             )
         }
     }
@@ -2957,8 +4284,8 @@ private fun ActivitySection(
                     Text(
                         text =
                             "Connect Health Connect to show activity " +
-                                "recorded by Google Fit, your phone, " +
-                                "or a compatible wearable.",
+                                    "recorded by Google Fit, your phone, " +
+                                    "or a compatible wearable.",
                         style =
                             MaterialTheme
                                 .typography
@@ -2982,7 +4309,7 @@ private fun ActivitySection(
                 Text(
                     text =
                         "Health Connect must be installed or updated " +
-                            "before Daily Rebuild can read activity.",
+                                "before Daily Rebuild can read activity.",
                     color =
                         MaterialTheme
                             .colorScheme
@@ -3000,7 +4327,7 @@ private fun ActivitySection(
                 Text(
                     text =
                         "Health Connect is not available on this device. " +
-                            "Daily Rebuild will continue working without it.",
+                                "Daily Rebuild will continue working without it.",
                     color =
                         MaterialTheme
                             .colorScheme
@@ -3012,7 +4339,7 @@ private fun ActivitySection(
         Text(
             text =
                 "Daily Rebuild has read-only access. Save Today stores " +
-                    "a separate snapshot for your calendar and future stats.",
+                        "a separate snapshot for your calendar and future stats.",
             style = MaterialTheme.typography.bodySmall,
             color =
                 MaterialTheme
@@ -3170,7 +4497,7 @@ private fun WaterSection(
         plainDisposableBottleCount + mioDisposableBottleCount
     val totalOunces =
         reusableBottleTotal * 24.0 +
-            disposableBottleTotal * 16.9
+                disposableBottleTotal * 16.9
 
     RebuildSectionCard(
         title = "Hydration",
