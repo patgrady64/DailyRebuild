@@ -80,6 +80,8 @@ import com.pgdevhouse.dailyrebuild.data.local.CareAppointment
 import com.pgdevhouse.dailyrebuild.data.local.CarePlace
 import com.pgdevhouse.dailyrebuild.data.local.CareProvider
 import com.pgdevhouse.dailyrebuild.data.local.CareVisit
+import com.pgdevhouse.dailyrebuild.data.local.PantryEssential
+import com.pgdevhouse.dailyrebuild.data.local.PantryEssentialStatus
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurementType
 import kotlinx.coroutines.delay
@@ -180,6 +182,10 @@ fun DailyRebuildApp(
 
     val careAppointmentDao = remember {
         database.careAppointmentDao()
+    }
+
+    val pantryEssentialDao = remember {
+        database.pantryEssentialDao()
     }
 
     val healthProfileDao = remember {
@@ -285,14 +291,6 @@ fun DailyRebuildApp(
         mutableIntStateOf(0)
     }
 
-    var showMoreToday by rememberSaveable {
-        mutableStateOf(false)
-    }
-
-    var expandedTodaySection by rememberSaveable {
-        mutableStateOf<String?>(null)
-    }
-
     var showQuickWaterDialog by rememberSaveable {
         mutableStateOf(false)
     }
@@ -301,21 +299,18 @@ fun DailyRebuildApp(
         mutableStateOf(false)
     }
 
+    var selectedFoodSection by rememberSaveable {
+        mutableIntStateOf(0)
+    }
+
     var currentCalorieGoal by remember {
         mutableStateOf<Int?>(null)
     }
-
-    val homeScrollState =
-        rememberScrollState()
 
     BackHandler(
         enabled = selectedMainTab != 0
     ) {
         selectedMainTab = 0
-
-        coroutineScope.launch {
-            homeScrollState.animateScrollTo(0)
-        }
     }
 
     var isAddingFood by remember {
@@ -350,6 +345,16 @@ fun DailyRebuildApp(
         mutableStateOf<List<FoodProduct>>(
             emptyList()
         )
+    }
+
+    var pantryEssentials by remember {
+        mutableStateOf<List<PantryEssential>>(
+            emptyList()
+        )
+    }
+
+    var isSavingPantryEssential by remember {
+        mutableStateOf(false)
     }
 
     var showSavedFoodsDialog by rememberSaveable {
@@ -637,13 +642,11 @@ fun DailyRebuildApp(
     }
 
     /*
-     * Pain
+     * One daily pain value: the highest pain experienced so far today.
+     * Existing back/shin database columns are retained for compatibility;
+     * new saves store the highest value in backPain and zero in shinPain.
      */
-    var backPain by rememberSaveable {
-        mutableStateOf(0f)
-    }
-
-    var shinPain by rememberSaveable {
+    var highestPain by rememberSaveable {
         mutableStateOf(0f)
     }
 
@@ -872,8 +875,7 @@ fun DailyRebuildApp(
         painRecorded = false
         mobilityCompleted = false
 
-        backPain = 0f
-        shinPain = 0f
+        highestPain = 0f
 
         nextBottleHasMio = false
         plainReusableBottleCount = 0
@@ -918,11 +920,11 @@ fun DailyRebuildApp(
                 mobilityCompleted =
                     savedRecord.mobilityCompleted
 
-                backPain =
-                    savedRecord.backPain
-
-                shinPain =
-                    savedRecord.shinPain
+                highestPain =
+                    maxOf(
+                        savedRecord.backPain,
+                        savedRecord.shinPain
+                    )
 
                 plainReusableBottleCount =
                     savedRecord
@@ -1050,6 +1052,9 @@ fun DailyRebuildApp(
 
             savedMeals =
                 mealDao.getAllMealsWithIngredients()
+
+            pantryEssentials =
+                pantryEssentialDao.getAll()
 
             /*
              * Existing food entries count as recording food,
@@ -2729,8 +2734,8 @@ fun DailyRebuildApp(
                         walkCompleted = walkCompleted,
                         painRecorded = painRecorded,
                         mobilityCompleted = mobilityCompleted,
-                        backPain = backPain,
-                        shinPain = shinPain,
+                        backPain = highestPain,
+                        shinPain = 0f,
                         plainReusableBottleCount = plainReusableBottleCount,
                         mioReusableBottleCount = mioReusableBottleCount,
                         plainDisposableBottleCount = plainDisposableBottleCount,
@@ -3045,6 +3050,84 @@ fun DailyRebuildApp(
         }
     }
 
+    fun savePantryEssential(
+        item: PantryEssential
+    ) {
+        coroutineScope.launch {
+            isSavingPantryEssential = true
+            try {
+                if (item.id == 0L) {
+                    pantryEssentialDao.insert(item)
+                } else {
+                    pantryEssentialDao.update(item)
+                }
+                pantryEssentials = pantryEssentialDao.getAll()
+                snackbarHostState.showSnackbar(
+                    message = "Pantry essential saved."
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not save pantry essential."
+                )
+            } finally {
+                isSavingPantryEssential = false
+            }
+        }
+    }
+
+    fun deletePantryEssential(
+        item: PantryEssential
+    ) {
+        coroutineScope.launch {
+            try {
+                pantryEssentialDao.delete(item)
+                pantryEssentials = pantryEssentialDao.getAll()
+                snackbarHostState.showSnackbar(
+                    message = "Pantry essential deleted."
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not delete pantry essential."
+                )
+            }
+        }
+    }
+
+    fun updatePantryEssentialStatus(
+        item: PantryEssential,
+        status: String
+    ) {
+        coroutineScope.launch {
+            try {
+                pantryEssentialDao.updateStatus(
+                    id = item.id,
+                    status = status
+                )
+                pantryEssentials = pantryEssentialDao.getAll()
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not update pantry status."
+                )
+            }
+        }
+    }
+
+    fun markNeededPantryPurchased() {
+        coroutineScope.launch {
+            try {
+                pantryEssentialDao.markAllNeededAsHave()
+                pantryEssentials = pantryEssentialDao.getAll()
+                snackbarHostState.showSnackbar(
+                    message = "Required pantry items marked Have."
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not update pantry items."
+                )
+            }
+        }
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -3054,13 +3137,6 @@ fun DailyRebuildApp(
                     selectedTab = selectedMainTab,
                     onTabSelected = {
                         selectedMainTab = it
-
-                        if (it == 0) {
-                            coroutineScope.launch {
-                                homeScrollState
-                                    .animateScrollTo(0)
-                            }
-                        }
                     }
                 )
             }
@@ -3080,706 +3156,220 @@ fun DailyRebuildApp(
             )
         } else {
             when (selectedMainTab) {
-                0 -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding)
-                            .verticalScroll(
-                                homeScrollState
+                0 -> TodayScreen(
+                    state = TodayScreenState(
+                        date = todayDate,
+                        completedTasks = completedTasks,
+                        foodRecorded = foodRecorded,
+                        walkCompleted = walkCompleted,
+                        painRecorded = painRecorded,
+                        mobilityCompleted = mobilityCompleted,
+                        highestPain = highestPain,
+                        calories = totalCaloriesToday,
+                        calorieGoal = currentCalorieGoal,
+                        waterOunces = totalWaterOunces,
+                        showerDatesThisWeek = showerDatesThisWeek,
+                        showeredToday = showeredToday,
+                        showersThisWeek = showerCountThisWeek,
+                        meetingsThisWeek = meetingCountThisWeek,
+                        appointment = upcomingCareAppointment,
+                        activity = displayedActivity,
+                        activitySourceLabel = activitySourceLabel,
+                        morningAspirinTaken = morningAspirinTaken,
+                        morningIbuprofenTaken = morningIbuprofenTaken,
+                        morningNaproxenTaken = morningNaproxenTaken,
+                        morningAcetaminophenTaken = morningAcetaminophenTaken,
+                        nightIbuprofenTaken = nightIbuprofenTaken,
+                        nightNaproxenTaken = nightNaproxenTaken,
+                        nightAcetaminophenTaken = nightAcetaminophenTaken,
+                        journalText = journalText,
+                        isSaving = isSaving
+                    ),
+                    actions = TodayScreenActions(
+                        onOpenHistory = { openDailyHistory() },
+                        onOpenFood = { selectedMainTab = 1 },
+                        onOpenWater = { showQuickWaterDialog = true },
+                        onOpenMobility = { selectedMainTab = 2 },
+                        onOpenPain = { showQuickPainDialog = true },
+                        onOpenMeetings = { selectedMainTab = 3 },
+                        onOpenHealth = { selectedMainTab = 4 },
+                        onScheduleAppointment = { openAppointmentStart() },
+                        onViewAppointment = { appointment ->
+                            openAppointmentEditor(
+                                appointment,
+                                returnToHistory = false
                             )
-                            .padding(16.dp),
-                        verticalArrangement =
-                            Arrangement.spacedBy(16.dp)
-                    ) {
-                        HeaderSection(
-                            todayDate = todayDate,
-                            onOpenHistory = {
-                                openDailyHistory()
-                            }
-                        )
+                        },
+                        onLogMeeting = { showMeetingPickerDialog = true },
+                        onLogShower = { logShowerToday() },
+                        onRemoveShower = { removeTodayShower() },
+                        onFoodRecordedChange = { foodRecorded = it },
+                        onWalkCompletedChange = { walkCompleted = it },
+                        onPainRecordedChange = { painRecorded = it },
+                        onMobilityCompletedChange = { mobilityCompleted = it },
+                        onMorningAspirinChange = { morningAspirinTaken = it },
+                        onMorningIbuprofenChange = { morningIbuprofenTaken = it },
+                        onMorningNaproxenChange = { morningNaproxenTaken = it },
+                        onMorningAcetaminophenChange = { morningAcetaminophenTaken = it },
+                        onNightIbuprofenChange = { nightIbuprofenTaken = it },
+                        onNightNaproxenChange = { nightNaproxenTaken = it },
+                        onNightAcetaminophenChange = { nightAcetaminophenTaken = it },
+                        onJournalTextChange = { journalText = it },
+                        onSaveToday = saveToday
+                    ),
+                    modifier = Modifier.padding(innerPadding)
+                )
 
-                        TodayNextStepCard(
-                            foodRecorded =
-                                foodEntries.isNotEmpty(),
-                            waterOunces =
-                                totalWaterOunces,
-                            mobilityCompleted =
-                                mobilityCompleted,
-                            painRecorded =
-                                painRecorded,
-                            showerDue =
-                                showerIsDueNow,
-                            showersThisWeek =
-                                showerCountThisWeek,
-                            meetingDue =
-                                meetingGoalNeedsAttention,
-                            meetingsThisWeek =
-                                meetingCountThisWeek,
-                            completedTasks =
-                                completedTasks,
-                            isSaving =
-                                isSaving,
-                            onOpenFood = {
-                                selectedMainTab = 1
-                            },
-                            onOpenWater = {
-                                showQuickWaterDialog = true
-                            },
-                            onOpenMobility = {
-                                selectedMainTab = 2
-                            },
-                            onOpenPain = {
-                                showQuickPainDialog = true
-                            },
-                            onLogShower = {
-                                logShowerToday()
-                            },
-                            onOpenMeetings = {
-                                selectedMainTab = 3
-                            },
-                            onOpenAnchors = {
-                                showMoreToday = true
-                                expandedTodaySection =
-                                    "anchors"
+                1 -> FoodHubScreen(
+                    state = FoodHubState(
+                        selectedSection = selectedFoodSection,
+                        totalWaterOunces = totalWaterOunces,
+                        totalBottleCount =
+                            plainReusableBottleCount +
+                                mioReusableBottleCount +
+                                plainDisposableBottleCount +
+                                mioDisposableBottleCount,
+                        entries = foodEntries,
+                        savedFoodCount = savedProducts.size,
+                        savedMealCount = savedMeals.size,
+                        lastScannedBarcode = lastScannedBarcode,
+                        isScanningBarcode = isScanningBarcode,
+                        currentCalorieGoal = currentCalorieGoal,
+                        pantryItems = pantryEssentials,
+                        isSavingPantry = isSavingPantryEssential
+                    ),
+                    actions = FoodHubActions(
+                        onSectionChange = { selectedFoodSection = it },
+                        onOpenHistory = { openDailyHistory() },
+                        onAddWater = { showQuickWaterDialog = true },
+                        onScanFood = {
+                            startFoodBarcodeScan(forMealBuilder = false)
+                        },
+                        onAddFoodManually = {
+                            isCreatingFoodForMeal = false
+                            scannedFoodPrefill = null
+                            showManualFoodDialog = true
+                        },
+                        onOpenSavedFoods = { openSavedFoodsScreen() },
+                        onBuildMeal = { openMealBuilderScreen() },
+                        onOpenSavedMeals = { openSavedMealsScreen() },
+                        onDeleteEntry = { deleteFoodEntry(it) },
+                        onDeleteMealLog = { deleteMealLog(it) },
+                        onSavePantryItem = { item -> savePantryEssential(item) },
+                        onDeletePantryItem = { item -> deletePantryEssential(item) },
+                        onPantryStatusChange = { item, status ->
+                            updatePantryEssentialStatus(item, status)
+                        },
+                        onMarkNeededPurchased = { markNeededPantryPurchased() }
+                    ),
+                    modifier = Modifier.padding(innerPadding)
+                )
 
-                                coroutineScope.launch {
-                                    delay(120)
-                                    homeScrollState
-                                        .animateScrollTo(
-                                            homeScrollState
-                                                .maxValue
-                                        )
+                2 -> MobilityHubScreen(
+                    state = MobilityHubState(
+                        availability = healthAvailability,
+                        hasPermissions = hasHealthPermissions,
+                        isLoadingActivity = isLoadingHealthActivity,
+                        activity = displayedActivity,
+                        sourceLabel = activitySourceLabel,
+                        sessions = mobilitySessionsToday,
+                        isSaving = isSavingMobility
+                    ),
+                    actions = MobilityHubActions(
+                        onOpenHistory = { openDailyHistory() },
+                        onRefresh = {
+                            refreshHealthActivity(showFeedback = true)
+                        },
+                        onManageHealth = { selectedMainTab = 4 },
+                        onSaveSession = { saveMobilitySession(it) },
+                        onDeleteSession = { deleteMobilitySession(it) }
+                    ),
+                    modifier = Modifier.padding(innerPadding)
+                )
+
+                3 -> MeetingsHubScreen(
+                    weeklyAttendance = weeklyMeetingAttendance,
+                    isSaving = isSavingMeeting,
+                    onOpenHistory = { openDailyHistory() },
+                    onLogMeeting = { showMeetingPickerDialog = true },
+                    onAddMeeting = {
+                        meetingBeingEdited = null
+                        logAttendanceAfterMeetingSave = false
+                        showMeetingEditorDialog = true
+                    },
+                    onEditAttendance = {
+                        attendanceBeingEdited = it
+                        meetingForAttendance =
+                            it.savedMeetingId?.let { id ->
+                                savedMeetings.firstOrNull { meeting ->
+                                    meeting.id == id
                                 }
-                            },
-                            onSave = saveToday
-                        )
-
-                        TodayOverviewCard(
-                            completedTasks =
-                                completedTasks,
-                            totalTasks = 4,
-                            calories =
-                                totalCaloriesToday,
-                            calorieGoal =
-                                currentCalorieGoal,
-                            waterOunces =
-                                totalWaterOunces,
-                            mobilityCompleted =
-                                mobilityCompleted,
-                            showersThisWeek =
-                                showerCountThisWeek
-                        )
-
-                        HomeAppointmentCard(
-                            appointment =
-                                upcomingCareAppointment,
-                            onSchedule = {
-                                openAppointmentStart()
-                            },
-                            onView = { appointment ->
-                                openAppointmentEditor(
-                                    appointment,
-                                    returnToHistory = false
-                                )
                             }
-                        )
+                        isOneTimeMeetingAttendance =
+                            it.savedMeetingId == null
+                        showMeetingAttendanceDialog = true
+                    },
+                    onDeleteAttendance = {
+                        meetingAttendancePendingDeletion = it
+                    },
+                    onViewFullHistory = {
+                        showMeetingHistoryDialog = true
+                    },
+                    modifier = Modifier.padding(innerPadding)
+                )
 
-                        HomeMeetingsCard(
-                            meetingsThisWeek =
-                                meetingCountThisWeek,
-                            onOpenMeetings = {
-                                selectedMainTab = 3
-                            },
-                            onLogMeeting = {
-                                showMeetingPickerDialog = true
-                            }
-                        )
-
-                        TodayQuickActionsCard(
-                            onAddFood = {
-                                selectedMainTab = 1
-                            },
-                            onLogWater = {
-                                showQuickWaterDialog = true
-                            },
-                            onOpenMobility = {
-                                selectedMainTab = 2
-                            },
-                            onLogPain = {
-                                showQuickPainDialog = true
-                            }
-                        )
-
-                        CompactActivityCard(
-                            availability =
-                                healthAvailability,
-                            hasPermissions =
-                                hasHealthPermissions,
-                            isLoading =
-                                isLoadingHealthActivity,
-                            activity =
-                                displayedActivity,
-                            sourceLabel =
-                                activitySourceLabel,
-                            onOpenActivitySettings = {
-                                selectedMainTab = 4
-                            }
-                        )
-
-                        Button(
-                            onClick = saveToday,
-                            enabled = !isSaving,
-                            modifier =
-                                Modifier.fillMaxWidth(),
-                            shape =
-                                RoundedCornerShape(18.dp)
-                        ) {
-                            if (isSaving) {
-                                CircularProgressIndicator(
-                                    modifier =
-                                        Modifier.size(18.dp),
-                                    strokeWidth = 2.dp
-                                )
-
-                                Spacer(
-                                    Modifier.width(10.dp)
-                                )
-                            }
-
-                            Text(
-                                if (isSaving) {
-                                    "Saving today…"
-                                } else {
-                                    "Save Today"
-                                }
+                else -> HealthHubScreen(
+                    state = HealthHubState(
+                        appointments = careAppointments,
+                        visits = careVisits,
+                        migraineLogs = migraineLogs,
+                        availability = healthAvailability,
+                        hasPermissions = hasHealthPermissions,
+                        isLoadingActivity = isLoadingHealthActivity,
+                        activity = displayedActivity,
+                        activitySourceLabel = activitySourceLabel
+                    ),
+                    actions = HealthHubActions(
+                        onOpenHistory = { openDailyHistory() },
+                        onScheduleAppointment = { openAppointmentStart() },
+                        onOpenAppointmentHistory = {
+                            appointmentWorkflow.showHistory = true
+                        },
+                        onViewAppointment = { appointment ->
+                            openAppointmentEditor(
+                                appointment,
+                                returnToHistory = false
                             )
+                        },
+                        onLogVisit = { showCareVisitStartDialog = true },
+                        onOpenVisitHistory = {
+                            showCareVisitHistoryDialog = true
+                        },
+                        onLogMigraine = { showMigraineLogDialog = true },
+                        onDeleteMigraine = { deleteMigraineEvent(it) },
+                        onLogPain = { showQuickPainDialog = true },
+                        onConnectHealth = {
+                            healthPermissionsLauncher.launch(
+                                HealthConnectManager.permissions
+                            )
+                        },
+                        onRefreshActivity = {
+                            refreshHealthActivity(showFeedback = true)
+                        },
+                        onManageAccess = {
+                            healthConnectManager.openHealthConnectSettings()
+                        },
+                        onInstallOrUpdate = {
+                            healthConnectManager.openInstallOrUpdate()
                         }
-
-                        TodayDetailsCard(
-                            expanded = showMoreToday,
-                            onToggle = {
-                                showMoreToday =
-                                    !showMoreToday
-                            }
-                        ) {
-                            TodayDetailToggleRow(
-                                title =
-                                    "Daily anchors",
-                                summary =
-                                    "$completedTasks of 4 complete",
-                                expanded =
-                                    expandedTodaySection ==
-                                        "anchors",
-                                onClick = {
-                                    expandedTodaySection =
-                                        if (
-                                            expandedTodaySection ==
-                                                "anchors"
-                                        ) {
-                                            null
-                                        } else {
-                                            "anchors"
-                                        }
-                                }
-                            )
-
-                            if (
-                                expandedTodaySection ==
-                                    "anchors"
-                            ) {
-                                DailyTasksSection(
-                                    foodRecorded =
-                                        foodRecorded,
-                                    onFoodRecordedChange = {
-                                        foodRecorded = it
-                                    },
-                                    walkCompleted =
-                                        walkCompleted,
-                                    onWalkCompletedChange = {
-                                        walkCompleted = it
-                                    },
-                                    painRecorded =
-                                        painRecorded,
-                                    onPainRecordedChange = {
-                                        painRecorded = it
-                                    },
-                                    mobilityCompleted =
-                                        mobilityCompleted,
-                                    onMobilityCompletedChange = {
-                                        mobilityCompleted = it
-                                    }
-                                )
-                            }
-
-                            TodayDetailToggleRow(
-                                title =
-                                    "Showering",
-                                summary =
-                                    "$showerCountThisWeek this week · goal 2–3",
-                                expanded =
-                                    expandedTodaySection ==
-                                        "showering",
-                                onClick = {
-                                    expandedTodaySection =
-                                        if (
-                                            expandedTodaySection ==
-                                                "showering"
-                                        ) {
-                                            null
-                                        } else {
-                                            "showering"
-                                        }
-                                }
-                            )
-
-                            if (
-                                expandedTodaySection ==
-                                    "showering"
-                            ) {
-                                WeeklyShowerControls(
-                                    showerDates =
-                                        showerDatesThisWeek,
-                                    showeredToday =
-                                        showeredToday,
-                                    onLogToday = {
-                                        logShowerToday()
-                                    },
-                                    onRemoveToday = {
-                                        removeTodayShower()
-                                    }
-                                )
-                            }
-
-                            TodayDetailToggleRow(
-                                title =
-                                    "Medication check-in",
-                                summary =
-                                    "Morning and night reference checks",
-                                expanded =
-                                    expandedTodaySection ==
-                                        "medication",
-                                onClick = {
-                                    expandedTodaySection =
-                                        if (
-                                            expandedTodaySection ==
-                                                "medication"
-                                        ) {
-                                            null
-                                        } else {
-                                            "medication"
-                                        }
-                                }
-                            )
-
-                            if (
-                                expandedTodaySection ==
-                                    "medication"
-                            ) {
-                                MedicationSection(
-                                    morningAspirinTaken =
-                                        morningAspirinTaken,
-                                    onMorningAspirinChange = {
-                                        morningAspirinTaken = it
-                                    },
-                                    morningIbuprofenTaken =
-                                        morningIbuprofenTaken,
-                                    onMorningIbuprofenChange = {
-                                        morningIbuprofenTaken = it
-                                    },
-                                    morningNaproxenTaken =
-                                        morningNaproxenTaken,
-                                    onMorningNaproxenChange = {
-                                        morningNaproxenTaken = it
-                                    },
-                                    morningAcetaminophenTaken =
-                                        morningAcetaminophenTaken,
-                                    onMorningAcetaminophenChange = {
-                                        morningAcetaminophenTaken = it
-                                    },
-                                    nightIbuprofenTaken =
-                                        nightIbuprofenTaken,
-                                    onNightIbuprofenChange = {
-                                        nightIbuprofenTaken = it
-                                    },
-                                    nightNaproxenTaken =
-                                        nightNaproxenTaken,
-                                    onNightNaproxenChange = {
-                                        nightNaproxenTaken = it
-                                    },
-                                    nightAcetaminophenTaken =
-                                        nightAcetaminophenTaken,
-                                    onNightAcetaminophenChange = {
-                                        nightAcetaminophenTaken = it
-                                    }
-                                )
-                            }
-
-                            TodayDetailToggleRow(
-                                title =
-                                    "Journal",
-                                summary =
-                                    if (
-                                        journalText.isBlank()
-                                    ) {
-                                        "No note yet"
-                                    } else {
-                                        "Today has a note"
-                                    },
-                                expanded =
-                                    expandedTodaySection ==
-                                        "journal",
-                                onClick = {
-                                    expandedTodaySection =
-                                        if (
-                                            expandedTodaySection ==
-                                                "journal"
-                                        ) {
-                                            null
-                                        } else {
-                                            "journal"
-                                        }
-                                }
-                            )
-
-                            if (
-                                expandedTodaySection ==
-                                    "journal"
-                            ) {
-                                JournalSection(
-                                    journalText =
-                                        journalText,
-                                    onJournalTextChange = {
-                                        journalText = it
-                                    }
-                                )
-                            }
-                        }
-
-                        Text(
-                            text =
-                                "Food, mobility, history, and health tools now live in their own tabs below.",
-                            style =
-                                MaterialTheme.typography.bodySmall,
-                            color =
-                                MaterialTheme.colorScheme
-                                    .onSurfaceVariant,
-                            modifier =
-                                Modifier.padding(
-                                    horizontal = 6.dp
-                                )
-                        )
-
-                        Spacer(
-                            modifier =
-                                Modifier.height(12.dp)
-                        )
-                    }
-                }
-
-                1 -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding)
-                            .verticalScroll(
-                                rememberScrollState()
-                            )
-                            .padding(16.dp),
-                        verticalArrangement =
-                            Arrangement.spacedBy(16.dp)
-                    ) {
-                        TabScreenHeader(
-                            title = "Food",
-                            subtitle =
-                                "Log today’s meal, manage saved foods, and build reusable meals.",
-                            onOpenHistory = {
-                                openDailyHistory()
-                            }
-                        )
-
-                        FoodHydrationCard(
-                            totalWaterOunces =
-                                totalWaterOunces,
-                            totalBottleCount =
-                                plainReusableBottleCount +
-                                    mioReusableBottleCount +
-                                    plainDisposableBottleCount +
-                                    mioDisposableBottleCount,
-                            onAddWater = {
-                                showQuickWaterDialog = true
-                            }
-                        )
-
-                        FoodSection(
-                            entries =
-                                foodEntries,
-                            savedFoodCount =
-                                savedProducts.size,
-                            savedMealCount =
-                                savedMeals.size,
-                            lastScannedBarcode =
-                                lastScannedBarcode,
-                            isScanningBarcode =
-                                isScanningBarcode,
-                            onScanFood = {
-                                startFoodBarcodeScan(
-                                    forMealBuilder = false
-                                )
-                            },
-                            onAddFoodManually = {
-                                isCreatingFoodForMeal =
-                                    false
-                                scannedFoodPrefill = null
-                                showManualFoodDialog =
-                                    true
-                            },
-                            onOpenSavedFoods = {
-                                openSavedFoodsScreen()
-                            },
-                            onBuildMeal = {
-                                openMealBuilderScreen()
-                            },
-                            onOpenSavedMeals = {
-                                openSavedMealsScreen()
-                            },
-                            onDeleteEntry = {
-                                deleteFoodEntry(it)
-                            },
-                            onDeleteMealLog = {
-                                deleteMealLog(it)
-                            }
-                        )
-
-                        Spacer(
-                            modifier =
-                                Modifier.height(12.dp)
-                        )
-                    }
-                }
-
-                2 -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding)
-                            .verticalScroll(
-                                rememberScrollState()
-                            )
-                            .padding(16.dp),
-                        verticalArrangement =
-                            Arrangement.spacedBy(16.dp)
-                    ) {
-                        TabScreenHeader(
-                            title = "Mobility",
-                            subtitle =
-                                "See today’s walking, generate a balanced routine, or record independent stretching.",
-                            onOpenHistory = {
-                                openDailyHistory()
-                            }
-                        )
-
-                        MobilityWalkingCard(
-                            availability =
-                                healthAvailability,
-                            hasPermissions =
-                                hasHealthPermissions,
-                            isLoading =
-                                isLoadingHealthActivity,
-                            activity =
-                                displayedActivity,
-                            sourceLabel =
-                                activitySourceLabel,
-                            onRefresh = {
-                                refreshHealthActivity(
-                                    showFeedback = true
-                                )
-                            },
-                            onManage = {
-                                selectedMainTab = 4
-                            }
-                        )
-
-                        MobilitySection(
-                            sessions =
-                                mobilitySessionsToday,
-                            isSaving =
-                                isSavingMobility,
-                            onSaveSession = {
-                                saveMobilitySession(it)
-                            },
-                            onDeleteSession = {
-                                deleteMobilitySession(it)
-                            }
-                        )
-
-                        Spacer(
-                            modifier =
-                                Modifier.height(12.dp)
-                        )
-                    }
-                }
-
-                3 -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding)
-                            .verticalScroll(
-                                rememberScrollState()
-                            )
-                            .padding(16.dp),
-                        verticalArrangement =
-                            Arrangement.spacedBy(16.dp)
-                    ) {
-                        TabScreenHeader(
-                            title = "Meetings",
-                            subtitle =
-                                "Track a goal of at least three recovery meetings each week.",
-                            onOpenHistory = {
-                                openDailyHistory()
-                            }
-                        )
-
-                        MeetingsTab(
-                            weeklyAttendance =
-                                weeklyMeetingAttendance,
-                            isSaving =
-                                isSavingMeeting,
-                            onLogMeeting = {
-                                showMeetingPickerDialog = true
-                            },
-                            onAddMeeting = {
-                                meetingBeingEdited = null
-                                logAttendanceAfterMeetingSave = false
-                                showMeetingEditorDialog = true
-                            },
-                            onEditAttendance = {
-                                attendanceBeingEdited = it
-                                meetingForAttendance =
-                                    it.savedMeetingId?.let { id ->
-                                        savedMeetings.firstOrNull { meeting ->
-                                            meeting.id == id
-                                        }
-                                    }
-                                isOneTimeMeetingAttendance =
-                                    it.savedMeetingId == null
-                                showMeetingAttendanceDialog = true
-                            },
-                            onDeleteAttendance = {
-                                meetingAttendancePendingDeletion = it
-                            },
-                            onViewFullHistory = {
-                                showMeetingHistoryDialog = true
-                            }
-                        )
-
-                        Spacer(
-                            modifier =
-                                Modifier.height(12.dp)
-                        )
-                    }
-                }
-
-                else -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding)
-                            .verticalScroll(
-                                rememberScrollState()
-                            )
-                            .padding(16.dp),
-                        verticalArrangement =
-                            Arrangement.spacedBy(16.dp)
-                    ) {
-                        TabScreenHeader(
-                            title = "Health",
-                            subtitle =
-                                "Care visits, profile, measurements, medication reference, health events, and connected activity.",
-                            onOpenHistory = {
-                                openDailyHistory()
-                            }
-                        )
-
-                        CareAppointmentTrackerCard(
-                            appointments = careAppointments,
-                            onSchedule = {
-                                openAppointmentStart()
-                            },
-                            onOpenHistory = {
-                                appointmentWorkflow.showHistory = true
-                            },
-                            onViewAppointment = { appointment ->
-                                openAppointmentEditor(
-                                    appointment,
-                                    returnToHistory = false
-                                )
-                            }
-                        )
-
-                        CareVisitTrackerCard(
-                            visits = careVisits,
-                            onLogVisit = {
-                                showCareVisitStartDialog = true
-                            },
-                            onOpenHistory = {
-                                showCareVisitHistoryDialog = true
-                            }
-                        )
-
-                        MigraineTrackerCard(
-                            logs = migraineLogs,
-                            onLogMigraine = {
-                                showMigraineLogDialog = true
-                            },
-                            onDeleteLog = {
-                                deleteMigraineEvent(it)
-                            }
-                        )
-
+                    ),
+                    profileContent = {
                         key(healthFeatureRefreshKey) {
                             HealthProfileFeature()
                         }
-
-                        ActivitySection(
-                            availability =
-                                healthAvailability,
-                            hasPermissions =
-                                hasHealthPermissions,
-                            isLoading =
-                                isLoadingHealthActivity,
-                            activity =
-                                displayedActivity,
-                            sourceLabel =
-                                activitySourceLabel,
-                            onConnect = {
-                                healthPermissionsLauncher
-                                    .launch(
-                                        HealthConnectManager
-                                            .permissions
-                                    )
-                            },
-                            onRefresh = {
-                                refreshHealthActivity(
-                                    showFeedback = true
-                                )
-                            },
-                            onManageAccess = {
-                                healthConnectManager
-                                    .openHealthConnectSettings()
-                            },
-                            onInstallOrUpdate = {
-                                healthConnectManager
-                                    .openInstallOrUpdate()
-                            }
-                        )
-                        Spacer(
-                            modifier =
-                                Modifier.height(12.dp)
-                        )
-                    }
-                }
+                    },
+                    modifier = Modifier.padding(innerPadding)
+                )
             }
         }
     }
@@ -4471,64 +4061,16 @@ fun DailyRebuildApp(
     }
 
     if (showQuickPainDialog) {
-        AlertDialog(
-            onDismissRequest = {
+        HighestPainDialog(
+            currentHighestPain = highestPain,
+            wasRecordedToday = painRecorded,
+            onSave = { value ->
+                highestPain = value
+                painRecorded = true
                 showQuickPainDialog = false
             },
-            title = {
-                Text("Record Pain")
-            },
-            text = {
-                Column(
-                    modifier =
-                        Modifier
-                            .heightIn(max = 520.dp)
-                            .verticalScroll(
-                                rememberScrollState()
-                            ),
-                    verticalArrangement =
-                        Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text =
-                            "Record what is true right now. You can change it later before saving today.",
-                        style =
-                            MaterialTheme.typography.bodyMedium,
-                        color =
-                            MaterialTheme.colorScheme
-                                .onSurfaceVariant
-                    )
-
-                    PainSlider(
-                        label = "Back pain",
-                        painValue =
-                            backPain,
-                        onPainValueChange = {
-                            backPain = it
-                            painRecorded = true
-                        }
-                    )
-
-                    PainSlider(
-                        label = "Shin pain",
-                        painValue =
-                            shinPain,
-                        onPainValueChange = {
-                            shinPain = it
-                            painRecorded = true
-                        }
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        painRecorded = true
-                        showQuickPainDialog = false
-                    }
-                ) {
-                    Text("Done")
-                }
+            onDismiss = {
+                showQuickPainDialog = false
             }
         )
     }
@@ -5222,8 +4764,7 @@ fun DailyRebuildApp(
                             painRecorded = false
                             mobilityCompleted = false
 
-                            backPain = 0f
-                            shinPain = 0f
+                            highestPain = 0f
 
                             nextBottleHasMio = false
                             plainReusableBottleCount = 0
@@ -5477,1928 +5018,3 @@ fun DailyRebuildApp(
     }
 }
 
-
-private data class DailyRebuildNavigationItem(
-    val label: String,
-    val symbol: String
-)
-
-private val dailyRebuildNavigationItems =
-    listOf(
-        DailyRebuildNavigationItem(
-            label = "Home",
-            symbol = "⌂"
-        ),
-        DailyRebuildNavigationItem(
-            label = "Food",
-            symbol = "F"
-        ),
-        DailyRebuildNavigationItem(
-            label = "Mobility",
-            symbol = "M"
-        ),
-        DailyRebuildNavigationItem(
-            label = "Meetings",
-            symbol = "G"
-        ),
-        DailyRebuildNavigationItem(
-            label = "Health",
-            symbol = "+"
-        )
-    )
-
-@Composable
-private fun DailyRebuildBottomNavigation(
-    selectedTab: Int,
-    onTabSelected: (Int) -> Unit
-) {
-    NavigationBar(
-        containerColor =
-            MaterialTheme.colorScheme.surface,
-        tonalElevation = 6.dp
-    ) {
-        dailyRebuildNavigationItems
-            .forEachIndexed { index, item ->
-                NavigationBarItem(
-                    selected =
-                        selectedTab == index,
-                    onClick = {
-                        onTabSelected(index)
-                    },
-                    icon = {
-                        Text(
-                            text = item.symbol,
-                            style =
-                                MaterialTheme.typography
-                                    .titleMedium,
-                            fontWeight =
-                                FontWeight.Bold
-                        )
-                    },
-                    label = {
-                        Text(item.label)
-                    },
-                    alwaysShowLabel = true
-                )
-            }
-    }
-}
-
-@Composable
-private fun TabScreenHeader(
-    title: String,
-    subtitle: String,
-    onOpenHistory: () -> Unit
-) {
-    Column(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(
-                    horizontal = 4.dp,
-                    vertical = 4.dp
-                ),
-        verticalArrangement =
-            Arrangement.spacedBy(4.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = title,
-                style =
-                    MaterialTheme.typography
-                        .headlineMedium,
-                modifier = Modifier.weight(1f)
-            )
-
-            TextButton(
-                onClick = onOpenHistory
-            ) {
-                Text("History")
-            }
-        }
-
-        Text(
-            text = subtitle,
-            style =
-                MaterialTheme.typography
-                    .bodyMedium,
-            color =
-                MaterialTheme.colorScheme
-                    .onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-private fun TodayNextStepCard(
-    foodRecorded: Boolean,
-    waterOunces: Double,
-    mobilityCompleted: Boolean,
-    painRecorded: Boolean,
-    showerDue: Boolean,
-    showersThisWeek: Int,
-    meetingDue: Boolean,
-    meetingsThisWeek: Int,
-    completedTasks: Int,
-    isSaving: Boolean,
-    onOpenFood: () -> Unit,
-    onOpenWater: () -> Unit,
-    onOpenMobility: () -> Unit,
-    onOpenPain: () -> Unit,
-    onLogShower: () -> Unit,
-    onOpenMeetings: () -> Unit,
-    onOpenAnchors: () -> Unit,
-    onSave: () -> Unit
-) {
-    val title: String
-    val description: String
-    val buttonText: String
-    val onClick: () -> Unit
-
-    when {
-        !foodRecorded -> {
-            title = "Log today’s food"
-            description =
-                "Start with the meal or food you actually ate."
-            buttonText = "Open Food"
-            onClick = onOpenFood
-        }
-
-        waterOunces <= 0.0 -> {
-            title = "Start today’s water"
-            description =
-                "Record the first bottle without opening the full daily form."
-            buttonText = "Log Water"
-            onClick = onOpenWater
-        }
-
-        !mobilityCompleted -> {
-            title = "Complete mobility"
-            description =
-                "Generate a seated or bed-compatible routine."
-            buttonText = "Open Mobility"
-            onClick = onOpenMobility
-        }
-
-        !painRecorded -> {
-            title = "Record current pain"
-            description =
-                "A quick back and shin check keeps the day measurable."
-            buttonText = "Log Pain"
-            onClick = onOpenPain
-        }
-
-        showerDue -> {
-            title = "Shower goal needs attention"
-            description =
-                "$showersThisWeek of 2 minimum showers logged this week."
-            buttonText = "Log Today’s Shower"
-            onClick = onLogShower
-        }
-
-        meetingDue -> {
-            title = "Weekly meeting goal"
-            description =
-                "$meetingsThisWeek of $DEFAULT_WEEKLY_MEETING_GOAL meetings logged this week."
-            buttonText = "Open Meetings"
-            onClick = onOpenMeetings
-        }
-
-        completedTasks < 4 -> {
-            title = "Review daily anchors"
-            description =
-                "One or more daily checks still need your attention."
-            buttonText = "Review Anchors"
-            onClick = onOpenAnchors
-        }
-
-        else -> {
-            title = "Today is ready"
-            description =
-                "Review anything you need, then save the day."
-            buttonText =
-                if (isSaving) {
-                    "Saving…"
-                } else {
-                    "Save Today"
-                }
-            onClick = onSave
-        }
-    }
-
-    RebuildSectionCard(
-        title = "Next step",
-        subtitle = title,
-        accentColor = RebuildAmber
-    ) {
-        Text(
-            text = description,
-            style =
-                MaterialTheme.typography
-                    .bodyMedium,
-            color =
-                MaterialTheme.colorScheme
-                    .onSurfaceVariant
-        )
-
-        Button(
-            onClick = onClick,
-            enabled = !isSaving,
-            modifier =
-                Modifier.fillMaxWidth(),
-            shape =
-                RoundedCornerShape(16.dp)
-        ) {
-            Text(buttonText)
-        }
-    }
-}
-
-@Composable
-private fun TodayOverviewCard(
-    completedTasks: Int,
-    totalTasks: Int,
-    calories: Double,
-    calorieGoal: Int?,
-    waterOunces: Double,
-    mobilityCompleted: Boolean,
-    showersThisWeek: Int
-) {
-    val progress =
-        if (totalTasks <= 0) {
-            0f
-        } else {
-            completedTasks
-                .toFloat()
-                .div(totalTasks.toFloat())
-                .coerceIn(0f, 1f)
-        }
-
-    RebuildSectionCard(
-        title = "Today",
-        subtitle =
-            "A compact view of the information you use most.",
-        accentColor = RebuildBlue
-    ) {
-        Row(
-            modifier =
-                Modifier.fillMaxWidth(),
-            horizontalArrangement =
-                Arrangement.SpaceBetween,
-            verticalAlignment =
-                Alignment.CenterVertically
-        ) {
-            Text(
-                text =
-                    "$completedTasks of $totalTasks anchors",
-                style =
-                    MaterialTheme.typography
-                        .titleMedium
-            )
-
-            Text(
-                text =
-                    "${(progress * 100).toInt()}%",
-                style =
-                    MaterialTheme.typography
-                        .labelLarge,
-                color =
-                    MaterialTheme.colorScheme
-                        .primary
-            )
-        }
-
-        LinearProgressIndicator(
-            progress = progress,
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(
-                        RoundedCornerShape(50)
-                    )
-        )
-
-        Row(
-            modifier =
-                Modifier.fillMaxWidth(),
-            horizontalArrangement =
-                Arrangement.spacedBy(8.dp)
-        ) {
-            RebuildMetricPill(
-                label = "calories",
-                value =
-                    if (calorieGoal != null) {
-                        "${calories.toInt()} / $calorieGoal"
-                    } else {
-                        calories.toInt().toString()
-                    },
-                modifier =
-                    Modifier.weight(1f),
-                color =
-                    MaterialTheme.colorScheme
-                        .tertiaryContainer,
-                contentColor =
-                    MaterialTheme.colorScheme
-                        .onTertiaryContainer
-            )
-
-            RebuildMetricPill(
-                label = "water",
-                value =
-                    "${formatOunces(waterOunces)} oz",
-                modifier =
-                    Modifier.weight(1f),
-                color =
-                    MaterialTheme.colorScheme
-                        .primaryContainer
-            )
-        }
-
-        Row(
-            modifier =
-                Modifier.fillMaxWidth(),
-            horizontalArrangement =
-                Arrangement.spacedBy(8.dp)
-        ) {
-            RebuildMetricPill(
-                label = "mobility",
-                value =
-                    if (mobilityCompleted) {
-                        "Done"
-                    } else {
-                        "Not yet"
-                    },
-                modifier =
-                    Modifier.weight(1f),
-                color =
-                    MaterialTheme.colorScheme
-                        .secondaryContainer,
-                contentColor =
-                    MaterialTheme.colorScheme
-                        .onSecondaryContainer
-            )
-
-            RebuildMetricPill(
-                label = "showers this week",
-                value =
-                    "$showersThisWeek / 2 minimum",
-                modifier =
-                    Modifier.weight(1f),
-                color =
-                    MaterialTheme.colorScheme
-                        .surfaceVariant,
-                contentColor =
-                    MaterialTheme.colorScheme
-                        .onSurfaceVariant
-            )
-        }
-
-        if (calorieGoal == null) {
-            Text(
-                text =
-                    "No calorie goal is set yet. Add one under More → Health profile & goals after enough days are logged.",
-                style =
-                    MaterialTheme.typography
-                        .bodySmall,
-                color =
-                    MaterialTheme.colorScheme
-                        .onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun TodayQuickActionsCard(
-    onAddFood: () -> Unit,
-    onLogWater: () -> Unit,
-    onOpenMobility: () -> Unit,
-    onLogPain: () -> Unit
-) {
-    RebuildSectionCard(
-        title = "Quick actions",
-        subtitle =
-            "Open the right tool without searching through the entire page.",
-        accentColor = RebuildGreen
-    ) {
-        Row(
-            modifier =
-                Modifier.fillMaxWidth(),
-            horizontalArrangement =
-                Arrangement.spacedBy(8.dp)
-        ) {
-            Button(
-                onClick = onAddFood,
-                modifier =
-                    Modifier.weight(1f),
-                shape =
-                    RoundedCornerShape(16.dp)
-            ) {
-                Text("Add Food")
-            }
-
-            OutlinedButton(
-                onClick = onLogWater,
-                modifier =
-                    Modifier.weight(1f),
-                shape =
-                    RoundedCornerShape(16.dp)
-            ) {
-                Text("Water")
-            }
-        }
-
-        Row(
-            modifier =
-                Modifier.fillMaxWidth(),
-            horizontalArrangement =
-                Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedButton(
-                onClick = onOpenMobility,
-                modifier =
-                    Modifier.weight(1f),
-                shape =
-                    RoundedCornerShape(16.dp)
-            ) {
-                Text("Mobility")
-            }
-
-            OutlinedButton(
-                onClick = onLogPain,
-                modifier =
-                    Modifier.weight(1f),
-                shape =
-                    RoundedCornerShape(16.dp)
-            ) {
-                Text("Log Pain")
-            }
-        }
-    }
-}
-
-@Composable
-private fun MobilityWalkingCard(
-    availability: HealthConnectAvailability,
-    hasPermissions: Boolean,
-    isLoading: Boolean,
-    activity: HealthActivityData,
-    sourceLabel: String?,
-    onRefresh: () -> Unit,
-    onManage: () -> Unit
-) {
-    RebuildSectionCard(
-        title = "Today’s walking",
-        subtitle =
-            sourceLabel
-                ?.let { "$it • Google Fit through Health Connect" }
-                ?: "Steps, miles, and recorded activity time from Google Fit through Health Connect.",
-        accentColor = RebuildTeal,
-        trailing = {
-            Row {
-                TextButton(
-                    onClick = onRefresh,
-                    enabled =
-                        availability ==
-                            HealthConnectAvailability.AVAILABLE &&
-                            hasPermissions &&
-                            !isLoading
-                ) {
-                    Text("Refresh")
-                }
-
-                TextButton(
-                    onClick = onManage
-                ) {
-                    Text("Manage")
-                }
-            }
-        }
-    ) {
-        when {
-            isLoading -> {
-                Row(
-                    verticalAlignment =
-                        Alignment.CenterVertically,
-                    horizontalArrangement =
-                        Arrangement.spacedBy(12.dp)
-                ) {
-                    CircularProgressIndicator(
-                        modifier =
-                            Modifier.size(24.dp),
-                        strokeWidth = 3.dp
-                    )
-
-                    Text(
-                        text = "Refreshing walking data…",
-                        style =
-                            MaterialTheme.typography
-                                .bodyMedium
-                    )
-                }
-            }
-
-            availability !=
-                HealthConnectAvailability.AVAILABLE -> {
-                Text(
-                    text =
-                        "Health Connect is not currently available. Open Health to install, update, or review access.",
-                    style =
-                        MaterialTheme.typography
-                            .bodyMedium,
-                    color =
-                        MaterialTheme.colorScheme
-                            .onSurfaceVariant
-                )
-            }
-
-            !hasPermissions -> {
-                Text(
-                    text =
-                        "Walking access is not connected. Open Health to connect Google Fit through Health Connect.",
-                    style =
-                        MaterialTheme.typography
-                            .bodyMedium,
-                    color =
-                        MaterialTheme.colorScheme
-                            .onSurfaceVariant
-                )
-            }
-
-            else -> {
-                Row(
-                    modifier =
-                        Modifier.fillMaxWidth(),
-                    horizontalArrangement =
-                        Arrangement.spacedBy(8.dp)
-                ) {
-                    RebuildMetricPill(
-                        label = "steps",
-                        value =
-                            String.format(
-                                Locale.US,
-                                "%,d",
-                                activity.steps
-                            ),
-                        modifier =
-                            Modifier.weight(1f)
-                    )
-
-                    RebuildMetricPill(
-                        label = "miles",
-                        value =
-                            formatActivityMiles(
-                                activity.distanceMiles
-                            ),
-                        modifier =
-                            Modifier.weight(1f),
-                        color =
-                            MaterialTheme.colorScheme
-                                .secondaryContainer,
-                        contentColor =
-                            MaterialTheme.colorScheme
-                                .onSecondaryContainer
-                    )
-
-                    RebuildMetricPill(
-                        label = "time",
-                        value =
-                            formatActivityTime(
-                                activity.activityMinutes
-                            ),
-                        modifier =
-                            Modifier.weight(1f),
-                        color =
-                            MaterialTheme.colorScheme
-                                .tertiaryContainer,
-                        contentColor =
-                            MaterialTheme.colorScheme
-                                .onTertiaryContainer
-                    )
-                }
-
-                if (
-                    sourceLabel ==
-                        "Saved with today's record"
-                ) {
-                    Spacer(
-                        modifier =
-                            Modifier.height(8.dp)
-                    )
-
-                    Text(
-                        text =
-                            "Showing the last snapshot saved for today. Tap Refresh for current Fit data.",
-                        style =
-                            MaterialTheme.typography
-                                .bodySmall,
-                        color =
-                            MaterialTheme.colorScheme
-                                .onSurfaceVariant
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CompactActivityCard(
-    availability: HealthConnectAvailability,
-    hasPermissions: Boolean,
-    isLoading: Boolean,
-    activity: HealthActivityData,
-    sourceLabel: String?,
-    onOpenActivitySettings: () -> Unit
-) {
-    RebuildSectionCard(
-        title = "Today’s activity",
-        subtitle =
-            sourceLabel
-                ?: "Steps, miles, and recorded activity time.",
-        accentColor = RebuildTeal,
-        trailing = {
-            TextButton(
-                onClick =
-                    onOpenActivitySettings
-            ) {
-                Text("Manage")
-            }
-        }
-    ) {
-        when {
-            isLoading -> {
-                Row(
-                    verticalAlignment =
-                        Alignment.CenterVertically,
-                    horizontalArrangement =
-                        Arrangement.spacedBy(12.dp)
-                ) {
-                    CircularProgressIndicator(
-                        modifier =
-                            Modifier.size(24.dp),
-                        strokeWidth = 3.dp
-                    )
-
-                    Text(
-                        text =
-                            "Refreshing activity…",
-                        style =
-                            MaterialTheme.typography
-                                .bodyMedium
-                    )
-                }
-            }
-
-            availability !=
-                HealthConnectAvailability.AVAILABLE -> {
-                Text(
-                    text =
-                        "Health Connect is not currently available. Open More to install, update, or review access.",
-                    style =
-                        MaterialTheme.typography
-                            .bodyMedium,
-                    color =
-                        MaterialTheme.colorScheme
-                            .onSurfaceVariant
-                )
-            }
-
-            !hasPermissions -> {
-                Text(
-                    text =
-                        "Activity access is not connected. Open More when you are ready to connect it.",
-                    style =
-                        MaterialTheme.typography
-                            .bodyMedium,
-                    color =
-                        MaterialTheme.colorScheme
-                            .onSurfaceVariant
-                )
-            }
-
-            else -> {
-                Row(
-                    modifier =
-                        Modifier.fillMaxWidth(),
-                    horizontalArrangement =
-                        Arrangement.spacedBy(8.dp)
-                ) {
-                    RebuildMetricPill(
-                        label = "steps",
-                        value =
-                            String.format(
-                                Locale.US,
-                                "%,d",
-                                activity.steps
-                            ),
-                        modifier =
-                            Modifier.weight(1f)
-                    )
-
-                    RebuildMetricPill(
-                        label = "miles",
-                        value =
-                            formatActivityMiles(
-                                activity.distanceMiles
-                            ),
-                        modifier =
-                            Modifier.weight(1f),
-                        color =
-                            MaterialTheme.colorScheme
-                                .secondaryContainer,
-                        contentColor =
-                            MaterialTheme.colorScheme
-                                .onSecondaryContainer
-                    )
-
-                    RebuildMetricPill(
-                        label = "time",
-                        value =
-                            formatActivityTime(
-                                activity.activityMinutes
-                            ),
-                        modifier =
-                            Modifier.weight(1f),
-                        color =
-                            MaterialTheme.colorScheme
-                                .tertiaryContainer,
-                        contentColor =
-                            MaterialTheme.colorScheme
-                                .onTertiaryContainer
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TodayDetailsCard(
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    content: @Composable () -> Unit
-) {
-    Column(
-        verticalArrangement =
-            Arrangement.spacedBy(12.dp)
-    ) {
-        RebuildSectionCard(
-            title = "More today",
-            subtitle =
-                if (expanded) {
-                    "Daily anchors, medication checks, and journal."
-                } else {
-                    "Less-frequent daily controls stay out of the way until needed."
-                },
-            accentColor =
-                MaterialTheme.colorScheme
-                    .outline,
-            trailing = {
-                TextButton(
-                    onClick = onToggle
-                ) {
-                    Text(
-                        if (expanded) {
-                            "Hide"
-                        } else {
-                            "Expand"
-                        }
-                    )
-                }
-            }
-        ) {
-            if (!expanded) {
-                Text(
-                    text =
-                        "Expand only when you need the detailed daily controls.",
-                    style =
-                        MaterialTheme.typography
-                            .bodySmall,
-                    color =
-                        MaterialTheme.colorScheme
-                            .onSurfaceVariant
-                )
-            }
-        }
-
-        if (expanded) {
-            Column(
-                verticalArrangement =
-                    Arrangement.spacedBy(12.dp)
-            ) {
-                content()
-            }
-        }
-    }
-}
-
-@Composable
-private fun TodayDetailToggleRow(
-    title: String,
-    summary: String,
-    expanded: Boolean,
-    onClick: () -> Unit
-) {
-    Surface(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .clip(
-                    RoundedCornerShape(18.dp)
-                )
-                .clickable(
-                    onClick = onClick
-                ),
-        shape =
-            RoundedCornerShape(18.dp),
-        color =
-            MaterialTheme.colorScheme
-                .surfaceVariant
-                .copy(alpha = 0.56f)
-    ) {
-        Row(
-            modifier =
-                Modifier.padding(16.dp),
-            verticalAlignment =
-                Alignment.CenterVertically
-        ) {
-            Column(
-                modifier =
-                    Modifier.weight(1f),
-                verticalArrangement =
-                    Arrangement.spacedBy(2.dp)
-            ) {
-                Text(
-                    text = title,
-                    style =
-                        MaterialTheme.typography
-                            .titleMedium
-                )
-
-                Text(
-                    text = summary,
-                    style =
-                        MaterialTheme.typography
-                            .bodySmall,
-                    color =
-                        MaterialTheme.colorScheme
-                            .onSurfaceVariant
-                )
-            }
-
-            Text(
-                text =
-                    if (expanded) {
-                        "−"
-                    } else {
-                        "+"
-                    },
-                style =
-                    MaterialTheme.typography
-                        .headlineMedium,
-                color =
-                    MaterialTheme.colorScheme
-                        .primary
-            )
-        }
-    }
-}
-
-@Composable
-private fun HistoryHubCard(
-    isLoading: Boolean,
-    onOpenCalendar: () -> Unit
-) {
-    RebuildSectionCard(
-        title = "Calendar & day details",
-        subtitle =
-            "Open any saved day to review food, activity, mobility, water, pain, medication checks, and journal entries.",
-        accentColor = RebuildBlue
-    ) {
-        Button(
-            onClick = onOpenCalendar,
-            enabled = !isLoading,
-            modifier =
-                Modifier.fillMaxWidth(),
-            shape =
-                RoundedCornerShape(16.dp)
-        ) {
-            if (isLoading) {
-                CircularProgressIndicator(
-                    modifier =
-                        Modifier.size(18.dp),
-                    strokeWidth = 2.dp
-                )
-
-                Spacer(
-                    Modifier.width(10.dp)
-                )
-            }
-
-            Text(
-                if (isLoading) {
-                    "Loading history…"
-                } else {
-                    "Open Calendar"
-                }
-            )
-        }
-
-        Text(
-            text =
-                "Deleting an entire day remains inside the calendar details screen with confirmation.",
-            style =
-                MaterialTheme.typography
-                    .bodySmall,
-            color =
-                MaterialTheme.colorScheme
-                    .onSurfaceVariant
-        )
-    }
-}
-
-
-@Composable
-private fun DailyActionBar(
-    isSaving: Boolean,
-    onSave: () -> Unit,
-    onOpenHistory: () -> Unit
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 4.dp,
-        shadowElevation = 12.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            RebuildSecondaryAction(
-                text = "Calendar",
-                onClick = onOpenHistory,
-                modifier = Modifier.weight(0.42f)
-            )
-            RebuildPrimaryAction(
-                text = if (isSaving) "Saving…" else "Save Today",
-                onClick = onSave,
-                enabled = !isSaving,
-                modifier = Modifier.weight(0.58f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun LoadingScreen(
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center
-    ) {
-        RebuildInsetPanel(
-            modifier = Modifier.padding(32.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(34.dp),
-                    strokeWidth = 4.dp
-                )
-
-                Column {
-                    Text(
-                        text = "Preparing your day",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Text(
-                        text = "Loading your latest progress and entries…",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun HeaderSection(
-    todayDate: String,
-    onOpenHistory: () -> Unit
-) {
-    val today = remember(todayDate) {
-        LocalDate.parse(todayDate)
-    }
-    val dayFormatter =
-        DateTimeFormatter.ofPattern("EEEE")
-    val dateFormatter =
-        DateTimeFormatter.ofPattern(
-            "MMMM d, yyyy"
-        )
-
-    Surface(
-        modifier =
-            Modifier.fillMaxWidth(),
-        shape =
-            RoundedCornerShape(28.dp),
-        color = RebuildNavy,
-        contentColor = Color.White,
-        shadowElevation = 5.dp
-    ) {
-        Row(
-            modifier =
-                Modifier.padding(
-                    horizontal = 22.dp,
-                    vertical = 18.dp
-                ),
-            verticalAlignment = Alignment.Top
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement =
-                    Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = "Daily Rebuild",
-                    style =
-                        MaterialTheme.typography
-                            .headlineMedium,
-                    color = Color.White
-                )
-
-                Text(
-                    text =
-                        today.format(
-                            dayFormatter
-                        ),
-                    style =
-                        MaterialTheme.typography
-                            .titleMedium,
-                    color =
-                        Color.White.copy(
-                            alpha = 0.94f
-                        )
-                )
-
-                Text(
-                    text =
-                        today.format(
-                            dateFormatter
-                        ),
-                    style =
-                        MaterialTheme.typography
-                            .bodyLarge,
-                    color =
-                        Color.White.copy(
-                            alpha = 0.78f
-                        )
-                )
-            }
-
-            TextButton(
-                onClick = onOpenHistory
-            ) {
-                Text(
-                    text = "History",
-                    color = Color.White
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProgressSection(
-    completedTasks: Int,
-    progressPercent: Int,
-    waterOunces: Double,
-    calories: Double,
-    backPain: Float
-) {
-    RebuildSectionCard(
-        title = "Today at a glance",
-        subtitle = "A quick snapshot of the information you have recorded.",
-        accentColor = RebuildTeal
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(18.dp)
-        ) {
-            RebuildProgressRing(
-                progress = progressPercent / 100f,
-                centerText = "$progressPercent%"
-            )
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = "$completedTasks of 4 daily anchors complete",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Text(
-                    text = when (completedTasks) {
-                        4 -> "All four anchors are recorded. Nice work."
-                        0 -> "Start anywhere. One completed anchor changes the day."
-                        else -> "You are building momentum—keep going."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            RebuildMetricPill(
-                label = "water",
-                value = "${formatOunces(waterOunces)} oz",
-                modifier = Modifier.weight(1f),
-                color = MaterialTheme.colorScheme.primaryContainer
-            )
-            RebuildMetricPill(
-                label = "calories",
-                value = calories.toInt().toString(),
-                modifier = Modifier.weight(1f),
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-            )
-            RebuildMetricPill(
-                label = "back pain",
-                value = "${backPain.toInt()}/10",
-                modifier = Modifier.weight(1f),
-                color = MaterialTheme.colorScheme.tertiaryContainer,
-                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-            )
-        }
-    }
-}
-
-@Composable
-private fun ActivitySection(
-    availability: HealthConnectAvailability,
-    hasPermissions: Boolean,
-    isLoading: Boolean,
-    activity: HealthActivityData,
-    sourceLabel: String?,
-    onConnect: () -> Unit,
-    onRefresh: () -> Unit,
-    onManageAccess: () -> Unit,
-    onInstallOrUpdate: () -> Unit
-) {
-    RebuildSectionCard(
-        title = "Today's activity",
-        subtitle =
-            "Steps, distance, and recorded activity time from Health Connect.",
-        accentColor = RebuildBlue
-    ) {
-        when (availability) {
-            HealthConnectAvailability.AVAILABLE -> {
-                if (
-                    hasPermissions ||
-                    sourceLabel != null
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement =
-                            Arrangement.spacedBy(8.dp)
-                    ) {
-                        RebuildMetricPill(
-                            label = "steps",
-                            value =
-                                String.format(
-                                    Locale.US,
-                                    "%,d",
-                                    activity.steps
-                                ),
-                            modifier = Modifier.weight(1f),
-                            color =
-                                MaterialTheme
-                                    .colorScheme
-                                    .primaryContainer
-                        )
-
-                        RebuildMetricPill(
-                            label = "miles",
-                            value =
-                                formatActivityMiles(
-                                    activity.distanceMiles
-                                ),
-                            modifier = Modifier.weight(1f),
-                            color =
-                                MaterialTheme
-                                    .colorScheme
-                                    .secondaryContainer,
-                            contentColor =
-                                MaterialTheme
-                                    .colorScheme
-                                    .onSecondaryContainer
-                        )
-
-                        RebuildMetricPill(
-                            label = "time",
-                            value =
-                                formatActivityTime(
-                                    activity.activityMinutes
-                                ),
-                            modifier = Modifier.weight(1f),
-                            color =
-                                MaterialTheme
-                                    .colorScheme
-                                    .tertiaryContainer,
-                            contentColor =
-                                MaterialTheme
-                                    .colorScheme
-                                    .onTertiaryContainer
-                        )
-                    }
-
-                    sourceLabel?.let {
-                        Text(
-                            text = it,
-                            style =
-                                MaterialTheme
-                                    .typography
-                                    .bodySmall,
-                            color =
-                                MaterialTheme
-                                    .colorScheme
-                                    .onSurfaceVariant
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement =
-                            Arrangement.spacedBy(10.dp)
-                    ) {
-                        RebuildSecondaryAction(
-                            text =
-                                if (isLoading) {
-                                    "Refreshing…"
-                                } else if (
-                                    hasPermissions
-                                ) {
-                                    "Refresh"
-                                } else {
-                                    "Reconnect"
-                                },
-                            onClick =
-                                if (hasPermissions) {
-                                    onRefresh
-                                } else {
-                                    onConnect
-                                },
-                            enabled = !isLoading,
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        RebuildSecondaryAction(
-                            text = "Manage access",
-                            onClick = onManageAccess,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                } else {
-                    Text(
-                        text =
-                            "Connect Health Connect to show activity " +
-                                "recorded by Google Fit, your phone, " +
-                                "or a compatible wearable.",
-                        style =
-                            MaterialTheme
-                                .typography
-                                .bodyMedium,
-                        color =
-                            MaterialTheme
-                                .colorScheme
-                                .onSurfaceVariant
-                    )
-
-                    RebuildPrimaryAction(
-                        text = "Connect Health Connect",
-                        onClick = onConnect,
-                        enabled = !isLoading,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
-
-            HealthConnectAvailability.UPDATE_REQUIRED -> {
-                Text(
-                    text =
-                        "Health Connect must be installed or updated " +
-                            "before Daily Rebuild can read activity.",
-                    color =
-                        MaterialTheme
-                            .colorScheme
-                            .onSurfaceVariant
-                )
-
-                RebuildPrimaryAction(
-                    text = "Install or update",
-                    onClick = onInstallOrUpdate,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            HealthConnectAvailability.UNAVAILABLE -> {
-                Text(
-                    text =
-                        "Health Connect is not available on this device. " +
-                            "Daily Rebuild will continue working without it.",
-                    color =
-                        MaterialTheme
-                            .colorScheme
-                            .onSurfaceVariant
-                )
-            }
-        }
-
-        Text(
-            text =
-                "Daily Rebuild has read-only access. Save Today stores " +
-                    "a separate snapshot for your calendar and future stats.",
-            style = MaterialTheme.typography.bodySmall,
-            color =
-                MaterialTheme
-                    .colorScheme
-                    .onSurfaceVariant
-        )
-    }
-}
-
-private fun formatActivityMiles(
-    miles: Double
-): String {
-    return String.format(
-        Locale.US,
-        "%.2f",
-        miles
-    )
-}
-
-private fun formatActivityTime(
-    totalMinutes: Long
-): String {
-    if (totalMinutes <= 0L) {
-        return "0m"
-    }
-
-    val hours = totalMinutes / 60L
-    val minutes = totalMinutes % 60L
-
-    return when {
-        hours == 0L -> "${minutes}m"
-        minutes == 0L -> "${hours}h"
-        else -> "${hours}h ${minutes}m"
-    }
-}
-
-@Composable
-private fun DailyTasksSection(
-    foodRecorded: Boolean,
-    onFoodRecordedChange: (Boolean) -> Unit,
-    walkCompleted: Boolean,
-    onWalkCompletedChange: (Boolean) -> Unit,
-    painRecorded: Boolean,
-    onPainRecordedChange: (Boolean) -> Unit,
-    mobilityCompleted: Boolean,
-    onMobilityCompletedChange: (Boolean) -> Unit
-) {
-    RebuildSectionCard(
-        title = "Daily anchors",
-        subtitle = "Four simple checks keep the day visible and measurable.",
-        accentColor = RebuildBlue
-    ) {
-        TaskCheckbox(
-            title = "Food and water recorded",
-            supportingText = "Log meals, snacks, and hydration.",
-            checked = foodRecorded,
-            onCheckedChange = onFoodRecordedChange
-        )
-        TaskCheckbox(
-            title = "Walk or intentional movement",
-            supportingText = "Count what was realistic for today.",
-            checked = walkCompleted,
-            onCheckedChange = onWalkCompletedChange
-        )
-        TaskCheckbox(
-            title = "Pain levels recorded",
-            supportingText = "Capture back and shin pain honestly.",
-            checked = painRecorded,
-            onCheckedChange = onPainRecordedChange
-        )
-        TaskCheckbox(
-            title = "Mobility or stretching",
-            supportingText = "Small mobility sessions still count.",
-            checked = mobilityCompleted,
-            onCheckedChange = onMobilityCompletedChange
-        )
-    }
-}
-
-@Composable
-private fun TaskCheckbox(
-    title: String,
-    supportingText: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .clickable { onCheckedChange(!checked) },
-        shape = RoundedCornerShape(18.dp),
-        color = if (checked) {
-            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f)
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-        }
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Checkbox(
-                checked = checked,
-                onCheckedChange = onCheckedChange
-            )
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Text(
-                    text = supportingText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            RebuildStatusBadge(
-                text = if (checked) "Done" else "Open",
-                backgroundColor = if (checked) {
-                    MaterialTheme.colorScheme.secondary
-                } else {
-                    MaterialTheme.colorScheme.surface
-                },
-                contentColor = if (checked) {
-                    MaterialTheme.colorScheme.onSecondary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                }
-            )
-        }
-    }
-}
-
-@Composable
-private fun WaterSection(
-    nextBottleHasMio: Boolean,
-    onNextBottleHasMioChange: (Boolean) -> Unit,
-    plainReusableBottleCount: Int,
-    mioReusableBottleCount: Int,
-    plainDisposableBottleCount: Int,
-    mioDisposableBottleCount: Int,
-    onAddReusableBottle: () -> Unit,
-    onAddDisposableBottle: () -> Unit,
-    onRemovePlainReusableBottle: () -> Unit,
-    onRemoveMioReusableBottle: () -> Unit,
-    onRemovePlainDisposableBottle: () -> Unit,
-    onRemoveMioDisposableBottle: () -> Unit
-) {
-    val reusableBottleTotal =
-        plainReusableBottleCount + mioReusableBottleCount
-    val disposableBottleTotal =
-        plainDisposableBottleCount + mioDisposableBottleCount
-    val totalOunces =
-        reusableBottleTotal * 24.0 +
-            disposableBottleTotal * 16.9
-
-    RebuildSectionCard(
-        title = "Hydration",
-        subtitle = "Quick-add your usual bottles and keep the total visible.",
-        accentColor = RebuildTeal,
-        trailing = {
-            RebuildStatusBadge(
-                text = "${formatOunces(totalOunces)} oz"
-            )
-        }
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .clickable {
-                    onNextBottleHasMioChange(!nextBottleHasMio)
-                },
-            shape = RoundedCornerShape(18.dp),
-            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
-        ) {
-            Row(
-                modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Checkbox(
-                    checked = nextBottleHasMio,
-                    onCheckedChange = onNextBottleHasMioChange
-                )
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "Next bottle includes MiO",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Text(
-                        text = "This changes how the next quick-add is labeled.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            RebuildPrimaryAction(
-                text = "+ 24 oz bottle",
-                onClick = onAddReusableBottle,
-                modifier = Modifier.weight(1f)
-            )
-            RebuildSecondaryAction(
-                text = "+ 16.9 oz bottle",
-                onClick = onAddDisposableBottle,
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        if (reusableBottleTotal == 0 && disposableBottleTotal == 0) {
-            RebuildInsetPanel {
-                Text(
-                    text = "No water recorded yet.",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Text(
-                    text = "Use either quick-add button when you finish a bottle.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        } else {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "Today’s bottles",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                if (plainReusableBottleCount > 0) {
-                    WaterCountRow(
-                        label = "24 oz plain water",
-                        count = plainReusableBottleCount,
-                        onRemoveOne = onRemovePlainReusableBottle
-                    )
-                }
-                if (mioReusableBottleCount > 0) {
-                    WaterCountRow(
-                        label = "24 oz MiO water",
-                        count = mioReusableBottleCount,
-                        onRemoveOne = onRemoveMioReusableBottle
-                    )
-                }
-                if (plainDisposableBottleCount > 0) {
-                    WaterCountRow(
-                        label = "16.9 oz plain water",
-                        count = plainDisposableBottleCount,
-                        onRemoveOne = onRemovePlainDisposableBottle
-                    )
-                }
-                if (mioDisposableBottleCount > 0) {
-                    WaterCountRow(
-                        label = "16.9 oz MiO water",
-                        count = mioDisposableBottleCount,
-                        onRemoveOne = onRemoveMioDisposableBottle
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun WaterCountRow(
-    label: String,
-    count: Int,
-    onRemoveOne: () -> Unit
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.48f)
-    ) {
-        Row(
-            modifier = Modifier.padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            RebuildStatusBadge(
-                text = "× $count",
-                backgroundColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = label,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyMedium
-            )
-            TextButton(onClick = onRemoveOne) {
-                Text("Remove")
-            }
-        }
-    }
-}
-
-private fun formatOunces(
-    ounces: Double
-): String {
-    return if (
-        ounces % 1.0 == 0.0
-    ) {
-        ounces.toInt().toString()
-    } else {
-        String.format(
-            Locale.US,
-            "%.1f",
-            ounces
-        )
-    }
-}
-
-@Composable
-private fun PainSection(
-    backPain: Float,
-    onBackPainChange: (Float) -> Unit,
-    shinPain: Float,
-    onShinPainChange: (Float) -> Unit
-) {
-    RebuildSectionCard(
-        title = "Pain check-in",
-        subtitle = "Record the number that best matches how it feels right now.",
-        accentColor = RebuildAmber
-    ) {
-        PainSlider(
-            label = "Lower back pain",
-            painValue = backPain,
-            onPainValueChange = onBackPainChange
-        )
-        PainSlider(
-            label = "Shin pain",
-            painValue = shinPain,
-            onPainValueChange = onShinPainChange
-        )
-    }
-}
-
-@Composable
-private fun PainSlider(
-    label: String,
-    painValue: Float,
-    onPainValueChange: (Float) -> Unit
-) {
-    val badgeColor = when {
-        painValue < 4f -> MaterialTheme.colorScheme.secondaryContainer
-        painValue < 7f -> Color(0xFFFFEDC2)
-        else -> MaterialTheme.colorScheme.errorContainer
-    }
-    val badgeContentColor = when {
-        painValue < 4f -> MaterialTheme.colorScheme.onSecondaryContainer
-        painValue < 7f -> Color(0xFF604400)
-        else -> MaterialTheme.colorScheme.onErrorContainer
-    }
-
-    RebuildInsetPanel {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Text(
-                    text = when {
-                        painValue == 0f -> "No pain recorded"
-                        painValue < 4f -> "Mild"
-                        painValue < 7f -> "Moderate"
-                        else -> "High"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            RebuildStatusBadge(
-                text = "${painValue.toInt()} / 10",
-                backgroundColor = badgeColor,
-                contentColor = badgeContentColor
-            )
-        }
-
-        Slider(
-            value = painValue,
-            onValueChange = onPainValueChange,
-            valueRange = 0f..10f,
-            steps = 9
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "No pain",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Worst pain",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun MedicationSection(
-    morningAspirinTaken: Boolean,
-    onMorningAspirinChange: (Boolean) -> Unit,
-    morningIbuprofenTaken: Boolean,
-    onMorningIbuprofenChange: (Boolean) -> Unit,
-    morningNaproxenTaken: Boolean,
-    onMorningNaproxenChange: (Boolean) -> Unit,
-    morningAcetaminophenTaken: Boolean,
-    onMorningAcetaminophenChange: (Boolean) -> Unit,
-    nightIbuprofenTaken: Boolean,
-    onNightIbuprofenChange: (Boolean) -> Unit,
-    nightNaproxenTaken: Boolean,
-    onNightNaproxenChange: (Boolean) -> Unit,
-    nightAcetaminophenTaken: Boolean,
-    onNightAcetaminophenChange: (Boolean) -> Unit
-) {
-    RebuildSectionCard(
-        title = "Pain relievers",
-        subtitle = "Your usual organizer is prefilled. Uncheck anything you did not take.",
-        accentColor = RebuildGreen
-    ) {
-        RebuildInsetPanel(
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f)
-        ) {
-            Text(
-                text = "Morning / day",
-                style = MaterialTheme.typography.titleMedium
-            )
-            MedicationCheckbox(
-                name = "Aspirin", dose = "325 mg",
-                checked = morningAspirinTaken,
-                onCheckedChange = onMorningAspirinChange
-            )
-            MedicationCheckbox(
-                name = "Ibuprofen", dose = "400 mg — 2 × 200 mg",
-                checked = morningIbuprofenTaken,
-                onCheckedChange = onMorningIbuprofenChange
-            )
-            MedicationCheckbox(
-                name = "Naproxen sodium", dose = "220 mg",
-                checked = morningNaproxenTaken,
-                onCheckedChange = onMorningNaproxenChange
-            )
-            MedicationCheckbox(
-                name = "Acetaminophen", dose = "1,000 mg — 2 × 500 mg",
-                checked = morningAcetaminophenTaken,
-                onCheckedChange = onMorningAcetaminophenChange
-            )
-        }
-
-        RebuildInsetPanel(
-            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f)
-        ) {
-            Text(
-                text = "Night",
-                style = MaterialTheme.typography.titleMedium
-            )
-            MedicationCheckbox(
-                name = "Ibuprofen", dose = "400 mg — 2 × 200 mg",
-                checked = nightIbuprofenTaken,
-                onCheckedChange = onNightIbuprofenChange
-            )
-            MedicationCheckbox(
-                name = "Naproxen sodium", dose = "220 mg",
-                checked = nightNaproxenTaken,
-                onCheckedChange = onNightNaproxenChange
-            )
-            MedicationCheckbox(
-                name = "Acetaminophen", dose = "1,000 mg — 2 × 500 mg",
-                checked = nightAcetaminophenTaken,
-                onCheckedChange = onNightAcetaminophenChange
-            )
-        }
-    }
-}
-
-@Composable
-private fun MedicationCheckbox(
-    name: String,
-    dose: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .clickable { onCheckedChange(!checked) },
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.74f)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Checkbox(
-                checked = checked,
-                onCheckedChange = onCheckedChange
-            )
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = name,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = dose,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Text(
-                text = if (checked) "Taken" else "Skipped",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (checked) {
-                    MaterialTheme.colorScheme.secondary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-    }
-}
-
-@Composable
-private fun JournalSection(
-    journalText: String,
-    onJournalTextChange: (String) -> Unit
-) {
-    RebuildSectionCard(
-        title = "Daily notes",
-        subtitle = "Capture meetings, pain triggers, progress, or anything worth remembering.",
-        accentColor = RebuildBlue
-    ) {
-        OutlinedTextField(
-            value = journalText,
-            onValueChange = onJournalTextChange,
-            label = { Text("What should future-you remember?") },
-            placeholder = {
-                Text(
-                    "Example: The meeting was about acceptance. My back hurt more while doing dishes…"
-                )
-            },
-            minLines = 7,
-            shape = RoundedCornerShape(18.dp),
-            modifier = Modifier.fillMaxWidth()
-        )
-        Text(
-            text = "Saved with the rest of today’s record.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}

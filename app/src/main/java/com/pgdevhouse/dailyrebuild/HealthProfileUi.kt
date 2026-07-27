@@ -115,7 +115,7 @@ fun HealthProfileFeature() {
     RebuildSectionCard(
         title = "Health profile & goals",
         subtitle =
-            "Private local tracking for goals, measurements, pain context, and your medication reference list.",
+            "Private local tracking for goals, measurements, daily highest pain, and your medication reference list.",
         accentColor = RebuildAmber
     ) {
         if (isLoading || data == null) {
@@ -566,15 +566,16 @@ private fun HealthProfileDialog(
                         }
                     )
 
-                    PainActivitySection(
-                        logs = data.painLogs,
-                        onAdd = {
-                            showPainLogEditor = true
-                        },
-                        onDelete = {
-                            painLogPendingDelete = it
-                        }
-                    )
+                    RebuildSectionCard(
+                        title = "Daily Highest Pain",
+                        subtitle = "Pain is now managed as one daily value: the highest pain experienced that day.",
+                        accentColor = RebuildAmber
+                    ) {
+                        Text(
+                            text = "Use Highest Pain from Home or the Health quick-log area. If pain increases later, update the same daily value. The former before-and-after activity form is no longer part of the interface.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
 
                     MedicationReferenceSection(
                         medications = data.medications,

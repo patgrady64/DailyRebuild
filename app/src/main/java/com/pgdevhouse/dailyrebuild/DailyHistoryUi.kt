@@ -16,6 +16,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -73,6 +74,18 @@ data class DailyHistoryDay(
     val careAppointments: List<CareAppointment> = emptyList()
 )
 
+
+enum class DailyHistoryFilter(
+    val label: String
+) {
+    ALL("All"),
+    FOOD("Food"),
+    MOBILITY("Mobility"),
+    MEETINGS("Meetings"),
+    HEALTH("Health"),
+    SELF_CARE("Self-care")
+}
+
 @Composable
 fun DailyHistoryDialog(
     days: List<DailyHistoryDay>,
@@ -95,8 +108,22 @@ fun DailyHistoryDialog(
         mutableStateOf<String?>(null)
     }
 
+    var selectedFilterName by rememberSaveable {
+        mutableStateOf(DailyHistoryFilter.ALL.name)
+    }
+
+    val selectedFilter =
+        runCatching {
+            DailyHistoryFilter.valueOf(selectedFilterName)
+        }.getOrDefault(DailyHistoryFilter.ALL)
+
+    val filteredDays =
+        days.filter { day ->
+            dayMatchesHistoryFilter(day, selectedFilter)
+        }
+
     val selectedDay =
-        days.firstOrNull {
+        filteredDays.firstOrNull {
             it.date == selectedDate
         }
 
@@ -121,7 +148,13 @@ fun DailyHistoryDialog(
         ) {
             if (selectedDay == null) {
                 DailyHistoryCalendarPage(
-                    days = days,
+                    days = filteredDays,
+                    allDayCount = days.size,
+                    selectedFilter = selectedFilter,
+                    onFilterChange = { filter ->
+                        selectedFilterName = filter.name
+                        selectedDate = null
+                    },
                     isLoading = isLoading,
                     visibleMonth =
                         runCatching {
@@ -212,6 +245,9 @@ fun DailyHistoryDialog(
 @Composable
 private fun DailyHistoryCalendarPage(
     days: List<DailyHistoryDay>,
+    allDayCount: Int,
+    selectedFilter: DailyHistoryFilter,
+    onFilterChange: (DailyHistoryFilter) -> Unit,
     isLoading: Boolean,
     visibleMonth: YearMonth,
     onVisibleMonthChange: (YearMonth) -> Unit,
@@ -232,20 +268,29 @@ private fun DailyHistoryCalendarPage(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                RebuildStatusBadge(text = "History · ${days.size} days")
+                RebuildStatusBadge(text = "${selectedFilter.label} · ${days.size} days")
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = "Daily calendar",
                     style = MaterialTheme.typography.headlineMedium
                 )
                 Text(
-                    text = "Marked dates contain saved records, food, activity, or health events.",
+                    text = if (selectedFilter == DailyHistoryFilter.ALL) {
+                        "Marked dates contain saved records, food, activity, meetings, self-care, or health events."
+                    } else {
+                        "Showing ${selectedFilter.label.lowercase(Locale.US)} dates only. $allDayCount total saved days remain available."
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             TextButton(onClick = onDismiss) { Text("Close") }
         }
+
+        HistoryFilterChips(
+            selectedFilter = selectedFilter,
+            onFilterChange = onFilterChange
+        )
 
         RebuildInsetPanel {
             Row(
@@ -301,7 +346,11 @@ private fun DailyHistoryCalendarPage(
             RebuildInsetPanel {
                 Text("No history yet", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Save a day or log food to place it on this calendar.",
+                    if (selectedFilter == DailyHistoryFilter.ALL) {
+                        "Save a day or log an event to place it on this calendar."
+                    } else {
+                        "No ${selectedFilter.label.lowercase(Locale.US)} records match this filter."
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1257,16 +1306,22 @@ private fun HistoryWaterCard(
 private fun HistoryPainCard(
     record: DailyRecord
 ) {
+    val highestPain = maxOf(
+        record.backPain,
+        record.shinPain
+    )
+
     HistorySectionCard(
-        title = "Pain"
+        title = "Highest Pain"
     ) {
         Text(
             text =
-                "Lower back pain: ${formatHistoryPain(record.backPain)} / 10"
+                "Highest pain that day: ${formatHistoryPain(highestPain)} / 10"
         )
         Text(
-            text =
-                "Shin pain: ${formatHistoryPain(record.shinPain)} / 10"
+            text = "Older records automatically use the higher of the former back and shin values.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -1628,6 +1683,60 @@ private fun buildMigraineHistorySummary(
         "Event logged"
     } else {
         parts.joinToString(" · ")
+    }
+}
+
+@Composable
+private fun HistoryFilterChips(
+    selectedFilter: DailyHistoryFilter,
+    onFilterChange: (DailyHistoryFilter) -> Unit
+) {
+    DailyHistoryFilter.values().toList().chunked(3).forEach { filters ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            filters.forEach { filter ->
+                FilterChip(
+                    selected = selectedFilter == filter,
+                    onClick = { onFilterChange(filter) },
+                    label = { Text(filter.label) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            repeat(3 - filters.size) {
+                Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+private fun dayMatchesHistoryFilter(
+    day: DailyHistoryDay,
+    filter: DailyHistoryFilter
+): Boolean {
+    val record = day.record
+
+    return when (filter) {
+        DailyHistoryFilter.ALL -> true
+        DailyHistoryFilter.FOOD ->
+            day.foodEntries.isNotEmpty() ||
+                record?.foodRecorded == true
+        DailyHistoryFilter.MOBILITY ->
+            day.activitySnapshot != null ||
+                day.mobilitySessions.isNotEmpty() ||
+                record?.walkCompleted == true ||
+                record?.mobilityCompleted == true
+        DailyHistoryFilter.MEETINGS ->
+            day.meetingAttendance.isNotEmpty()
+        DailyHistoryFilter.HEALTH ->
+            day.migraineLogs.isNotEmpty() ||
+                day.careVisits.isNotEmpty() ||
+                day.careAppointments.isNotEmpty()
+        DailyHistoryFilter.SELF_CARE ->
+            day.showerLogged ||
+                record?.painRecorded == true ||
+                record?.journalText?.isNotBlank() == true
     }
 }
 

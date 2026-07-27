@@ -28,9 +28,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CarePlace::class,
         CareProvider::class,
         CareVisit::class,
-        CareAppointment::class
+        CareAppointment::class,
+        PantryEssential::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = false
 )
 abstract class DailyRebuildDatabase :
@@ -224,7 +225,8 @@ abstract class DailyRebuildDatabase :
                                 MIGRATION_9_10,
                                 MIGRATION_10_11,
                                 MIGRATION_11_12,
-                                MIGRATION_12_13
+                                MIGRATION_12_13,
+                                MIGRATION_13_14
                             )
                             .build()
 
@@ -349,4 +351,6 @@ abstract class DailyRebuildDatabase :
     abstract fun careVisitDao(): CareVisitDao
 
     abstract fun careAppointmentDao(): CareAppointmentDao
+
+    abstract fun pantryEssentialDao(): PantryEssentialDao
 }
