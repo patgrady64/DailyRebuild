@@ -66,6 +66,7 @@ import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import com.pgdevhouse.dailyrebuild.data.local.ShowerLog
+import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Duration
@@ -148,6 +149,10 @@ fun DailyRebuildApp(
 
     val showerLogDao = remember {
         database.showerLogDao()
+    }
+
+    val migraineLogDao = remember {
+        database.migraineLogDao()
     }
 
     val healthProfileDao = remember {
@@ -409,6 +414,21 @@ fun DailyRebuildApp(
         mutableStateOf<List<String>>(
             emptyList()
         )
+    }
+
+    /*
+     * Migraine / visual-aura events are occasional health events, not daily
+     * anchors. The Health tab always keeps the log button available, while
+     * weekly summaries only include this category when an event exists.
+     */
+    var migraineLogs by remember {
+        mutableStateOf<List<MigraineLog>>(
+            emptyList()
+        )
+    }
+
+    var showMigraineLogDialog by rememberSaveable {
+        mutableStateOf(false)
     }
 
     /*
@@ -787,6 +807,9 @@ fun DailyRebuildApp(
                     it.date == todayDate
                 }
 
+            migraineLogs =
+                migraineLogDao.getAllLogs()
+
             foodEntries =
                 foodDao.getEntriesForDate(
                     todayDate
@@ -956,12 +979,18 @@ fun DailyRebuildApp(
                             date
                         )
 
+                    val migraineEvents =
+                        migraineLogDao.getLogsForDate(
+                            date
+                        )
+
                     if (
                         record != null ||
                         entries.isNotEmpty() ||
                         activitySnapshot != null ||
                         mobilitySessions.isNotEmpty() ||
-                        showerLog != null
+                        showerLog != null ||
+                        migraineEvents.isNotEmpty()
                     ) {
                         loadedDays.add(
                             DailyHistoryDay(
@@ -973,7 +1002,9 @@ fun DailyRebuildApp(
                                 mobilitySessions =
                                     mobilitySessions,
                                 showerLogged =
-                                    showerLog != null
+                                    showerLog != null,
+                                migraineLogs =
+                                    migraineEvents
                             )
                         )
                     }
@@ -1042,6 +1073,72 @@ fun DailyRebuildApp(
                 snackbarHostState.showSnackbar(
                     message =
                         "Could not remove today’s shower."
+                )
+            }
+        }
+    }
+
+
+    fun saveMigraineEvent(
+        draft: MigraineLogDraft
+    ) {
+        coroutineScope.launch {
+            try {
+                migraineLogDao.save(
+                    MigraineLog(
+                        date = draft.date,
+                        occurredAt = draft.occurredAt,
+                        auraDurationMinutes =
+                            draft.auraDurationMinutes,
+                        visualAura =
+                            draft.visualAura,
+                        headPain =
+                            draft.headPain,
+                        foggyAfterward =
+                            draft.foggyAfterward,
+                        notes = draft.notes
+                    )
+                )
+
+                migraineLogs =
+                    migraineLogDao.getAllLogs()
+                showMigraineLogDialog = false
+
+                snackbarHostState.showSnackbar(
+                    message =
+                        "Migraine / visual-aura event logged."
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message =
+                        "Could not save the migraine event."
+                )
+            }
+        }
+    }
+
+    fun deleteMigraineEvent(
+        log: MigraineLog
+    ) {
+        coroutineScope.launch {
+            try {
+                migraineLogDao.deleteById(
+                    log.id
+                )
+
+                migraineLogs =
+                    migraineLogs.filterNot {
+                        it.id == log.id
+                    }
+
+                snackbarHostState.showSnackbar(
+                    message =
+                        "Migraine event removed."
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message =
+                        "Could not remove the migraine event."
                 )
             }
         }
@@ -2131,7 +2228,28 @@ fun DailyRebuildApp(
                         TabScreenHeader(
                             title = "Mobility",
                             subtitle =
-                                "Generate a balanced routine or quickly record independent stretching."
+                                "See today’s walking, generate a balanced routine, or record independent stretching."
+                        )
+
+                        MobilityWalkingCard(
+                            availability =
+                                healthAvailability,
+                            hasPermissions =
+                                hasHealthPermissions,
+                            isLoading =
+                                isLoadingHealthActivity,
+                            activity =
+                                displayedActivity,
+                            sourceLabel =
+                                activitySourceLabel,
+                            onRefresh = {
+                                refreshHealthActivity(
+                                    showFeedback = true
+                                )
+                            },
+                            onManage = {
+                                selectedMainTab = 4
+                            }
                         )
 
                         MobilitySection(
@@ -2199,9 +2317,19 @@ fun DailyRebuildApp(
                             Arrangement.spacedBy(16.dp)
                     ) {
                         TabScreenHeader(
-                            title = "More",
+                            title = "Health",
                             subtitle =
-                                "Profile, goals, measurements, medication reference, and connected activity settings."
+                                "Profile, measurements, medication reference, health events, and connected activity."
+                        )
+
+                        MigraineTrackerCard(
+                            logs = migraineLogs,
+                            onLogMigraine = {
+                                showMigraineLogDialog = true
+                            },
+                            onDeleteLog = {
+                                deleteMigraineEvent(it)
+                            }
                         )
 
                         HealthProfileFeature()
@@ -2246,6 +2374,17 @@ fun DailyRebuildApp(
                 }
             }
         }
+    }
+
+    if (showMigraineLogDialog) {
+        MigraineLogDialog(
+            onDismiss = {
+                showMigraineLogDialog = false
+            },
+            onSave = {
+                saveMigraineEvent(it)
+            }
+        )
     }
 
     if (showQuickWaterDialog) {
@@ -3116,6 +3255,10 @@ fun DailyRebuildApp(
                             showerLogDao.deleteByDate(
                                 day.date
                             )
+
+                            migraineLogDao.deleteByDate(
+                                day.date
+                            )
                         }
 
                         dailyHistoryDays =
@@ -3126,6 +3269,11 @@ fun DailyRebuildApp(
                         showerDatesThisWeek =
                             showerDatesThisWeek.filterNot {
                                 it == day.date
+                            }
+
+                        migraineLogs =
+                            migraineLogs.filterNot {
+                                it.date == day.date
                             }
 
                         if (day.date == todayDate) {
@@ -3416,8 +3564,8 @@ private val dailyRebuildNavigationItems =
             symbol = "↺"
         ),
         DailyRebuildNavigationItem(
-            label = "More",
-            symbol = "•••"
+            label = "Health",
+            symbol = "+"
         )
     )
 
@@ -3826,6 +3974,171 @@ private fun TodayQuickActionsCard(
                     RoundedCornerShape(16.dp)
             ) {
                 Text("Log Pain")
+            }
+        }
+    }
+}
+
+@Composable
+private fun MobilityWalkingCard(
+    availability: HealthConnectAvailability,
+    hasPermissions: Boolean,
+    isLoading: Boolean,
+    activity: HealthActivityData,
+    sourceLabel: String?,
+    onRefresh: () -> Unit,
+    onManage: () -> Unit
+) {
+    RebuildSectionCard(
+        title = "Today’s walking",
+        subtitle =
+            sourceLabel
+                ?.let { "$it • Google Fit through Health Connect" }
+                ?: "Steps, miles, and recorded activity time from Google Fit through Health Connect.",
+        accentColor = RebuildTeal,
+        trailing = {
+            Row {
+                TextButton(
+                    onClick = onRefresh,
+                    enabled =
+                        availability ==
+                            HealthConnectAvailability.AVAILABLE &&
+                            hasPermissions &&
+                            !isLoading
+                ) {
+                    Text("Refresh")
+                }
+
+                TextButton(
+                    onClick = onManage
+                ) {
+                    Text("Manage")
+                }
+            }
+        }
+    ) {
+        when {
+            isLoading -> {
+                Row(
+                    verticalAlignment =
+                        Alignment.CenterVertically,
+                    horizontalArrangement =
+                        Arrangement.spacedBy(12.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier =
+                            Modifier.size(24.dp),
+                        strokeWidth = 3.dp
+                    )
+
+                    Text(
+                        text = "Refreshing walking data…",
+                        style =
+                            MaterialTheme.typography
+                                .bodyMedium
+                    )
+                }
+            }
+
+            availability !=
+                HealthConnectAvailability.AVAILABLE -> {
+                Text(
+                    text =
+                        "Health Connect is not currently available. Open Health to install, update, or review access.",
+                    style =
+                        MaterialTheme.typography
+                            .bodyMedium,
+                    color =
+                        MaterialTheme.colorScheme
+                            .onSurfaceVariant
+                )
+            }
+
+            !hasPermissions -> {
+                Text(
+                    text =
+                        "Walking access is not connected. Open Health to connect Google Fit through Health Connect.",
+                    style =
+                        MaterialTheme.typography
+                            .bodyMedium,
+                    color =
+                        MaterialTheme.colorScheme
+                            .onSurfaceVariant
+                )
+            }
+
+            else -> {
+                Row(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    horizontalArrangement =
+                        Arrangement.spacedBy(8.dp)
+                ) {
+                    RebuildMetricPill(
+                        label = "steps",
+                        value =
+                            String.format(
+                                Locale.US,
+                                "%,d",
+                                activity.steps
+                            ),
+                        modifier =
+                            Modifier.weight(1f)
+                    )
+
+                    RebuildMetricPill(
+                        label = "miles",
+                        value =
+                            formatActivityMiles(
+                                activity.distanceMiles
+                            ),
+                        modifier =
+                            Modifier.weight(1f),
+                        color =
+                            MaterialTheme.colorScheme
+                                .secondaryContainer,
+                        contentColor =
+                            MaterialTheme.colorScheme
+                                .onSecondaryContainer
+                    )
+
+                    RebuildMetricPill(
+                        label = "time",
+                        value =
+                            formatActivityTime(
+                                activity.activityMinutes
+                            ),
+                        modifier =
+                            Modifier.weight(1f),
+                        color =
+                            MaterialTheme.colorScheme
+                                .tertiaryContainer,
+                        contentColor =
+                            MaterialTheme.colorScheme
+                                .onTertiaryContainer
+                    )
+                }
+
+                if (
+                    sourceLabel ==
+                        "Saved with today's record"
+                ) {
+                    Spacer(
+                        modifier =
+                            Modifier.height(8.dp)
+                    )
+
+                    Text(
+                        text =
+                            "Showing the last snapshot saved for today. Tap Refresh for current Fit data.",
+                        style =
+                            MaterialTheme.typography
+                                .bodySmall,
+                        color =
+                            MaterialTheme.colorScheme
+                                .onSurfaceVariant
+                    )
+                }
             }
         }
     }

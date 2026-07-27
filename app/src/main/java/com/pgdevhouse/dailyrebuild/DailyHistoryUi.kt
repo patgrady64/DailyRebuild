@@ -39,8 +39,11 @@ import com.pgdevhouse.dailyrebuild.data.local.DailyActivitySnapshot
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
+import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
@@ -60,7 +63,8 @@ data class DailyHistoryDay(
     val foodEntries: List<FoodLogEntry>,
     val activitySnapshot: DailyActivitySnapshot? = null,
     val mobilitySessions: List<MobilitySession> = emptyList(),
-    val showerLogged: Boolean = false
+    val showerLogged: Boolean = false,
+    val migraineLogs: List<MigraineLog> = emptyList()
 )
 
 @Composable
@@ -162,7 +166,7 @@ fun DailyHistoryDialog(
                         "Delete ${formatHistoryDate(pendingDeletionDay.date)}? " +
                             "This permanently removes the saved checklist, " +
                             "water, pain, medications, journal, activity snapshot, " +
-                            "mobility sessions, shower log, individual foods, and logged meals for this date. Saved Foods and " +
+                            "mobility sessions, shower log, migraine events, individual foods, and logged meals for this date. Saved Foods and " +
                             "Saved Meal templates will not be deleted."
                 )
             },
@@ -229,7 +233,7 @@ private fun DailyHistoryCalendarPage(
                     style = MaterialTheme.typography.headlineMedium
                 )
                 Text(
-                    text = "Marked dates contain a saved record, food entries, or both.",
+                    text = "Marked dates contain saved records, food, activity, or health events.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -455,7 +459,8 @@ private fun CalendarDayCell(
         historyDay?.record != null ||
             historyDay?.activitySnapshot != null ||
             historyDay?.mobilitySessions?.isNotEmpty() == true ||
-            historyDay?.showerLogged == true
+            historyDay?.showerLogged == true ||
+            historyDay?.migraineLogs?.isNotEmpty() == true
     val hasFood = historyDay?.foodEntries?.isNotEmpty() == true
     val isToday = date == LocalDate.now()
     val containerColor = when {
@@ -545,7 +550,8 @@ private fun DailyHistoryDetailPage(
                 day.record != null ||
                     day.activitySnapshot != null ||
                     day.mobilitySessions.isNotEmpty() ||
-                    day.showerLogged
+                    day.showerLogged ||
+                    day.migraineLogs.isNotEmpty()
 
             RebuildStatusBadge(
                 text =
@@ -572,7 +578,7 @@ private fun DailyHistoryDetailPage(
             RebuildInsetPanel {
                 Text("Checklist not saved", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "The daily checklist was not saved, but the day's logged food, activity, mobility, or shower information remains available below.",
+                    "The daily checklist was not saved, but the day's logged food, activity, mobility, shower, or migraine information remains available below.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -598,6 +604,12 @@ private fun DailyHistoryDetailPage(
 
         if (day.showerLogged) {
             HistoryShowerCard()
+        }
+
+        if (day.migraineLogs.isNotEmpty()) {
+            HistoryMigraineCard(
+                logs = day.migraineLogs
+            )
         }
 
         HistoryFoodCard(entries = day.foodEntries)
@@ -732,6 +744,41 @@ private fun HistoryShowerCard() {
                 MaterialTheme.colorScheme
                     .onSurfaceVariant
         )
+    }
+}
+
+@Composable
+private fun HistoryMigraineCard(
+    logs: List<MigraineLog>
+) {
+    HistorySectionCard(
+        title = "Migraine & Visual Aura"
+    ) {
+        logs.sortedBy { it.occurredAt }
+            .forEach { log ->
+                RebuildInsetPanel {
+                    Text(
+                        text = formatMigraineHistoryTime(
+                            log.occurredAt
+                        ),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Text(
+                        text = buildMigraineHistorySummary(log),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (log.notes.isNotBlank()) {
+                        Text(
+                            text = log.notes,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
     }
 }
 
@@ -1228,6 +1275,44 @@ private fun calculateHistoryWaterOunces(
 
     return reusableCount * 24.0 +
         disposableCount * 16.9
+}
+
+private fun formatMigraineHistoryTime(
+    occurredAt: Long
+): String {
+    return Instant.ofEpochMilli(occurredAt)
+        .atZone(ZoneId.systemDefault())
+        .format(
+            DateTimeFormatter.ofPattern(
+                "h:mm a",
+                Locale.US
+            )
+        )
+}
+
+private fun buildMigraineHistorySummary(
+    log: MigraineLog
+): String {
+    val parts = mutableListOf<String>()
+
+    if (log.visualAura) {
+        parts += "visual aura"
+    }
+    if (log.headPain) {
+        parts += "head pain"
+    }
+    if (log.foggyAfterward) {
+        parts += "foggy afterward"
+    }
+    log.auraDurationMinutes?.let {
+        parts += "$it min aura"
+    }
+
+    return if (parts.isEmpty()) {
+        "Event logged"
+    } else {
+        parts.joinToString(" · ")
+    }
 }
 
 private fun formatHistoryDate(
