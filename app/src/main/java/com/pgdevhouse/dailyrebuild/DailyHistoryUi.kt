@@ -41,6 +41,7 @@ import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
 import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
+import com.pgdevhouse.dailyrebuild.data.local.CareAppointment
 import com.pgdevhouse.dailyrebuild.data.local.CareVisit
 import java.math.BigDecimal
 import java.time.Instant
@@ -68,7 +69,8 @@ data class DailyHistoryDay(
     val showerLogged: Boolean = false,
     val migraineLogs: List<MigraineLog> = emptyList(),
     val meetingAttendance: List<MeetingAttendance> = emptyList(),
-    val careVisits: List<CareVisit> = emptyList()
+    val careVisits: List<CareVisit> = emptyList(),
+    val careAppointments: List<CareAppointment> = emptyList()
 )
 
 @Composable
@@ -170,7 +172,7 @@ fun DailyHistoryDialog(
                         "Delete ${formatHistoryDate(pendingDeletionDay.date)}? " +
                             "This permanently removes the saved checklist, " +
                             "water, pain, medications, journal, activity snapshot, " +
-                            "mobility sessions, shower log, migraine events, meeting attendance, individual foods, and logged meals for this date. Saved Foods and " +
+                            "mobility sessions, shower log, migraine events, meeting attendance, care appointments, care visits, individual foods, and logged meals for this date. Saved Places, Providers, Saved Foods, and " +
                             "Saved Meal templates will not be deleted."
                 )
             },
@@ -558,7 +560,8 @@ private fun DailyHistoryDetailPage(
                     day.showerLogged ||
                     day.migraineLogs.isNotEmpty() ||
                     day.meetingAttendance.isNotEmpty() ||
-                    day.careVisits.isNotEmpty()
+                    day.careVisits.isNotEmpty() ||
+                    day.careAppointments.isNotEmpty()
 
             RebuildStatusBadge(
                 text =
@@ -585,7 +588,7 @@ private fun DailyHistoryDetailPage(
             RebuildInsetPanel {
                 Text("Checklist not saved", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "The daily checklist was not saved, but the day's logged food, activity, mobility, shower, migraine, meeting, or care-visit information remains available below.",
+                    "The daily checklist was not saved, but the day's logged food, activity, mobility, shower, migraine, meeting, appointment, or care-visit information remains available below.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -622,6 +625,12 @@ private fun DailyHistoryDetailPage(
         if (day.meetingAttendance.isNotEmpty()) {
             HistoryMeetingCard(
                 attendance = day.meetingAttendance
+            )
+        }
+
+        if (day.careAppointments.isNotEmpty()) {
+            HistoryCareAppointmentCard(
+                appointments = day.careAppointments
             )
         }
 
@@ -845,6 +854,88 @@ private fun HistoryMeetingCard(
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
+                }
+            }
+    }
+}
+
+@Composable
+private fun HistoryCareAppointmentCard(
+    appointments: List<CareAppointment>
+) {
+    HistorySectionCard(
+        title = "Care Appointments"
+    ) {
+        appointments.sortedBy { it.scheduledAt }
+            .forEach { appointment ->
+                RebuildInsetPanel {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = appointment.placeName,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = formatAppointmentDateTime(
+                                    appointment.scheduledAt
+                                ) + " · ${appointment.visitCategory}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        RebuildStatusBadge(appointment.status)
+                    }
+
+                    val provider =
+                        appointmentProviderDisplay(appointment)
+                    if (provider.isNotBlank()) {
+                        Text(
+                            text = provider,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+
+                    if (appointment.reasonForAppointment.isNotBlank()) {
+                        Text(
+                            text = "Reason: ${appointment.reasonForAppointment}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
+                    careVisitDetailLine(
+                        label = "Location",
+                        value = appointmentLocationText(
+                            appointment.address,
+                            appointment.city,
+                            appointment.state,
+                            appointment.zipCode
+                        )
+                    )
+                    careVisitDetailLine(
+                        label = "Transportation",
+                        value = listOf(
+                            appointment.transportationMode
+                                .takeUnless { it == "Not planned" }
+                                .orEmpty(),
+                            appointment.transportationDetails,
+                            appointment.leaveByAt?.let {
+                                "Leave by ${formatAppointmentDateTime(it)}"
+                            }.orEmpty()
+                        ).filter(String::isNotBlank)
+                            .joinToString(" · ")
+                    )
+                    careVisitDetailLine(
+                        label = "Questions",
+                        value = appointment.questionsToAsk
+                    )
+                    careVisitDetailLine(
+                        label = "Documents",
+                        value = appointment.documentsToBring
+                    )
                 }
             }
     }

@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.pgdevhouse.dailyrebuild.data.local.CareAppointment
 import com.pgdevhouse.dailyrebuild.data.local.CarePlace
 import com.pgdevhouse.dailyrebuild.data.local.CareProvider
 import com.pgdevhouse.dailyrebuild.data.local.CareVisit
@@ -364,7 +365,8 @@ fun CareProviderPickerDialog(
     onAddProvider: () -> Unit,
     onContinueWithoutProvider: () -> Unit,
     onBack: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    prompt: String = "Who did you see?"
 ) {
     Dialog(
         onDismissRequest = onDismiss,
@@ -395,7 +397,7 @@ fun CareProviderPickerDialog(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Who did you see?",
+                    text = prompt,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -739,33 +741,94 @@ private class CareVisitFormState(
 private fun createCareVisitFormState(
     existingVisit: CareVisit?,
     savedPlace: CarePlace?,
-    savedProvider: CareProvider?
+    savedProvider: CareProvider?,
+    appointmentPrefill: CareAppointment?
 ): CareVisitFormState {
+    val initialTimestamp =
+        existingVisit?.startedAt
+            ?: appointmentPrefill?.scheduledAt
+            ?: System.currentTimeMillis()
+
     val initialDateTime =
-        if (existingVisit == null) {
-            java.time.ZonedDateTime.now()
-        } else {
-            Instant.ofEpochMilli(existingVisit.startedAt)
-                .atZone(ZoneId.systemDefault())
-        }
+        Instant.ofEpochMilli(initialTimestamp)
+            .atZone(ZoneId.systemDefault())
+
+    val appointmentNotes =
+        appointmentPrefill?.let { appointment ->
+            buildList {
+                if (appointment.questionsToAsk.isNotBlank()) {
+                    add("Questions prepared: ${appointment.questionsToAsk}")
+                }
+                if (appointment.documentsToBring.isNotBlank()) {
+                    add("Documents brought/planned: ${appointment.documentsToBring}")
+                }
+                if (appointment.preparationNotes.isNotBlank()) {
+                    add("Preparation notes: ${appointment.preparationNotes}")
+                }
+            }.joinToString("\n")
+        }.orEmpty()
 
     return CareVisitFormState(
-        selectedDate = existingVisit?.date ?: initialDateTime.toLocalDate().toString(),
+        selectedDate =
+            existingVisit?.date
+                ?: appointmentPrefill?.date
+                ?: initialDateTime.toLocalDate().toString(),
         selectedTime = initialDateTime.toLocalTime().withSecond(0).withNano(0).toString(),
-        category = existingVisit?.visitCategory ?: defaultVisitCategory(savedPlace, savedProvider),
-        format = existingVisit?.visitFormat ?: "In person",
-        placeName = existingVisit?.placeName ?: savedPlace?.name.orEmpty(),
-        placeCategory = existingVisit?.placeCategory ?: savedPlace?.placeCategory.orEmpty(),
-        providerName = existingVisit?.providerName ?: savedProvider?.name.orEmpty(),
-        providerCredentials = existingVisit?.providerCredentials ?: savedProvider?.credentials.orEmpty(),
-        providerSpecialty = existingVisit?.providerSpecialty ?: savedProvider?.specialty.orEmpty(),
-        address = existingVisit?.address ?: savedPlace?.address.orEmpty(),
-        city = existingVisit?.city ?: savedPlace?.city.orEmpty(),
-        state = existingVisit?.state ?: savedPlace?.state.orEmpty(),
-        zipCode = existingVisit?.zipCode ?: savedPlace?.zipCode.orEmpty(),
-        placePhone = existingVisit?.placePhone ?: savedPlace?.phone.orEmpty(),
-        providerPhone = existingVisit?.providerPhone ?: savedProvider?.phone.orEmpty(),
-        reason = existingVisit?.reasonForVisit.orEmpty(),
+        category =
+            existingVisit?.visitCategory
+                ?: appointmentPrefill?.visitCategory
+                ?: defaultVisitCategory(savedPlace, savedProvider),
+        format =
+            existingVisit?.visitFormat
+                ?: appointmentPrefill?.visitFormat
+                ?: "In person",
+        placeName =
+            existingVisit?.placeName
+                ?: appointmentPrefill?.placeName
+                ?: savedPlace?.name.orEmpty(),
+        placeCategory =
+            existingVisit?.placeCategory
+                ?: appointmentPrefill?.placeCategory
+                ?: savedPlace?.placeCategory.orEmpty(),
+        providerName =
+            existingVisit?.providerName
+                ?: appointmentPrefill?.providerName
+                ?: savedProvider?.name.orEmpty(),
+        providerCredentials =
+            existingVisit?.providerCredentials
+                ?: appointmentPrefill?.providerCredentials
+                ?: savedProvider?.credentials.orEmpty(),
+        providerSpecialty =
+            existingVisit?.providerSpecialty
+                ?: appointmentPrefill?.providerSpecialty
+                ?: savedProvider?.specialty.orEmpty(),
+        address =
+            existingVisit?.address
+                ?: appointmentPrefill?.address
+                ?: savedPlace?.address.orEmpty(),
+        city =
+            existingVisit?.city
+                ?: appointmentPrefill?.city
+                ?: savedPlace?.city.orEmpty(),
+        state =
+            existingVisit?.state
+                ?: appointmentPrefill?.state
+                ?: savedPlace?.state.orEmpty(),
+        zipCode =
+            existingVisit?.zipCode
+                ?: appointmentPrefill?.zipCode
+                ?: savedPlace?.zipCode.orEmpty(),
+        placePhone =
+            existingVisit?.placePhone
+                ?: appointmentPrefill?.placePhone
+                ?: savedPlace?.phone.orEmpty(),
+        providerPhone =
+            existingVisit?.providerPhone
+                ?: appointmentPrefill?.providerPhone
+                ?: savedProvider?.phone.orEmpty(),
+        reason =
+            existingVisit?.reasonForVisit
+                ?: appointmentPrefill?.reasonForAppointment.orEmpty(),
         summary = existingVisit?.visitSummary.orEmpty(),
         tests = existingVisit?.testsProcedures.orEmpty(),
         results = existingVisit?.resultsDiscussed.orEmpty(),
@@ -773,7 +836,7 @@ private fun createCareVisitFormState(
         medicationChanges = existingVisit?.medicationChanges.orEmpty(),
         referrals = existingVisit?.referrals.orEmpty(),
         followUpDate = existingVisit?.followUpDate.orEmpty(),
-        notes = existingVisit?.notes.orEmpty(),
+        notes = existingVisit?.notes ?: appointmentNotes,
         weight = existingVisit?.weightPounds?.toString().orEmpty(),
         systolic = existingVisit?.systolic?.toString().orEmpty(),
         diastolic = existingVisit?.diastolic?.toString().orEmpty(),
@@ -790,7 +853,8 @@ private fun createCareVisitFormState(
 private fun CareVisitFormState.toDraft(
     existingVisit: CareVisit?,
     savedPlace: CarePlace?,
-    savedProvider: CareProvider?
+    savedProvider: CareProvider?,
+    appointmentPrefill: CareAppointment?
 ): CareVisitDraft {
     val dateValue = LocalDate.parse(selectedDate)
     val timeValue = LocalTime.parse(selectedTime)
@@ -802,8 +866,14 @@ private fun CareVisitFormState.toDraft(
 
     return CareVisitDraft(
         id = existingVisit?.id ?: 0L,
-        placeId = existingVisit?.placeId ?: savedPlace?.id,
-        providerId = existingVisit?.providerId ?: savedProvider?.id,
+        placeId =
+            existingVisit?.placeId
+                ?: appointmentPrefill?.placeId
+                ?: savedPlace?.id,
+        providerId =
+            existingVisit?.providerId
+                ?: appointmentPrefill?.providerId
+                ?: savedProvider?.id,
         date = selectedDate,
         startedAt = timestamp,
         visitCategory = category.trim(),
@@ -1255,19 +1325,22 @@ fun CareVisitEditorDialog(
     isOneTimeVisit: Boolean,
     isSaving: Boolean,
     onSave: (CareVisitDraft) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    appointmentPrefill: CareAppointment? = null
 ) {
     val form =
         remember(
             existingVisit?.id,
             savedPlace?.id,
             savedProvider?.id,
+            appointmentPrefill?.id,
             isOneTimeVisit
         ) {
             createCareVisitFormState(
                 existingVisit = existingVisit,
                 savedPlace = savedPlace,
-                savedProvider = savedProvider
+                savedProvider = savedProvider,
+                appointmentPrefill = appointmentPrefill
             )
         }
     val canEditSnapshot =
@@ -1300,16 +1373,21 @@ fun CareVisitEditorDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (existingVisit == null) {
-                                "Log Care Visit"
-                            } else {
-                                "Edit Care Visit"
+                            text = when {
+                                existingVisit != null -> "Edit Care Visit"
+                                appointmentPrefill != null -> "Complete Appointment as Visit"
+                                else -> "Log Care Visit"
                             },
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Completed visit details",
+                            text =
+                                if (appointmentPrefill != null) {
+                                    "Appointment details are prefilled; add what happened."
+                                } else {
+                                    "Completed visit details"
+                                },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1384,7 +1462,8 @@ fun CareVisitEditorDialog(
                                 form.toDraft(
                                     existingVisit = existingVisit,
                                     savedPlace = savedPlace,
-                                    savedProvider = savedProvider
+                                    savedProvider = savedProvider,
+                                    appointmentPrefill = appointmentPrefill
                                 )
                             )
                         }

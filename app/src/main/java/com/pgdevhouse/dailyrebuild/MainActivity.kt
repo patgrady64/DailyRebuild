@@ -1,10 +1,14 @@
 package com.pgdevhouse.dailyrebuild
 
+import android.Manifest
+import android.os.Build
 import android.os.Bundle
+import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -72,6 +76,7 @@ import com.pgdevhouse.dailyrebuild.data.local.ShowerLog
 import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
 import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
 import com.pgdevhouse.dailyrebuild.data.local.SavedMeeting
+import com.pgdevhouse.dailyrebuild.data.local.CareAppointment
 import com.pgdevhouse.dailyrebuild.data.local.CarePlace
 import com.pgdevhouse.dailyrebuild.data.local.CareProvider
 import com.pgdevhouse.dailyrebuild.data.local.CareVisit
@@ -173,6 +178,10 @@ fun DailyRebuildApp(
         database.careVisitDao()
     }
 
+    val careAppointmentDao = remember {
+        database.careAppointmentDao()
+    }
+
     val healthProfileDao = remember {
         database.healthProfileDao()
     }
@@ -244,6 +253,22 @@ fun DailyRebuildApp(
     val snackbarHostState = remember {
         SnackbarHostState()
     }
+
+    val notificationPermissionLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar(
+                    message =
+                        if (granted) {
+                            "Appointment notifications enabled."
+                        } else {
+                            "Appointment saved, but notification permission was not allowed."
+                        }
+                )
+            }
+        }
 
     var isLoading by remember {
         mutableStateOf(true)
@@ -525,6 +550,14 @@ fun DailyRebuildApp(
 
     var careVisits by remember {
         mutableStateOf<List<CareVisit>>(emptyList())
+    }
+
+    var careAppointments by remember {
+        mutableStateOf<List<CareAppointment>>(emptyList())
+    }
+
+    val appointmentWorkflow = remember {
+        AppointmentWorkflowState()
     }
 
     var showCareVisitStartDialog by rememberSaveable {
@@ -997,6 +1030,16 @@ fun DailyRebuildApp(
             careVisits =
                 careVisitDao.getAllVisits()
 
+            careAppointments =
+                careAppointmentDao.getAllAppointments()
+
+            careAppointments.forEach { appointment ->
+                AppointmentReminderScheduler.schedule(
+                    context,
+                    appointment
+                )
+            }
+
             foodEntries =
                 foodDao.getEntriesForDate(
                     todayDate
@@ -1143,22 +1186,56 @@ fun DailyRebuildApp(
         }
 
     val recentCarePlaces =
-        remember(carePlaces, careVisits) {
-            val lastVisitByPlaceId =
-                careVisits
-                    .filter { it.placeId != null }
-                    .groupBy { it.placeId }
-                    .mapValues { (_, visits) ->
-                        visits.maxOf { it.startedAt }
-                    }
+        remember(
+            carePlaces,
+            careVisits,
+            careAppointments
+        ) {
+            val lastUseByPlaceId =
+                buildMap<Long, Long> {
+                    careVisits
+                        .filter { it.placeId != null }
+                        .forEach { visit ->
+                            val placeId = visit.placeId ?: return@forEach
+                            put(
+                                placeId,
+                                maxOf(
+                                    get(placeId) ?: Long.MIN_VALUE,
+                                    visit.startedAt
+                                )
+                            )
+                        }
+
+                    careAppointments
+                        .filter { it.placeId != null }
+                        .forEach { appointment ->
+                            val placeId =
+                                appointment.placeId
+                                    ?: return@forEach
+                            put(
+                                placeId,
+                                maxOf(
+                                    get(placeId) ?: Long.MIN_VALUE,
+                                    appointment.scheduledAt
+                                )
+                            )
+                        }
+                }
 
             carePlaces.sortedWith(
                 compareByDescending<CarePlace> {
-                    lastVisitByPlaceId[it.id]
+                    lastUseByPlaceId[it.id]
                         ?: Long.MIN_VALUE
                 }.thenBy {
                     it.name.lowercase(Locale.US)
                 }
+            )
+        }
+
+    val upcomingCareAppointment =
+        remember(careAppointments) {
+            nextUpcomingAppointment(
+                careAppointments
             )
         }
 
@@ -1191,6 +1268,21 @@ fun DailyRebuildApp(
                         }
                     )
             }
+        }
+
+    val providersForSelectedAppointmentPlace =
+        remember(
+            appointmentWorkflow.selectedPlace,
+            careProviders,
+            careVisits,
+            careAppointments
+        ) {
+            recentAppointmentProviders(
+                place = appointmentWorkflow.selectedPlace,
+                providers = careProviders,
+                visits = careVisits,
+                appointments = careAppointments
+            )
         }
 
     val displayedActivity =
@@ -1510,19 +1602,37 @@ fun DailyRebuildApp(
                 showCarePlaceEditorDialog = false
                 carePlaceBeingEdited = null
 
-                if (
-                    continueVisitAfterPlaceSave &&
-                    savedPlace != null
-                ) {
-                    selectedCarePlaceForVisit = savedPlace
-                    selectedCareProviderForVisit = null
-                    showCareVisitStartDialog = false
-                    showCareProviderPickerDialog = true
+                if (appointmentWorkflow.placeEditorActive) {
+                    if (
+                        appointmentWorkflow.continueAfterPlaceSave &&
+                        savedPlace != null
+                    ) {
+                        appointmentWorkflow.selectedPlace = savedPlace
+                        appointmentWorkflow.selectedProvider = null
+                        appointmentWorkflow.showStart = false
+                        appointmentWorkflow.showProviderPicker = true
+                    } else {
+                        appointmentWorkflow.showStart = true
+                    }
+
+                    appointmentWorkflow.placeEditorActive = false
+                    appointmentWorkflow.continueAfterPlaceSave = false
                 } else {
-                    showCareVisitStartDialog = true
+                    if (
+                        continueVisitAfterPlaceSave &&
+                        savedPlace != null
+                    ) {
+                        selectedCarePlaceForVisit = savedPlace
+                        selectedCareProviderForVisit = null
+                        showCareVisitStartDialog = false
+                        showCareProviderPickerDialog = true
+                    } else {
+                        showCareVisitStartDialog = true
+                    }
+
+                    continueVisitAfterPlaceSave = false
                 }
 
-                continueVisitAfterPlaceSave = false
                 snackbarHostState.showSnackbar(
                     message =
                         if (existing == null) {
@@ -1590,20 +1700,39 @@ fun DailyRebuildApp(
                 showCareProviderEditorDialog = false
                 careProviderBeingEdited = null
 
-                if (
-                    continueVisitAfterProviderSave &&
-                    savedProvider != null
-                ) {
-                    selectedCareProviderForVisit = savedProvider
-                    careVisitBeingEdited = null
-                    isOneTimeCareVisit = false
-                    showCareProviderPickerDialog = false
-                    showCareVisitEditorDialog = true
+                if (appointmentWorkflow.providerEditorActive) {
+                    if (
+                        appointmentWorkflow.continueAfterProviderSave &&
+                        savedProvider != null
+                    ) {
+                        appointmentWorkflow.selectedProvider = savedProvider
+                        appointmentWorkflow.editingAppointment = null
+                        appointmentWorkflow.oneTimeAppointment = false
+                        appointmentWorkflow.showProviderPicker = false
+                        appointmentWorkflow.showEditor = true
+                    } else {
+                        appointmentWorkflow.showProviderPicker = true
+                    }
+
+                    appointmentWorkflow.providerEditorActive = false
+                    appointmentWorkflow.continueAfterProviderSave = false
                 } else {
-                    showCareProviderPickerDialog = true
+                    if (
+                        continueVisitAfterProviderSave &&
+                        savedProvider != null
+                    ) {
+                        selectedCareProviderForVisit = savedProvider
+                        careVisitBeingEdited = null
+                        isOneTimeCareVisit = false
+                        showCareProviderPickerDialog = false
+                        showCareVisitEditorDialog = true
+                    } else {
+                        showCareProviderPickerDialog = true
+                    }
+
+                    continueVisitAfterProviderSave = false
                 }
 
-                continueVisitAfterProviderSave = false
                 snackbarHostState.showSnackbar(
                     message =
                         if (existing == null) {
@@ -1647,6 +1776,10 @@ fun DailyRebuildApp(
                 }
 
                 val now = System.currentTimeMillis()
+                val convertedAppointment =
+                    appointmentWorkflow.convertingAppointment
+                var savedVisitId = draft.id
+
                 val visit =
                     CareVisit(
                         id = draft.id,
@@ -1691,7 +1824,8 @@ fun DailyRebuildApp(
 
                 database.withTransaction {
                     if (draft.id == 0L) {
-                        careVisitDao.insertVisit(visit)
+                        savedVisitId =
+                            careVisitDao.insertVisit(visit)
                     } else {
                         careVisitDao.updateVisit(visit)
                     }
@@ -1751,9 +1885,27 @@ fun DailyRebuildApp(
                             )
                         }
                     }
+
+                    convertedAppointment?.let { appointment ->
+                        careAppointmentDao.updateAppointment(
+                            appointment.copy(
+                                status = "Completed",
+                                convertedVisitId = savedVisitId,
+                                updatedAt = now
+                            )
+                        )
+                    }
                 }
 
                 careVisits = careVisitDao.getAllVisits()
+                careAppointments =
+                    careAppointmentDao.getAllAppointments()
+                convertedAppointment?.let { appointment ->
+                    AppointmentReminderScheduler.cancel(
+                        context,
+                        appointment.id
+                    )
+                }
                 healthFeatureRefreshKey++
 
                 showCareVisitEditorDialog = false
@@ -1764,7 +1916,10 @@ fun DailyRebuildApp(
                 careVisitBeingEdited = null
                 isOneTimeCareVisit = false
 
-                if (returnToCareHistoryAfterVisitSave) {
+                if (convertedAppointment != null) {
+                    appointmentWorkflow.convertingAppointment = null
+                    appointmentWorkflow.showHistory = true
+                } else if (returnToCareHistoryAfterVisitSave) {
                     showCareVisitHistoryDialog = true
                 }
                 returnToCareHistoryAfterVisitSave = false
@@ -1794,8 +1949,16 @@ fun DailyRebuildApp(
             isDeletingCareVisit = true
 
             try {
-                careVisitDao.deleteVisitById(visit.id)
+                database.withTransaction {
+                    careVisitDao.deleteVisitById(visit.id)
+                    careAppointmentDao.clearConvertedVisitLink(
+                        visitId = visit.id,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                }
                 careVisits = careVisitDao.getAllVisits()
+                careAppointments =
+                    careAppointmentDao.getAllAppointments()
                 careVisitPendingDeletion = null
                 snackbarHostState.showSnackbar(
                     message = "Care visit removed."
@@ -1810,6 +1973,231 @@ fun DailyRebuildApp(
         }
     }
 
+    fun requestAppointmentNotificationPermissionIfNeeded(
+        remindersEnabled: Boolean
+    ) {
+        if (
+            remindersEnabled &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            context.checkSelfPermission(
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(
+                Manifest.permission.POST_NOTIFICATIONS
+            )
+        }
+    }
+
+    fun openAppointmentStart() {
+        appointmentWorkflow.clearSelection()
+        appointmentWorkflow.returnToHistoryAfterSave = false
+        appointmentWorkflow.showHistory = false
+        appointmentWorkflow.showStart = true
+    }
+
+    fun openAppointmentEditor(
+        appointment: CareAppointment,
+        returnToHistory: Boolean
+    ) {
+        appointmentWorkflow.editingAppointment = appointment
+        appointmentWorkflow.selectedPlace =
+            appointment.placeId?.let { id ->
+                carePlaces.firstOrNull { it.id == id }
+            }
+        appointmentWorkflow.selectedProvider =
+            appointment.providerId?.let { id ->
+                careProviders.firstOrNull { it.id == id }
+            }
+        appointmentWorkflow.oneTimeAppointment =
+            appointment.placeId == null
+        appointmentWorkflow.returnToHistoryAfterSave =
+            returnToHistory
+        appointmentWorkflow.showHistory = false
+        appointmentWorkflow.showEditor = true
+    }
+
+    fun saveCareAppointment(
+        draft: AppointmentDraft
+    ) {
+        coroutineScope.launch {
+            appointmentWorkflow.isSaving = true
+
+            try {
+                val duplicate =
+                    careAppointmentDao.findPotentialDuplicate(
+                        date = draft.date,
+                        placeName = draft.placeName,
+                        providerName = draft.providerName,
+                        scheduledAt = draft.scheduledAt,
+                        excludedId = draft.id
+                    )
+
+                if (duplicate != null) {
+                    snackbarHostState.showSnackbar(
+                        message =
+                            "A similar appointment is already scheduled within 30 minutes."
+                    )
+                    return@launch
+                }
+
+                val now = System.currentTimeMillis()
+                val appointment =
+                    CareAppointment(
+                        id = draft.id,
+                        placeId = draft.placeId,
+                        providerId = draft.providerId,
+                        date = draft.date,
+                        scheduledAt = draft.scheduledAt,
+                        status = draft.status,
+                        visitCategory = draft.visitCategory,
+                        visitFormat = draft.visitFormat,
+                        placeName = draft.placeName,
+                        placeCategory = draft.placeCategory,
+                        providerName = draft.providerName,
+                        providerCredentials = draft.providerCredentials,
+                        providerSpecialty = draft.providerSpecialty,
+                        address = draft.address,
+                        city = draft.city,
+                        state = draft.state,
+                        zipCode = draft.zipCode,
+                        placePhone = draft.placePhone,
+                        providerPhone = draft.providerPhone,
+                        reasonForAppointment =
+                            draft.reasonForAppointment,
+                        transportationMode =
+                            draft.transportationMode,
+                        transportationDetails =
+                            draft.transportationDetails,
+                        leaveByAt = draft.leaveByAt,
+                        transportationConfirmed =
+                            draft.transportationConfirmed,
+                        questionsToAsk = draft.questionsToAsk,
+                        documentsToBring = draft.documentsToBring,
+                        preparationNotes = draft.preparationNotes,
+                        remindOneDayBefore =
+                            draft.remindOneDayBefore,
+                        remindTwoHoursBefore =
+                            draft.remindTwoHoursBefore,
+                        convertedVisitId = draft.convertedVisitId,
+                        createdAt = draft.createdAt,
+                        updatedAt = now
+                    )
+
+                val savedId =
+                    if (draft.id == 0L) {
+                        careAppointmentDao.insertAppointment(
+                            appointment
+                        )
+                    } else {
+                        careAppointmentDao.updateAppointment(
+                            appointment
+                        )
+                        draft.id
+                    }
+
+                val savedAppointment =
+                    careAppointmentDao.getAppointmentById(
+                        savedId
+                    ) ?: appointment.copy(id = savedId)
+
+                AppointmentReminderScheduler.schedule(
+                    context,
+                    savedAppointment
+                )
+
+                careAppointments =
+                    careAppointmentDao.getAllAppointments()
+
+                requestAppointmentNotificationPermissionIfNeeded(
+                    remindersEnabled =
+                        savedAppointment.scheduledAt > now &&
+                            savedAppointment.status in
+                                setOf("Scheduled", "Confirmed") &&
+                            (
+                                savedAppointment.remindOneDayBefore ||
+                                    savedAppointment.remindTwoHoursBefore
+                            )
+                )
+
+                appointmentWorkflow.showEditor = false
+                appointmentWorkflow.showStart = false
+                appointmentWorkflow.showProviderPicker = false
+                appointmentWorkflow.clearSelection()
+
+                if (appointmentWorkflow.returnToHistoryAfterSave) {
+                    appointmentWorkflow.showHistory = true
+                }
+                appointmentWorkflow.returnToHistoryAfterSave = false
+
+                snackbarHostState.showSnackbar(
+                    message =
+                        if (draft.id == 0L) {
+                            "Appointment scheduled."
+                        } else {
+                            "Appointment updated."
+                        }
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not save the appointment."
+                )
+            } finally {
+                appointmentWorkflow.isSaving = false
+            }
+        }
+    }
+
+    fun deleteCareAppointment(
+        appointment: CareAppointment
+    ) {
+        coroutineScope.launch {
+            appointmentWorkflow.isDeleting = true
+
+            try {
+                AppointmentReminderScheduler.cancel(
+                    context,
+                    appointment.id
+                )
+                careAppointmentDao.deleteAppointmentById(
+                    appointment.id
+                )
+                careAppointments =
+                    careAppointmentDao.getAllAppointments()
+                appointmentWorkflow.deletingAppointment = null
+
+                snackbarHostState.showSnackbar(
+                    message = "Appointment removed."
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not remove the appointment."
+                )
+            } finally {
+                appointmentWorkflow.isDeleting = false
+            }
+        }
+    }
+
+    fun convertAppointmentToVisit(
+        appointment: CareAppointment
+    ) {
+        appointmentWorkflow.convertingAppointment = appointment
+        appointmentWorkflow.showHistory = false
+        selectedCarePlaceForVisit =
+            appointment.placeId?.let { id ->
+                carePlaces.firstOrNull { it.id == id }
+            }
+        selectedCareProviderForVisit =
+            appointment.providerId?.let { id ->
+                careProviders.firstOrNull { it.id == id }
+            }
+        careVisitBeingEdited = null
+        isOneTimeCareVisit = appointment.placeId == null
+        returnToCareHistoryAfterVisitSave = false
+        showCareVisitEditorDialog = true
+    }
+
     fun openDailyHistory() {
         showDailyHistoryDialog = true
         isLoadingDailyHistory = true
@@ -1820,6 +2208,10 @@ fun DailyRebuildApp(
                     mutableListOf<DailyHistoryDay>()
 
                 val today = LocalDate.now()
+                val appointmentHistory =
+                    careAppointmentDao.getAllAppointments()
+                val appointmentsByDate =
+                    appointmentHistory.groupBy { it.date }
 
                 for (dayOffset in 0L until 365L) {
                     val date =
@@ -1869,6 +2261,9 @@ fun DailyRebuildApp(
                             date
                         )
 
+                    val careAppointmentsForDate =
+                        appointmentsByDate[date].orEmpty()
+
                     if (
                         record != null ||
                         entries.isNotEmpty() ||
@@ -1877,7 +2272,8 @@ fun DailyRebuildApp(
                         showerLog != null ||
                         migraineEvents.isNotEmpty() ||
                         meetingAttendance.isNotEmpty() ||
-                        careVisitsForDate.isNotEmpty()
+                        careVisitsForDate.isNotEmpty() ||
+                        careAppointmentsForDate.isNotEmpty()
                     ) {
                         loadedDays.add(
                             DailyHistoryDay(
@@ -1895,13 +2291,33 @@ fun DailyRebuildApp(
                                 meetingAttendance =
                                     meetingAttendance,
                                 careVisits =
-                                    careVisitsForDate
+                                    careVisitsForDate,
+                                careAppointments =
+                                    careAppointmentsForDate
                             )
                         )
                     }
                 }
 
-                dailyHistoryDays = loadedDays
+                val futureLimit = today.plusYears(1).toString()
+                appointmentsByDate
+                    .filterKeys { date ->
+                        date > today.toString() &&
+                            date <= futureLimit
+                    }
+                    .forEach { (date, appointments) ->
+                        loadedDays.add(
+                            DailyHistoryDay(
+                                date = date,
+                                record = null,
+                                foodEntries = emptyList(),
+                                careAppointments = appointments
+                            )
+                        )
+                    }
+
+                dailyHistoryDays =
+                    loadedDays.sortedByDescending { it.date }
             } catch (exception: Exception) {
                 snackbarHostState.showSnackbar(
                     message =
@@ -2755,6 +3171,20 @@ fun DailyRebuildApp(
                                 showerCountThisWeek
                         )
 
+                        HomeAppointmentCard(
+                            appointment =
+                                upcomingCareAppointment,
+                            onSchedule = {
+                                openAppointmentStart()
+                            },
+                            onView = { appointment ->
+                                openAppointmentEditor(
+                                    appointment,
+                                    returnToHistory = false
+                                )
+                            }
+                        )
+
                         HomeMeetingsCard(
                             meetingsThisWeek =
                                 meetingCountThisWeek,
@@ -3272,6 +3702,22 @@ fun DailyRebuildApp(
                             }
                         )
 
+                        CareAppointmentTrackerCard(
+                            appointments = careAppointments,
+                            onSchedule = {
+                                openAppointmentStart()
+                            },
+                            onOpenHistory = {
+                                appointmentWorkflow.showHistory = true
+                            },
+                            onViewAppointment = { appointment ->
+                                openAppointmentEditor(
+                                    appointment,
+                                    returnToHistory = false
+                                )
+                            }
+                        )
+
                         CareVisitTrackerCard(
                             visits = careVisits,
                             onLogVisit = {
@@ -3336,6 +3782,163 @@ fun DailyRebuildApp(
                 }
             }
         }
+    }
+
+    if (appointmentWorkflow.showStart) {
+        AppointmentStartDialog(
+            recentPlaces = recentCarePlaces,
+            appointments = careAppointments,
+            visits = careVisits,
+            onSelectPlace = { place ->
+                appointmentWorkflow.selectedPlace = place
+                appointmentWorkflow.selectedProvider = null
+                appointmentWorkflow.showStart = false
+                appointmentWorkflow.showProviderPicker = true
+            },
+            onEditPlace = { place ->
+                carePlaceBeingEdited = place
+                appointmentWorkflow.placeEditorActive = true
+                appointmentWorkflow.continueAfterPlaceSave = false
+                appointmentWorkflow.showStart = false
+                showCarePlaceEditorDialog = true
+            },
+            onAddPlace = {
+                carePlaceBeingEdited = null
+                appointmentWorkflow.placeEditorActive = true
+                appointmentWorkflow.continueAfterPlaceSave = true
+                appointmentWorkflow.showStart = false
+                showCarePlaceEditorDialog = true
+            },
+            onOneTimeAppointment = {
+                appointmentWorkflow.clearSelection()
+                appointmentWorkflow.oneTimeAppointment = true
+                appointmentWorkflow.returnToHistoryAfterSave = false
+                appointmentWorkflow.showStart = false
+                appointmentWorkflow.showEditor = true
+            },
+            onDismiss = {
+                appointmentWorkflow.showStart = false
+            }
+        )
+    }
+
+    if (
+        appointmentWorkflow.showProviderPicker &&
+        appointmentWorkflow.selectedPlace != null
+    ) {
+        CareProviderPickerDialog(
+            place = appointmentWorkflow.selectedPlace!!,
+            providers = providersForSelectedAppointmentPlace,
+            onSelectProvider = { provider ->
+                appointmentWorkflow.selectedProvider = provider
+                appointmentWorkflow.editingAppointment = null
+                appointmentWorkflow.oneTimeAppointment = false
+                appointmentWorkflow.returnToHistoryAfterSave = false
+                appointmentWorkflow.showProviderPicker = false
+                appointmentWorkflow.showEditor = true
+            },
+            onEditProvider = { provider ->
+                careProviderBeingEdited = provider
+                appointmentWorkflow.providerEditorActive = true
+                appointmentWorkflow.continueAfterProviderSave = false
+                appointmentWorkflow.showProviderPicker = false
+                showCareProviderEditorDialog = true
+            },
+            onAddProvider = {
+                careProviderBeingEdited = null
+                appointmentWorkflow.providerEditorActive = true
+                appointmentWorkflow.continueAfterProviderSave = true
+                appointmentWorkflow.showProviderPicker = false
+                showCareProviderEditorDialog = true
+            },
+            onContinueWithoutProvider = {
+                appointmentWorkflow.selectedProvider = null
+                appointmentWorkflow.editingAppointment = null
+                appointmentWorkflow.oneTimeAppointment = false
+                appointmentWorkflow.returnToHistoryAfterSave = false
+                appointmentWorkflow.showProviderPicker = false
+                appointmentWorkflow.showEditor = true
+            },
+            onBack = {
+                appointmentWorkflow.showProviderPicker = false
+                appointmentWorkflow.selectedPlace = null
+                appointmentWorkflow.showStart = true
+            },
+            onDismiss = {
+                appointmentWorkflow.showProviderPicker = false
+                appointmentWorkflow.selectedPlace = null
+            },
+            prompt = "Who will you see?"
+        )
+    }
+
+    if (appointmentWorkflow.showEditor) {
+        AppointmentEditorDialog(
+            savedPlace = appointmentWorkflow.selectedPlace,
+            savedProvider = appointmentWorkflow.selectedProvider,
+            existingAppointment =
+                appointmentWorkflow.editingAppointment,
+            isOneTimeAppointment =
+                appointmentWorkflow.oneTimeAppointment,
+            isSaving = appointmentWorkflow.isSaving,
+            onSave = {
+                saveCareAppointment(it)
+            },
+            onDismiss = {
+                if (!appointmentWorkflow.isSaving) {
+                    appointmentWorkflow.showEditor = false
+                    appointmentWorkflow.clearSelection()
+                    if (
+                        appointmentWorkflow
+                            .returnToHistoryAfterSave
+                    ) {
+                        appointmentWorkflow.showHistory = true
+                    }
+                    appointmentWorkflow.returnToHistoryAfterSave = false
+                }
+            }
+        )
+    }
+
+    if (appointmentWorkflow.showHistory) {
+        AppointmentHistoryDialog(
+            appointments = careAppointments,
+            onEdit = { appointment ->
+                openAppointmentEditor(
+                    appointment,
+                    returnToHistory = true
+                )
+            },
+            onConvertToVisit = { appointment ->
+                convertAppointmentToVisit(appointment)
+            },
+            onDelete = { appointment ->
+                appointmentWorkflow.deletingAppointment =
+                    appointment
+            },
+            onSchedule = {
+                appointmentWorkflow.showHistory = false
+                openAppointmentStart()
+            },
+            onDismiss = {
+                appointmentWorkflow.showHistory = false
+            }
+        )
+    }
+
+    appointmentWorkflow.deletingAppointment?.let { appointment ->
+        DeleteAppointmentDialog(
+            appointment = appointment,
+            isDeleting = appointmentWorkflow.isDeleting,
+            onConfirm = {
+                deleteCareAppointment(appointment)
+            },
+            onDismiss = {
+                if (!appointmentWorkflow.isDeleting) {
+                    appointmentWorkflow.deletingAppointment = null
+                }
+            }
+        )
     }
 
     if (showCareVisitStartDialog) {
@@ -3433,19 +4036,33 @@ fun DailyRebuildApp(
                 if (!isSavingCareVisit) {
                     showCarePlaceEditorDialog = false
                     carePlaceBeingEdited = null
-                    continueVisitAfterPlaceSave = false
-                    showCareVisitStartDialog = true
+
+                    if (appointmentWorkflow.placeEditorActive) {
+                        appointmentWorkflow.placeEditorActive = false
+                        appointmentWorkflow.continueAfterPlaceSave = false
+                        appointmentWorkflow.showStart = true
+                    } else {
+                        continueVisitAfterPlaceSave = false
+                        showCareVisitStartDialog = true
+                    }
                 }
             }
         )
     }
 
+    val carePlaceForProviderEditor =
+        if (appointmentWorkflow.providerEditorActive) {
+            appointmentWorkflow.selectedPlace
+        } else {
+            selectedCarePlaceForVisit
+        }
+
     if (
         showCareProviderEditorDialog &&
-        selectedCarePlaceForVisit != null
+        carePlaceForProviderEditor != null
     ) {
         CareProviderEditorDialog(
-            place = selectedCarePlaceForVisit!!,
+            place = carePlaceForProviderEditor,
             existingProvider = careProviderBeingEdited,
             isSaving = isSavingCareVisit,
             onSave = {
@@ -3455,8 +4072,15 @@ fun DailyRebuildApp(
                 if (!isSavingCareVisit) {
                     showCareProviderEditorDialog = false
                     careProviderBeingEdited = null
-                    continueVisitAfterProviderSave = false
-                    showCareProviderPickerDialog = true
+
+                    if (appointmentWorkflow.providerEditorActive) {
+                        appointmentWorkflow.providerEditorActive = false
+                        appointmentWorkflow.continueAfterProviderSave = false
+                        appointmentWorkflow.showProviderPicker = true
+                    } else {
+                        continueVisitAfterProviderSave = false
+                        showCareProviderPickerDialog = true
+                    }
                 }
             }
         )
@@ -3479,12 +4103,21 @@ fun DailyRebuildApp(
                     selectedCarePlaceForVisit = null
                     selectedCareProviderForVisit = null
                     isOneTimeCareVisit = false
-                    if (returnToCareHistoryAfterVisitSave) {
+
+                    if (
+                        appointmentWorkflow
+                            .convertingAppointment != null
+                    ) {
+                        appointmentWorkflow.convertingAppointment = null
+                        appointmentWorkflow.showHistory = true
+                    } else if (returnToCareHistoryAfterVisitSave) {
                         showCareVisitHistoryDialog = true
                     }
                     returnToCareHistoryAfterVisitSave = false
                 }
-            }
+            },
+            appointmentPrefill =
+                appointmentWorkflow.convertingAppointment
         )
     }
 
@@ -4532,7 +5165,23 @@ fun DailyRebuildApp(
                                 day.date
                             )
 
+                            day.careVisits.forEach { visit ->
+                                careAppointmentDao.clearConvertedVisitLink(
+                                    visitId = visit.id,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                            }
                             careVisitDao.deleteVisitsByDate(
+                                day.date
+                            )
+
+                            day.careAppointments.forEach { appointment ->
+                                AppointmentReminderScheduler.cancel(
+                                    context,
+                                    appointment.id
+                                )
+                            }
+                            careAppointmentDao.deleteAppointmentsByDate(
                                 day.date
                             )
                         }
@@ -4561,6 +5210,9 @@ fun DailyRebuildApp(
                             careVisits.filterNot {
                                 it.date == day.date
                             }
+
+                        careAppointments =
+                            careAppointmentDao.getAllAppointments()
 
                         if (day.date == todayDate) {
                             foodEntries = emptyList()
