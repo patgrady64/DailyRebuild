@@ -3199,6 +3199,9 @@ fun DailyRebuildApp(
                             HealthProfileFeature(repositories)
                         }
                     },
+                    backupContent = {
+                        BackupRestoreFeature(database = database)
+                    },
                     modifier = Modifier.padding(innerPadding)
                 )
 

@@ -858,6 +858,7 @@ fun HealthHubScreen(
     state: HealthHubState,
     actions: HealthHubActions,
     profileContent: @Composable () -> Unit,
+    backupContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     showHeader: Boolean = true
 ) {
@@ -936,6 +937,9 @@ fun HealthHubScreen(
             HealthRecordRow("Connected Activity", "Health Connect permissions and walking source") {
                 openFeature = if (openFeature == "activity") null else "activity"
             }
+            HealthRecordRow("Data & Backup", "Export or restore all local Daily Rebuild records") {
+                openFeature = if (openFeature == "backup") null else "backup"
+            }
         }
 
         when (openFeature) {
@@ -967,6 +971,7 @@ fun HealthHubScreen(
                 onManageAccess = actions.onManageAccess,
                 onInstallOrUpdate = actions.onInstallOrUpdate
             )
+            "backup" -> backupContent()
         }
 
         Spacer(Modifier.height(12.dp))
