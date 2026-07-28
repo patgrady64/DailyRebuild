@@ -15,24 +15,28 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.pgdevhouse.dailyrebuild.domain.correctDailyPainValue
 import com.pgdevhouse.dailyrebuild.domain.recordDailyHighestPain
 
 /**
- * Records one highest value per day for each pain area Daily Rebuild currently
- * tracks. This intentionally does not use before/after-workout values.
+ * Tracks one daily high for back pain and one daily high for shin-splint pain.
+ * Quick logging can only raise those highs. Correction mode intentionally
+ * allows an inaccurate value to be lowered or moved to the other pain area.
  */
 @Composable
 fun DailyPainDialog(
     currentBackPain: Float,
     currentShinPain: Float,
     wasRecordedToday: Boolean,
-    onSave: (backPain: Float, shinPain: Float) -> Unit,
+    onSaveDailyHighs: (backPain: Float, shinPain: Float) -> Unit,
+    onCorrectValues: (backPain: Float, shinPain: Float) -> Unit,
     onDismiss: () -> Unit
 ) {
     var selectedBackPain by remember(currentBackPain) {
@@ -41,23 +45,56 @@ fun DailyPainDialog(
     var selectedShinPain by remember(currentShinPain) {
         mutableFloatStateOf(currentShinPain)
     }
+    var correctionMode by remember {
+        mutableStateOf(false)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Pain Today") },
+        title = {
+            Text(
+                if (correctionMode) {
+                    "Correct Today's Pain"
+                } else {
+                    "Pain Today"
+                }
+            )
+        },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    text = if (wasRecordedToday) {
-                        "These are today's highest recorded values. Raise either one if that pain becomes worse. A lower quick-log selection will not reduce the day's recorded high."
-                    } else {
-                        "Record the highest back pain and shin-splint pain you have experienced so far today. You can raise either value later if the pain gets worse."
+                    text = when {
+                        correctionMode ->
+                            "Set the exact values that should be saved for today. " +
+                                "Correction mode can lower a mistaken value."
+
+                        wasRecordedToday ->
+                            "These are today's highest recorded values. Quick logging " +
+                                "can raise either value, but it will not lower one."
+
+                        else ->
+                            "Record the highest back pain and shin-splint pain you " +
+                                "have experienced so far today."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                if (wasRecordedToday) {
+                    TextButton(
+                        onClick = { correctionMode = !correctionMode }
+                    ) {
+                        Text(
+                            if (correctionMode) {
+                                "Return to Quick Log"
+                            } else {
+                                "Correct a Mistaken Value"
+                            }
+                        )
+                    }
+                }
 
                 DailyPainSlider(
                     label = "Back pain",
@@ -75,13 +112,34 @@ fun DailyPainDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    onSave(
-                        recordDailyHighestPain(currentBackPain, selectedBackPain),
-                        recordDailyHighestPain(currentShinPain, selectedShinPain)
-                    )
+                    if (correctionMode) {
+                        onCorrectValues(
+                            correctDailyPainValue(selectedBackPain),
+                            correctDailyPainValue(selectedShinPain)
+                        )
+                    } else {
+                        onSaveDailyHighs(
+                            recordDailyHighestPain(
+                                currentBackPain,
+                                selectedBackPain
+                            ),
+                            recordDailyHighestPain(
+                                currentShinPain,
+                                selectedShinPain
+                            )
+                        )
+                    }
                 }
             ) {
-                Text(if (wasRecordedToday) "Update Daily Highs" else "Save")
+                Text(
+                    if (correctionMode) {
+                        "Save Correction"
+                    } else if (wasRecordedToday) {
+                        "Update Daily Highs"
+                    } else {
+                        "Save"
+                    }
+                )
             }
         },
         dismissButton = {

@@ -27,4 +27,23 @@ class DailyPainPolicyTest {
     fun valuesAreClampedToPainScale() {
         assertEquals(10f, recordDailyHighestPain(12f, 20f), 0f)
     }
+
+
+    @Test
+    fun correctionCanLowerMistakenValue() {
+        assertEquals(
+            5f,
+            correctDailyPainValue(5f),
+            0f
+        )
+    }
+
+    @Test
+    fun correctionKeepsBackAndShinValuesIndependent() {
+        val correctedBackPain = correctDailyPainValue(5f)
+        val correctedShinPain = correctDailyPainValue(7f)
+
+        assertEquals(5f, correctedBackPain, 0f)
+        assertEquals(7f, correctedShinPain, 0f)
+    }
 }

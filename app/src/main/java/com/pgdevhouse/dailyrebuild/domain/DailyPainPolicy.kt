@@ -15,3 +15,14 @@ fun recordDailyHighestPain(
         candidate.coerceIn(0f, 10f)
     )
 }
+
+
+/**
+ * Replaces a mistaken daily value with the exact corrected value.
+ * Unlike quick logging, this intentionally allows the value to be lowered.
+ */
+fun correctDailyPainValue(
+    correctedValue: Float
+): Float {
+    return correctedValue.coerceIn(0f, 10f)
+}

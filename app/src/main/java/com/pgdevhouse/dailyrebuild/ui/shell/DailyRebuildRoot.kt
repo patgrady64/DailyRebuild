@@ -3908,11 +3908,21 @@ fun DailyRebuildApp(
             currentBackPain = backPain,
             currentShinPain = shinPain,
             wasRecordedToday = painRecorded,
-            onSave = { newBackPain, newShinPain ->
+            onSaveDailyHighs = { newBackPain, newShinPain ->
                 backPain = newBackPain
                 shinPain = newShinPain
                 painRecorded = true
                 showQuickPainDialog = false
+            },
+            onCorrectValues = { correctedBackPain, correctedShinPain ->
+                backPain = correctedBackPain
+                shinPain = correctedShinPain
+                painRecorded = true
+                showQuickPainDialog = false
+
+                // A correction should persist immediately so the mistaken value
+                // does not return if the app closes before Save Today is tapped.
+                saveToday()
             },
             onDismiss = {
                 showQuickPainDialog = false
