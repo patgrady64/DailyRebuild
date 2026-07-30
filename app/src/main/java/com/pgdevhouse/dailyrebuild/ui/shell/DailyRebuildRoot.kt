@@ -81,6 +81,8 @@ import com.pgdevhouse.dailyrebuild.data.local.PantryEssential
 import com.pgdevhouse.dailyrebuild.data.local.PantryEssentialStatus
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurementType
+import com.pgdevhouse.dailyrebuild.data.local.LifeMaintenanceLog
+import com.pgdevhouse.dailyrebuild.data.local.LifeMaintenanceTasks
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -144,6 +146,7 @@ fun DailyRebuildApp(
     val careVisitDao = repositories.careVisits
     val careAppointmentDao = repositories.appointments
     val healthProfileDao = repositories.healthProfile
+    val lifeMaintenanceDao = repositories.lifeMaintenance
 
     val navigationViewModel: AppNavigationViewModel = viewModel()
     val barcodeViewModel: FoodBarcodeViewModel = viewModel()
@@ -418,6 +421,18 @@ fun DailyRebuildApp(
         mutableStateOf<List<String>>(
             emptyList()
         )
+    }
+
+    /*
+     * Occasional life maintenance is history-only. It has no schedule, due
+     * date, inventory count, or overdue state.
+     */
+    var lifeMaintenanceLogs by remember {
+        mutableStateOf<List<LifeMaintenanceLog>>(emptyList())
+    }
+
+    var isSavingLifeMaintenance by remember {
+        mutableStateOf(false)
     }
 
     /*
@@ -919,6 +934,7 @@ fun DailyRebuildApp(
         mobilitySessionsToday = emptyList()
         showeredToday = false
         showerDatesThisWeek = emptyList()
+        lifeMaintenanceLogs = emptyList()
         savedActivitySnapshot = null
         hasLiveHealthActivity = false
         liveHealthActivity = HealthActivityData()
@@ -1002,6 +1018,13 @@ fun DailyRebuildApp(
 
             showerDatesThisWeek = weeklyShowerLogs.map { it.date }
             showeredToday = weeklyShowerLogs.any { it.date == todayDate }
+
+            lifeMaintenanceLogs = loadFeature(
+                feature = "life maintenance",
+                userMessage = "Could not load life-maintenance history."
+            ) {
+                lifeMaintenanceDao.getAllLogs()
+            } ?: emptyList()
 
             migraineLogs = loadFeature(
                 feature = "migraine history",
@@ -2317,6 +2340,78 @@ fun DailyRebuildApp(
     }
 
 
+    fun saveLifeMaintenanceCompletion(
+        taskKey: String,
+        date: String
+    ) {
+        coroutineScope.launch {
+            isSavingLifeMaintenance = true
+            try {
+                lifeMaintenanceDao.save(taskKey, date)
+                lifeMaintenanceLogs = lifeMaintenanceDao.getAllLogs()
+                historyViewModel.refresh()
+                statsViewModel.refresh()
+                snackbarHostState.showSnackbar(
+                    "${LifeMaintenanceTasks.labelFor(taskKey)} completed on ${formatMaintenanceDate(date)}."
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    "Could not save that life-maintenance completion."
+                )
+            } finally {
+                isSavingLifeMaintenance = false
+            }
+        }
+    }
+
+    fun moveLifeMaintenanceCompletion(
+        log: LifeMaintenanceLog,
+        newDate: String
+    ) {
+        coroutineScope.launch {
+            isSavingLifeMaintenance = true
+            try {
+                lifeMaintenanceDao.move(log, newDate)
+                lifeMaintenanceLogs = lifeMaintenanceDao.getAllLogs()
+                historyViewModel.refresh()
+                statsViewModel.refresh()
+                snackbarHostState.showSnackbar(
+                    "Completion moved to ${formatMaintenanceDate(newDate)}."
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    "Could not change that completion date."
+                )
+            } finally {
+                isSavingLifeMaintenance = false
+            }
+        }
+    }
+
+    fun deleteLifeMaintenanceCompletion(
+        log: LifeMaintenanceLog
+    ) {
+        coroutineScope.launch {
+            isSavingLifeMaintenance = true
+            try {
+                lifeMaintenanceDao.delete(log)
+                lifeMaintenanceLogs = lifeMaintenanceDao.getAllLogs()
+                historyViewModel.refresh()
+                statsViewModel.refresh()
+                snackbarHostState.showSnackbar(
+                    "Life-maintenance completion removed."
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    "Could not remove that completion."
+                )
+            } finally {
+                isSavingLifeMaintenance = false
+            }
+        }
+    }
+
+
     fun saveMigraineEvent(
         draft: MigraineLogDraft
     ) {
@@ -3142,7 +3237,11 @@ fun DailyRebuildApp(
                         nightNaproxenTaken = nightNaproxenTaken,
                         nightAcetaminophenTaken = nightAcetaminophenTaken,
                         journalText = journalText,
-                        isSaving = isSaving
+                        maintenanceCompletedToday = lifeMaintenanceLogs
+                            .filter { it.date == todayDate }
+                            .map { LifeMaintenanceTasks.labelFor(it.taskKey) }
+                            .sorted(),
+                        isSaving = isSaving || isSavingLifeMaintenance
                     ),
                     actions = TodayScreenActions(
                         onOpenHistory = { openDailyHistory() },
@@ -3178,6 +3277,11 @@ fun DailyRebuildApp(
                         onLogMeeting = { showMeetingPickerDialog = true },
                         onLogShower = { logShowerToday() },
                         onRemoveShower = { removeTodayShower() },
+                        onOpenLifeMaintenance = {
+                            navigationViewModel.openLogSection(
+                                AppNavigationViewModel.LOG_MAINTENANCE_SECTION
+                            )
+                        },
                         onFoodRecordedChange = { foodRecorded = it },
                         onWalkCompletedChange = { walkCompleted = it },
                         onPainRecordedChange = { painRecorded = it },
@@ -3196,8 +3300,8 @@ fun DailyRebuildApp(
 
                 AppNavigationViewModel.LOG_TAB -> TaskHubFrame(
                     title = "Log",
-                    subtitle = "Record food, movement, meetings, and occasional health events.",
-                    labels = listOf("Food", "Movement", "Meetings", "Health"),
+                    subtitle = "Record food, movement, meetings, health events, and occasional life maintenance.",
+                    labels = listOf("Food", "Movement", "Meetings", "Health", "Maintenance"),
                     selectedSection = navigationViewModel.selectedLogSection,
                     onSectionSelected = navigationViewModel::selectLogSection,
                     onOpenHistory = { openDailyHistory() },
@@ -3248,7 +3352,7 @@ fun DailyRebuildApp(
                             showHeader = false
                         )
 
-                        else -> HealthQuickLogScreen(
+                        AppNavigationViewModel.LOG_HEALTH_SECTION -> HealthQuickLogScreen(
                             onLogHighestPain = { showQuickPainDialog = true },
                             onLogMigraine = { showMigraineLogDialog = true },
                             onLogCareVisit = { showCareVisitStartDialog = true },
@@ -3263,6 +3367,14 @@ fun DailyRebuildApp(
                                     AppNavigationViewModel.HEALTH_TAB
                                 )
                             }
+                        )
+
+                        else -> LifeMaintenanceScreen(
+                            logs = lifeMaintenanceLogs,
+                            isSaving = isSavingLifeMaintenance,
+                            onMarkDone = ::saveLifeMaintenanceCompletion,
+                            onMoveLog = ::moveLifeMaintenanceCompletion,
+                            onDeleteLog = ::deleteLifeMaintenanceCompletion
                         )
                     }
                 }
@@ -4839,6 +4951,7 @@ fun DailyRebuildApp(
                             meetingAttendanceHistory = meetingDao.getAllAttendance()
                             careVisits = careVisitDao.getAllVisits()
                             careAppointments = careAppointmentDao.getAllAppointments()
+                            lifeMaintenanceLogs = lifeMaintenanceDao.getAllLogs()
 
                             if (day.date == todayDate) {
                                 dayReloadToken++

@@ -15,7 +15,8 @@ enum class StatsFilter(val label: String) {
     MOVEMENT("Movement"),
     MEETINGS("Meetings"),
     HEALTH("Health"),
-    SELF_CARE("Self-care")
+    SELF_CARE("Self-care"),
+    LAST_COMPLETED("Last Time Completed")
 }
 
 enum class StatsChartType {

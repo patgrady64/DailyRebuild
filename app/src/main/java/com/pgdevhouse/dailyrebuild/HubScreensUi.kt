@@ -79,6 +79,7 @@ data class TodayScreenState(
     val nightNaproxenTaken: Boolean,
     val nightAcetaminophenTaken: Boolean,
     val journalText: String,
+    val maintenanceCompletedToday: List<String>,
     val isSaving: Boolean
 )
 
@@ -95,6 +96,7 @@ data class TodayScreenActions(
     val onLogMeeting: () -> Unit,
     val onLogShower: () -> Unit,
     val onRemoveShower: () -> Unit,
+    val onOpenLifeMaintenance: () -> Unit,
     val onFoodRecordedChange: (Boolean) -> Unit,
     val onWalkCompletedChange: (Boolean) -> Unit,
     val onPainRecordedChange: (Boolean) -> Unit,
@@ -271,22 +273,40 @@ fun TodayScreen(
                     modifier = Modifier.weight(1f)
                 ) { Text("Pain") }
             }
-            OutlinedButton(
-                onClick = actions.onLogShower,
-                enabled = !state.showeredToday,
-                modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    if (state.showeredToday) {
-                        "✓ Shower Logged Today"
-                    } else {
-                        "Log Shower"
-                    }
-                )
+                OutlinedButton(
+                    onClick = actions.onLogShower,
+                    enabled = !state.showeredToday,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        if (state.showeredToday) {
+                            "✓ Shower Logged"
+                        } else {
+                            "Log Shower"
+                        }
+                    )
+                }
+                OutlinedButton(
+                    onClick = actions.onOpenLifeMaintenance,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Life Maintenance")
+                }
             }
             if (state.showeredToday) {
                 Text(
                     text = "Today’s shower was saved immediately. Use More Today → Showering to remove it if it was logged by mistake.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (state.maintenanceCompletedToday.isNotEmpty()) {
+                Text(
+                    text = "Completed today: ${state.maintenanceCompletedToday.joinToString()}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -313,7 +333,7 @@ fun TodayScreen(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Food, water, meals, showers, check-ins, and notes are saved as you add or change them.",
+                        text = "Food, water, meals, showers, life maintenance, check-ins, and notes are saved as you add or change them.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

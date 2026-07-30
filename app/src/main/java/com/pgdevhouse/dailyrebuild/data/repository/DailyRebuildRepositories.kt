@@ -14,6 +14,7 @@ import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
 import com.pgdevhouse.dailyrebuild.data.local.HealthProfile
 import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
+import com.pgdevhouse.dailyrebuild.data.local.LifeMaintenanceLog
 import com.pgdevhouse.dailyrebuild.data.local.MedicationEntry
 import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
@@ -43,6 +44,7 @@ class DailyRebuildRepositories private constructor(
     val appointments: CareAppointmentRepository,
     val pantry: PantryRepository,
     val healthProfile: HealthProfileRepository,
+    val lifeMaintenance: LifeMaintenanceRepository,
     val history: HistoryRepository
 ) {
     companion object {
@@ -60,6 +62,7 @@ class DailyRebuildRepositories private constructor(
                 appointments = CareAppointmentRepository(database),
                 pantry = PantryRepository(database),
                 healthProfile = HealthProfileRepository(database),
+                lifeMaintenance = LifeMaintenanceRepository(database),
                 history = HistoryRepository(database)
             )
         }
@@ -248,6 +251,37 @@ class PantryRepository internal constructor(database: DailyRebuildDatabase) {
     suspend fun delete(item: PantryEssential) = dao.delete(item)
 }
 
+class LifeMaintenanceRepository internal constructor(
+    private val database: DailyRebuildDatabase
+) {
+    private val dao = database.lifeMaintenanceDao()
+
+    suspend fun save(taskKey: String, date: String) {
+        dao.save(
+            LifeMaintenanceLog(
+                taskKey = taskKey,
+                date = date
+            )
+        )
+    }
+
+    suspend fun getAllLogs(): List<LifeMaintenanceLog> = dao.getAllLogs()
+
+    suspend fun getLogsForDate(date: String): List<LifeMaintenanceLog> =
+        dao.getLogsForDate(date)
+
+    suspend fun move(log: LifeMaintenanceLog, newDate: String) =
+        database.withTransaction {
+            dao.delete(log.taskKey, log.date)
+            dao.save(log.copy(date = newDate))
+        }
+
+    suspend fun delete(log: LifeMaintenanceLog) =
+        dao.delete(log.taskKey, log.date)
+
+    suspend fun deleteByDate(date: String) = dao.deleteByDate(date)
+}
+
 class HealthProfileRepository internal constructor(database: DailyRebuildDatabase) {
     private val dao = database.healthProfileDao()
     suspend fun getProfile(): HealthProfile? = dao.getProfile()
@@ -289,5 +323,6 @@ class HistoryRepository internal constructor(
         }
         database.careVisitDao().deleteVisitsByDate(date)
         database.careAppointmentDao().deleteAppointmentsByDate(date)
+        database.lifeMaintenanceDao().deleteByDate(date)
     }
 }

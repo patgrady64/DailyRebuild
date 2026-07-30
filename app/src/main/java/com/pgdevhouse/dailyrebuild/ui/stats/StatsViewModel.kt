@@ -15,6 +15,8 @@ import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurementType
 import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
+import com.pgdevhouse.dailyrebuild.data.local.LifeMaintenanceLog
+import com.pgdevhouse.dailyrebuild.data.local.LifeMaintenanceTasks
 import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import com.pgdevhouse.dailyrebuild.data.local.ShowerLog
@@ -40,7 +42,8 @@ private data class RawStatsData(
     val meetings: List<MeetingAttendance>,
     val appointments: List<CareAppointment>,
     val visits: List<CareVisit>,
-    val measurements: List<HealthMeasurement>
+    val measurements: List<HealthMeasurement>,
+    val lifeMaintenance: List<LifeMaintenanceLog>
 )
 
 private data class DatePeriod(
@@ -142,7 +145,8 @@ class StatsViewModel(
             meetings = repositories.meetings.getAllAttendance(),
             appointments = repositories.appointments.getAllAppointments(),
             visits = repositories.careVisits.getAllVisits(),
-            measurements = repositories.healthProfile.getAllMeasurements()
+            measurements = repositories.healthProfile.getAllMeasurements(),
+            lifeMaintenance = repositories.lifeMaintenance.getAllLogs()
         )
     }
 
@@ -158,6 +162,7 @@ class StatsViewModel(
             raw.appointments.mapNotNullTo(this) { parseDate(it.date) }
             raw.visits.mapNotNullTo(this) { parseDate(it.date) }
             raw.measurements.mapNotNullTo(this) { parseDate(it.recordedDate) }
+            raw.lifeMaintenance.mapNotNullTo(this) { parseDate(it.date) }
         }
         return dates.minOrNull() ?: LocalDate.now()
     }
@@ -430,13 +435,39 @@ class StatsViewModel(
             charts = listOf(showerChart)
         )
 
+        val lastCompleted = StatsSection(
+            metrics = LifeMaintenanceTasks.all.map { task ->
+                val latest = raw.lifeMaintenance
+                    .filter { it.taskKey == task.key }
+                    .maxWithOrNull(
+                        compareBy<LifeMaintenanceLog> { it.date }
+                            .thenBy { it.completedAt }
+                    )
+
+                StatsMetric(
+                    label = task.label,
+                    value = latest?.let { formatDate(parseDate(it.date) ?: LocalDate.now()) }
+                        ?: "Not recorded",
+                    detail = if (latest == null) {
+                        "No completion has been logged yet"
+                    } else {
+                        "Most recent completion"
+                    }
+                )
+            },
+            notes = listOf(
+                "These are all-time latest completion dates. They do not use schedules, due dates, or overdue labels."
+            )
+        )
+
         return mapOf(
             StatsFilter.OVERVIEW to overview,
             StatsFilter.FOOD to food,
             StatsFilter.MOVEMENT to movement,
             StatsFilter.MEETINGS to meetings,
             StatsFilter.HEALTH to health,
-            StatsFilter.SELF_CARE to selfCare
+            StatsFilter.SELF_CARE to selfCare,
+            StatsFilter.LAST_COMPLETED to lastCompleted
         )
     }
 

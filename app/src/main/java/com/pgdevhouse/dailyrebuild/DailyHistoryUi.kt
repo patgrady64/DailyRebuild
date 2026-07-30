@@ -44,6 +44,8 @@ import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
 import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
+import com.pgdevhouse.dailyrebuild.data.local.LifeMaintenanceLog
+import com.pgdevhouse.dailyrebuild.data.local.LifeMaintenanceTasks
 import com.pgdevhouse.dailyrebuild.data.local.CareAppointment
 import com.pgdevhouse.dailyrebuild.data.local.CareVisit
 import java.math.BigDecimal
@@ -72,7 +74,8 @@ data class DailyHistoryDay(
     val migraineLogs: List<MigraineLog> = emptyList(),
     val meetingAttendance: List<MeetingAttendance> = emptyList(),
     val careVisits: List<CareVisit> = emptyList(),
-    val careAppointments: List<CareAppointment> = emptyList()
+    val careAppointments: List<CareAppointment> = emptyList(),
+    val lifeMaintenanceLogs: List<LifeMaintenanceLog> = emptyList()
 )
 
 data class WaterBottleCounts(
@@ -363,7 +366,7 @@ fun DailyHistoryDialog(
                         "Delete ${formatHistoryDate(pendingDeletionDay.date)}? " +
                             "This permanently removes the saved checklist, " +
                             "water, pain, medications, journal, activity snapshot, " +
-                            "mobility sessions, shower log, migraine events, meeting attendance, care appointments, care visits, individual foods, and logged meals for this date. Saved Places, Providers, Saved Foods, and " +
+                            "mobility sessions, shower log, life-maintenance completions, migraine events, meeting attendance, care appointments, care visits, individual foods, and logged meals for this date. Saved Places, Providers, Saved Foods, and " +
                             "Saved Meal templates will not be deleted."
                 )
             },
@@ -680,7 +683,10 @@ private fun CalendarDayCell(
             historyDay?.mobilitySessions?.isNotEmpty() == true ||
             historyDay?.showerLogged == true ||
             historyDay?.migraineLogs?.isNotEmpty() == true ||
-            historyDay?.meetingAttendance?.isNotEmpty() == true
+            historyDay?.meetingAttendance?.isNotEmpty() == true ||
+            historyDay?.careVisits?.isNotEmpty() == true ||
+            historyDay?.careAppointments?.isNotEmpty() == true ||
+            historyDay?.lifeMaintenanceLogs?.isNotEmpty() == true
     val hasFood = historyDay?.foodEntries?.isNotEmpty() == true
     val isToday = date == LocalDate.now()
     val containerColor = when {
@@ -765,7 +771,8 @@ private fun DailyHistoryDetailPage(
             day.migraineLogs.isNotEmpty() ||
             day.meetingAttendance.isNotEmpty() ||
             day.careVisits.isNotEmpty() ||
-            day.careAppointments.isNotEmpty()
+            day.careAppointments.isNotEmpty() ||
+            day.lifeMaintenanceLogs.isNotEmpty()
 
     Column(
         modifier = Modifier
@@ -878,6 +885,10 @@ private fun DailyHistoryDetailPage(
 
         if (day.showerLogged) {
             HistoryShowerCard()
+        }
+
+        if (day.lifeMaintenanceLogs.isNotEmpty()) {
+            HistoryLifeMaintenanceCard(day.lifeMaintenanceLogs)
         }
 
         if (day.migraineLogs.isNotEmpty()) {
@@ -1115,6 +1126,25 @@ private fun HistoryActivityCard(
                     .colorScheme
                     .onSurfaceVariant
         )
+    }
+}
+
+@Composable
+private fun HistoryLifeMaintenanceCard(
+    logs: List<LifeMaintenanceLog>
+) {
+    RebuildSectionCard(
+        title = "Life Maintenance",
+        subtitle = "Completed on this date",
+        accentColor = RebuildTeal
+    ) {
+        logs.sortedBy { LifeMaintenanceTasks.labelFor(it.taskKey) }.forEach { log ->
+            Text(
+                text = "✓ ${LifeMaintenanceTasks.labelFor(log.taskKey)}",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium
+            )
+        }
     }
 }
 
@@ -2083,6 +2113,7 @@ private fun dayMatchesHistoryFilter(
                 day.careAppointments.isNotEmpty()
         DailyHistoryFilter.SELF_CARE ->
             day.showerLogged ||
+                day.lifeMaintenanceLogs.isNotEmpty() ||
                 record?.painRecorded == true ||
                 record?.journalText?.isNotBlank() == true
     }

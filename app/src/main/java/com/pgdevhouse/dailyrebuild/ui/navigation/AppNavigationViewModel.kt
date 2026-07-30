@@ -40,7 +40,7 @@ class AppNavigationViewModel(
     }
 
     fun selectLogSection(index: Int) {
-        selectedLogSection = index.coerceIn(LOG_FOOD_SECTION, LOG_HEALTH_SECTION)
+        selectedLogSection = index.coerceIn(LOG_FOOD_SECTION, LOG_MAINTENANCE_SECTION)
         savedStateHandle[KEY_LOG_SECTION] = selectedLogSection
     }
 
@@ -81,6 +81,7 @@ class AppNavigationViewModel(
         const val LOG_MOVEMENT_SECTION = 1
         const val LOG_MEETINGS_SECTION = 2
         const val LOG_HEALTH_SECTION = 3
+        const val LOG_MAINTENANCE_SECTION = 4
 
         const val PLAN_MEALS_SECTION = 0
         const val PLAN_PANTRY_SECTION = 1

@@ -81,6 +81,7 @@ class HistoryViewModel(
         val meetingAttendance = repositories.meetings.getAllAttendance()
         val careVisits = repositories.careVisits.getAllVisits()
         val careAppointments = repositories.appointments.getAllAppointments()
+        val lifeMaintenanceLogs = repositories.lifeMaintenance.getAllLogs()
 
         val recordsByDate = records.associateBy { it.date }
         val foodByDate = foodEntries.groupBy { it.date }
@@ -91,6 +92,7 @@ class HistoryViewModel(
         val meetingsByDate = meetingAttendance.groupBy { it.date }
         val visitsByDate = careVisits.groupBy { it.date }
         val appointmentsByDate = careAppointments.groupBy { it.date }
+        val lifeMaintenanceByDate = lifeMaintenanceLogs.groupBy { it.date }
 
         val allDates = buildSet {
             addAll(recordsByDate.keys)
@@ -102,6 +104,7 @@ class HistoryViewModel(
             addAll(meetingsByDate.keys)
             addAll(visitsByDate.keys)
             addAll(appointmentsByDate.keys)
+            addAll(lifeMaintenanceByDate.keys)
         }
 
         return allDates.map { date ->
@@ -115,7 +118,8 @@ class HistoryViewModel(
                 migraineLogs = migrainesByDate[date].orEmpty(),
                 meetingAttendance = meetingsByDate[date].orEmpty(),
                 careVisits = visitsByDate[date].orEmpty(),
-                careAppointments = appointmentsByDate[date].orEmpty()
+                careAppointments = appointmentsByDate[date].orEmpty(),
+                lifeMaintenanceLogs = lifeMaintenanceByDate[date].orEmpty()
             )
         }.sortedByDescending { it.date }
     }
