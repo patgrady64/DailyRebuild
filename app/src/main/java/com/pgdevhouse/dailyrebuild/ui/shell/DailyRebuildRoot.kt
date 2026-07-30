@@ -3920,7 +3920,7 @@ fun DailyRebuildApp(
                             } else {
                                 plainReusableBottleCount++
                             }
-
+                            showQuickWaterDialog = false
                         },
                         modifier =
                             Modifier.fillMaxWidth(),
@@ -3937,7 +3937,7 @@ fun DailyRebuildApp(
                             } else {
                                 plainDisposableBottleCount++
                             }
-
+                            showQuickWaterDialog = false
                         },
                         modifier =
                             Modifier.fillMaxWidth(),
