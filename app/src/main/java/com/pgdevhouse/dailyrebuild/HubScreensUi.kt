@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -105,8 +106,7 @@ data class TodayScreenActions(
     val onNightIbuprofenChange: (Boolean) -> Unit,
     val onNightNaproxenChange: (Boolean) -> Unit,
     val onNightAcetaminophenChange: (Boolean) -> Unit,
-    val onJournalTextChange: (String) -> Unit,
-    val onSaveToday: () -> Unit
+    val onJournalTextChange: (String) -> Unit
 )
 
 @Composable
@@ -271,18 +271,53 @@ fun TodayScreen(
                     modifier = Modifier.weight(1f)
                 ) { Text("Pain") }
             }
+            OutlinedButton(
+                onClick = actions.onLogShower,
+                enabled = !state.showeredToday,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    if (state.showeredToday) {
+                        "✓ Shower Logged Today"
+                    } else {
+                        "Log Shower"
+                    }
+                )
+            }
+            if (state.showeredToday) {
+                Text(
+                    text = "Today’s shower was saved immediately. Use More Today → Showering to remove it if it was logged by mistake.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
 
-        Button(
-            onClick = actions.onSaveToday,
-            enabled = !state.isSaving,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp)
+        RebuildInsetPanel(
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
         ) {
-            if (state.isSaving) {
-                CircularProgressIndicator(strokeWidth = 2.dp)
-            } else {
-                Text("Save Today")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (state.isSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = if (state.isSaving) "Saving changes…" else "Saved automatically",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Food, water, meals, showers, check-ins, and notes are saved as you add or change them.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
 
@@ -394,10 +429,10 @@ private fun TodayPriorityCard(
             action = actions.onOpenPain
         }
         else -> {
-            title = "Today is ready to save"
-            message = "Your four daily anchors are complete."
-            button = "Save Today"
-            action = actions.onSaveToday
+            title = "Today is up to date"
+            message = "Your four daily anchors are complete, and every change has already been saved."
+            button = "View History"
+            action = actions.onOpenHistory
         }
     }
 

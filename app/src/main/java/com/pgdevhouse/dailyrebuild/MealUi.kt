@@ -1029,6 +1029,7 @@ fun SavedMealsDialog(
     meals: List<SavedMealWithIngredients>,
     products: List<FoodProduct>,
     isAddingMeal: Boolean,
+    destinationLabel: String = "today",
     onAddToToday: (SavedMealWithIngredients, Double) -> Unit,
     onEdit: (SavedMealWithIngredients) -> Unit,
     onDelete: (SavedMealWithIngredients) -> Unit,
@@ -1066,7 +1067,7 @@ fun SavedMealsDialog(
                         Spacer(Modifier.height(8.dp))
                         Text("Saved meals", style = MaterialTheme.typography.headlineMedium)
                         Text(
-                            "Add a complete meal to today in one step.",
+                            "Add a complete meal to $destinationLabel in one step.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1168,7 +1169,7 @@ fun SavedMealsDialog(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         RebuildPrimaryAction(
-                                            text = "Add to today",
+                                            text = "Add to $destinationLabel",
                                             onClick = {
                                                 mealMultiplierText = "1"
                                                 mealPendingAdd = savedMeal
@@ -1205,7 +1206,7 @@ fun SavedMealsDialog(
             title = { Text("Add ${pendingAddMeal.meal.name}?") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("How many of this meal should be added to today?")
+                    Text("How many of this meal should be added to $destinationLabel?")
                     OutlinedTextField(
                         value = mealMultiplierText,
                         onValueChange = { mealMultiplierText = it },
@@ -1233,7 +1234,7 @@ fun SavedMealsDialog(
                         onAddToToday(pendingAddMeal, multiplier)
                     },
                     enabled = !isAddingMeal && multiplier > 0.0
-                ) { Text(if (isAddingMeal) "Adding…" else "Add to today") }
+                ) { Text(if (isAddingMeal) "Adding…" else "Add to $destinationLabel") }
             },
             dismissButton = {
                 TextButton(

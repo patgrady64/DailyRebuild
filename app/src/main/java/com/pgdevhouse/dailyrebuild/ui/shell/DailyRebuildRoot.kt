@@ -81,6 +81,7 @@ import com.pgdevhouse.dailyrebuild.data.local.PantryEssential
 import com.pgdevhouse.dailyrebuild.data.local.PantryEssentialStatus
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurementType
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Duration
@@ -677,7 +678,7 @@ fun DailyRebuildApp(
      * Health Connect activity.
      *
      * The dashboard shows the current live totals when permission is
-     * available. Save Today stores a separate Daily Rebuild snapshot.
+     * available. The app stores a separate Daily Rebuild snapshot automatically.
      */
     var healthAvailability by remember {
         mutableStateOf(
@@ -811,6 +812,72 @@ fun DailyRebuildApp(
         mutableIntStateOf(0)
     }
 
+    var hasLoadedActiveDay by remember {
+        mutableStateOf(false)
+    }
+
+    var lastAutoSavedRecord by remember {
+        mutableStateOf<DailyRecord?>(null)
+    }
+
+    var lastAutoSavedActivityFingerprint by remember {
+        mutableStateOf<List<Any?>?>(null)
+    }
+
+    var historicalFoodLogDate by rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+
+    var isUpdatingHistoryDay by remember {
+        mutableStateOf(false)
+    }
+
+    var historicalWaterSaveJob by remember {
+        mutableStateOf<Job?>(null)
+    }
+
+    fun buildCurrentDailyRecord(
+        updatedAt: Long = 0L
+    ): DailyRecord {
+        return DailyRecord(
+            date = todayDate,
+            foodRecorded = foodRecorded,
+            walkCompleted = walkCompleted,
+            painRecorded = painRecorded,
+            mobilityCompleted = mobilityCompleted,
+            backPain = backPain,
+            shinPain = shinPain,
+            plainReusableBottleCount = plainReusableBottleCount,
+            mioReusableBottleCount = mioReusableBottleCount,
+            plainDisposableBottleCount = plainDisposableBottleCount,
+            mioDisposableBottleCount = mioDisposableBottleCount,
+            morningAspirinTaken = morningAspirinTaken,
+            morningIbuprofenTaken = morningIbuprofenTaken,
+            morningNaproxenTaken = morningNaproxenTaken,
+            morningAcetaminophenTaken = morningAcetaminophenTaken,
+            nightIbuprofenTaken = nightIbuprofenTaken,
+            nightNaproxenTaken = nightNaproxenTaken,
+            nightAcetaminophenTaken = nightAcetaminophenTaken,
+            journalText = journalText,
+            updatedAt = updatedAt
+        )
+    }
+
+    fun buildEmptyHistoricalDailyRecord(
+        date: String
+    ): DailyRecord {
+        return DailyRecord(
+            date = date,
+            morningAspirinTaken = false,
+            morningIbuprofenTaken = false,
+            morningNaproxenTaken = false,
+            morningAcetaminophenTaken = false,
+            nightIbuprofenTaken = false,
+            nightNaproxenTaken = false,
+            nightAcetaminophenTaken = false
+        )
+    }
+
     /*
      * Load today's daily record and food entries.
      */
@@ -822,6 +889,7 @@ fun DailyRebuildApp(
          * Reusable saved foods and saved meals are intentionally kept.
          */
         isLoading = true
+        hasLoadedActiveDay = false
 
         foodRecorded = false
         walkCompleted = false
@@ -1024,6 +1092,19 @@ fun DailyRebuildApp(
                 snackbarHostState.showSnackbar(message)
             }
         } finally {
+            lastAutoSavedRecord =
+                buildCurrentDailyRecord(updatedAt = 0L)
+
+            lastAutoSavedActivityFingerprint =
+                savedActivitySnapshot?.let { snapshot ->
+                    listOf(
+                        snapshot.steps,
+                        snapshot.distanceMiles,
+                        snapshot.activityMinutes
+                    )
+                }
+
+            hasLoadedActiveDay = true
             isLoading = false
         }
 
@@ -2487,90 +2568,95 @@ fun DailyRebuildApp(
             }
     }
 
-    val saveToday: () -> Unit = {
-        coroutineScope.launch {
-            isSaving = true
+    suspend fun persistActiveDayAutomatically(
+        recordSnapshot: DailyRecord,
+        activityFingerprint: List<Any?>?
+    ) {
+        isSaving = true
 
-            try {
-                val record =
-                    DailyRecord(
-                        date = todayDate,
-                        foodRecorded = foodRecorded,
-                        walkCompleted = walkCompleted,
-                        painRecorded = painRecorded,
-                        mobilityCompleted = mobilityCompleted,
-                        backPain = backPain,
-                        shinPain = shinPain,
-                        plainReusableBottleCount = plainReusableBottleCount,
-                        mioReusableBottleCount = mioReusableBottleCount,
-                        plainDisposableBottleCount = plainDisposableBottleCount,
-                        mioDisposableBottleCount = mioDisposableBottleCount,
-                        morningAspirinTaken = morningAspirinTaken,
-                        morningIbuprofenTaken = morningIbuprofenTaken,
-                        morningNaproxenTaken = morningNaproxenTaken,
-                        morningAcetaminophenTaken = morningAcetaminophenTaken,
-                        nightIbuprofenTaken = nightIbuprofenTaken,
-                        nightNaproxenTaken = nightNaproxenTaken,
-                        nightAcetaminophenTaken = nightAcetaminophenTaken,
-                        journalText = journalText,
-                        updatedAt = System.currentTimeMillis()
-                    )
+        try {
+            val now = System.currentTimeMillis()
+            val recordToSave = recordSnapshot.copy(updatedAt = now)
 
-                val snapshotToSave =
-                    when {
-                        hasHealthPermissions &&
-                            hasLiveHealthActivity ->
-                            DailyActivitySnapshot(
-                                date = todayDate,
-                                steps =
-                                    liveHealthActivity
-                                        .steps,
-                                distanceMiles =
-                                    liveHealthActivity
-                                        .distanceMiles,
-                                activityMinutes =
-                                    liveHealthActivity
-                                        .activityMinutes,
-                                updatedAt =
-                                    System.currentTimeMillis()
-                            )
+            val snapshotToSave =
+                when {
+                    hasHealthPermissions &&
+                        hasLiveHealthActivity ->
+                        DailyActivitySnapshot(
+                            date = recordSnapshot.date,
+                            steps = liveHealthActivity.steps,
+                            distanceMiles = liveHealthActivity.distanceMiles,
+                            activityMinutes = liveHealthActivity.activityMinutes,
+                            updatedAt = now
+                        )
 
-                        savedActivitySnapshot != null ->
-                            savedActivitySnapshot
-                                ?.copy(
-                                    updatedAt =
-                                        System.currentTimeMillis()
-                                )
+                    savedActivitySnapshot != null ->
+                        savedActivitySnapshot?.copy(updatedAt = now)
 
-                        else ->
-                            null
-                    }
-
-                database.withTransaction {
-                    dailyRecordDao.saveRecord(
-                        record
-                    )
-
-                    snapshotToSave?.let {
-                        dailyActivityDao
-                            .saveSnapshot(it)
-                    }
+                    else -> null
                 }
 
-                savedActivitySnapshot =
-                    snapshotToSave
-
-                snackbarHostState.showSnackbar(
-                    message = "Today saved."
-                )
-            } catch (exception: Exception) {
-                snackbarHostState.showSnackbar(
-                    message = "Could not save today."
-                )
-            } finally {
-                isSaving = false
+            database.withTransaction {
+                dailyRecordDao.saveRecord(recordToSave)
+                snapshotToSave?.let {
+                    dailyActivityDao.saveSnapshot(it)
+                }
             }
+
+            savedActivitySnapshot = snapshotToSave
+            lastAutoSavedRecord = recordSnapshot.copy(updatedAt = 0L)
+            lastAutoSavedActivityFingerprint = activityFingerprint
+        } catch (exception: Exception) {
+            snackbarHostState.showSnackbar(
+                message = "Could not save your latest changes automatically."
+            )
+        } finally {
+            isSaving = false
         }
+    }
+
+    val pendingAutoSaveRecord =
+        buildCurrentDailyRecord(updatedAt = 0L)
+
+    val pendingActivityFingerprint =
+        if (hasHealthPermissions && hasLiveHealthActivity) {
+            listOf(
+                liveHealthActivity.steps,
+                liveHealthActivity.distanceMiles,
+                liveHealthActivity.activityMinutes
+            )
+        } else {
+            null
+        }
+
+    LaunchedEffect(
+        hasLoadedActiveDay,
+        pendingAutoSaveRecord,
+        pendingActivityFingerprint
+    ) {
+        if (!hasLoadedActiveDay || isLoading) {
+            return@LaunchedEffect
+        }
+
+        val dailyRecordChanged =
+            pendingAutoSaveRecord != lastAutoSavedRecord
+
+        val activityChanged =
+            pendingActivityFingerprint != null &&
+                pendingActivityFingerprint !=
+                    lastAutoSavedActivityFingerprint
+
+        if (!dailyRecordChanged && !activityChanged) {
+            return@LaunchedEffect
+        }
+
+        // Journal typing and repeated water taps are combined into one write.
+        delay(350L)
+
+        persistActiveDayAutomatically(
+            recordSnapshot = pendingAutoSaveRecord,
+            activityFingerprint = pendingActivityFingerprint
+        )
     }
 
 
@@ -2727,6 +2813,60 @@ fun DailyRebuildApp(
         }
     }
 
+    val activeFoodLogDate = historicalFoodLogDate ?: todayDate
+
+    suspend fun synchronizeFoodRecordedForDate(
+        date: String
+    ): List<FoodLogEntry> {
+        val entries = foodDao.getEntriesForDate(date)
+
+        if (date == todayDate) {
+            foodEntries = entries
+            foodRecorded = entries.isNotEmpty()
+        } else {
+            val existingRecord =
+                dailyRecordDao.getRecordByDate(date)
+                    ?: buildEmptyHistoricalDailyRecord(date)
+
+            dailyRecordDao.saveRecord(
+                existingRecord.copy(
+                    foodRecorded = entries.isNotEmpty(),
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+        }
+
+        return entries
+    }
+
+    fun returnToHistoricalDay(
+        successMessage: String? = null
+    ) {
+        val editedDate = historicalFoodLogDate ?: return
+        historicalFoodLogDate = null
+
+        historyViewModel.refresh { errorMessage ->
+            initialDailyHistoryDate = editedDate
+            historyViewModel.selectFilter(DailyHistoryFilter.ALL)
+            showDailyHistoryDialog = true
+
+            val message = errorMessage ?: successMessage
+            if (message != null) {
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar(message)
+                }
+            }
+        }
+    }
+
+    fun beginHistoricalFoodEdit(
+        date: String
+    ) {
+        historicalFoodLogDate = date
+        showDailyHistoryDialog = false
+        initialDailyHistoryDate = null
+    }
+
     fun openSavedMealsScreen() {
         coroutineScope.launch {
             try {
@@ -2759,11 +2899,7 @@ fun DailyRebuildApp(
                         entry.id
                     )
 
-                foodEntries =
-                    foodDao
-                        .getEntriesForDate(
-                            todayDate
-                        )
+                synchronizeFoodRecordedForDate(todayDate)
 
                 snackbarHostState
                     .showSnackbar(
@@ -2792,11 +2928,7 @@ fun DailyRebuildApp(
                         mealLogId
                     )
 
-                foodEntries =
-                    foodDao
-                        .getEntriesForDate(
-                            todayDate
-                        )
+                synchronizeFoodRecordedForDate(todayDate)
 
                 snackbarHostState
                     .showSnackbar(
@@ -3057,8 +3189,7 @@ fun DailyRebuildApp(
                         onNightIbuprofenChange = { nightIbuprofenTaken = it },
                         onNightNaproxenChange = { nightNaproxenTaken = it },
                         onNightAcetaminophenChange = { nightAcetaminophenTaken = it },
-                        onJournalTextChange = { journalText = it },
-                        onSaveToday = saveToday
+                        onJournalTextChange = { journalText = it }
                     ),
                     modifier = Modifier.padding(innerPadding)
                 )
@@ -3923,9 +4054,7 @@ fun DailyRebuildApp(
                 painRecorded = true
                 showQuickPainDialog = false
 
-                // A correction should persist immediately so the mistaken value
-                // does not return if the app closes before Save Today is tapped.
-                saveToday()
+                // The automatic daily save persists this correction immediately.
             },
             onDismiss = {
                 showQuickPainDialog = false
@@ -4109,6 +4238,15 @@ fun DailyRebuildApp(
 
             isAddingMeal = isAddingSavedMeal,
 
+            destinationLabel =
+                historicalFoodLogDate?.let { date ->
+                    runCatching {
+                        LocalDate.parse(date).format(
+                            DateTimeFormatter.ofPattern("MMM d", Locale.US)
+                        )
+                    }.getOrDefault(date)
+                } ?: "today",
+
             onAddToToday = { savedMeal, multiplier ->
                 coroutineScope.launch {
                     isAddingSavedMeal = true
@@ -4120,7 +4258,7 @@ fun DailyRebuildApp(
                             }
 
                         /*
-                         * Every press of Add to Today gets a different ID.
+                         * Every saved-meal addition gets a different ID.
                          * Two PBJ additions therefore remain separate groups.
                          */
                         val mealLogId =
@@ -4166,7 +4304,7 @@ fun DailyRebuildApp(
                                         }
 
                                     FoodLogEntry(
-                                        date = todayDate,
+                                        date = activeFoodLogDate,
 
                                         productId = product.id,
 
@@ -4233,18 +4371,19 @@ fun DailyRebuildApp(
                             }
                         }
 
-                        foodEntries =
-                            foodDao.getEntriesForDate(
-                                todayDate
-                            )
-
-                        foodRecorded = true
+                        synchronizeFoodRecordedForDate(activeFoodLogDate)
                         showSavedMealsDialog = false
 
-                        snackbarHostState.showSnackbar(
-                            message =
-                                "${savedMeal.meal.name} added to today."
-                        )
+                        if (historicalFoodLogDate != null) {
+                            returnToHistoricalDay(
+                                "${savedMeal.meal.name} added to the selected day."
+                            )
+                        } else {
+                            snackbarHostState.showSnackbar(
+                                message =
+                                    "${savedMeal.meal.name} added to today."
+                            )
+                        }
                     } catch (
                         exception: Exception
                     ) {
@@ -4293,6 +4432,9 @@ fun DailyRebuildApp(
             onDismiss = {
                 if (!isAddingSavedMeal) {
                     showSavedMealsDialog = false
+                    if (historicalFoodLogDate != null) {
+                        returnToHistoricalDay()
+                    }
                 }
             }
         )
@@ -4440,6 +4582,9 @@ fun DailyRebuildApp(
 
             onDismiss = {
                 showSavedFoodsDialog = false
+                if (historicalFoodLogDate != null) {
+                    returnToHistoricalDay()
+                }
             },
 
             onUseProduct = { product ->
@@ -4570,6 +4715,102 @@ fun DailyRebuildApp(
             isLoading = isLoadingDailyHistory,
             isDeletingDay =
                 isDeletingDailyHistoryDay,
+            isUpdatingDay = isUpdatingHistoryDay,
+
+            onAddSavedFood = { day ->
+                beginHistoricalFoodEdit(day.date)
+                openSavedFoodsScreen()
+            },
+
+            onAddSavedMeal = { day ->
+                beginHistoricalFoodEdit(day.date)
+                openSavedMealsScreen()
+            },
+
+            onAddFoodManually = { day ->
+                beginHistoricalFoodEdit(day.date)
+                isCreatingFoodForMeal = false
+                isEditingSavedFood = false
+                scannedFoodPrefill = null
+                showManualFoodDialog = true
+            },
+
+            onUpdateWater = { day, counts ->
+                historicalWaterSaveJob?.cancel()
+                historicalWaterSaveJob = coroutineScope.launch {
+                    delay(250L)
+                    isUpdatingHistoryDay = true
+
+                    try {
+                        val existingRecord =
+                            dailyRecordDao.getRecordByDate(day.date)
+                                ?: if (day.date == todayDate) {
+                                    buildCurrentDailyRecord()
+                                } else {
+                                    buildEmptyHistoricalDailyRecord(day.date)
+                                }
+
+                        dailyRecordDao.saveRecord(
+                            existingRecord.copy(
+                                plainReusableBottleCount = counts.plainReusable,
+                                mioReusableBottleCount = counts.mioReusable,
+                                plainDisposableBottleCount = counts.plainDisposable,
+                                mioDisposableBottleCount = counts.mioDisposable,
+                                updatedAt = System.currentTimeMillis()
+                            )
+                        )
+
+                        if (day.date == todayDate) {
+                            dayReloadToken++
+                        }
+
+                        historyViewModel.refresh()
+                        if (selectedMainTab == AppNavigationViewModel.STATS_TAB) {
+                            statsViewModel.refresh()
+                        }
+                    } catch (exception: Exception) {
+                        snackbarHostState.showSnackbar(
+                            "Could not update water for that day."
+                        )
+                    } finally {
+                        isUpdatingHistoryDay = false
+                    }
+                }
+            },
+
+            onDeleteFoodEntry = { day, entry ->
+                coroutineScope.launch {
+                    isUpdatingHistoryDay = true
+                    try {
+                        foodDao.deleteFoodEntryById(entry.id)
+                        synchronizeFoodRecordedForDate(day.date)
+                        if (day.date == todayDate) dayReloadToken++
+                        historyViewModel.refresh()
+                        snackbarHostState.showSnackbar("Food entry removed.")
+                    } catch (exception: Exception) {
+                        snackbarHostState.showSnackbar("Could not remove that food entry.")
+                    } finally {
+                        isUpdatingHistoryDay = false
+                    }
+                }
+            },
+
+            onDeleteMealLog = { day, mealLogId ->
+                coroutineScope.launch {
+                    isUpdatingHistoryDay = true
+                    try {
+                        foodDao.deleteFoodEntriesByMealLogId(mealLogId)
+                        synchronizeFoodRecordedForDate(day.date)
+                        if (day.date == todayDate) dayReloadToken++
+                        historyViewModel.refresh()
+                        snackbarHostState.showSnackbar("Logged meal removed.")
+                    } catch (exception: Exception) {
+                        snackbarHostState.showSnackbar("Could not remove that logged meal.")
+                    } finally {
+                        isUpdatingHistoryDay = false
+                    }
+                }
+            },
 
             onDeleteDay = { day ->
                 historyViewModel.deleteDay(day) { message, success ->
@@ -4636,7 +4877,16 @@ fun DailyRebuildApp(
                 } else if (isCreatingFoodForMeal) {
                     "Create Saved Food"
                 } else {
-                    null
+                    historicalFoodLogDate?.let { date ->
+                        val formattedDate =
+                            runCatching {
+                                LocalDate.parse(date).format(
+                                    DateTimeFormatter.ofPattern("MMM d", Locale.US)
+                                )
+                            }.getOrDefault(date)
+
+                        "Add Food to $formattedDate"
+                    }
                 },
 
             isScanningBarcode =
@@ -4665,6 +4915,8 @@ fun DailyRebuildApp(
 
                     if (returnToSavedFoods) {
                         showSavedFoodsDialog = true
+                    } else if (historicalFoodLogDate != null) {
+                        returnToHistoricalDay()
                     }
                 }
             },
@@ -4764,7 +5016,7 @@ fun DailyRebuildApp(
                         val entry =
                             FoodLogEntry(
                                 date =
-                                    todayDate,
+                                    activeFoodLogDate,
 
                                 productId =
                                     productId,
@@ -4803,32 +5055,34 @@ fun DailyRebuildApp(
                             entry
                         )
 
-                        foodEntries =
-                            foodDao
-                                .getEntriesForDate(
-                                    todayDate
-                                )
-
-                        foodRecorded = true
+                        synchronizeFoodRecordedForDate(activeFoodLogDate)
 
                         showManualFoodDialog = false
                         scannedFoodPrefill = null
                         manualBarcodeSavePolicy = BarcodeSavePolicy.NORMAL
                         barcodeViewModel.resetSavePolicy()
 
-                        snackbarHostState.showSnackbar(
-                            message =
-                                when (savePolicyUsed) {
-                                    BarcodeSavePolicy.USE_LOCAL_WITHOUT_UPDATE ->
-                                        "Food added using your saved local food. Saved Food was not changed."
-                                    BarcodeSavePolicy.USE_ONLINE_ONCE ->
-                                        "Food added using the online values. Saved Food was not changed."
-                                    BarcodeSavePolicy.UPDATE_LOCAL ->
-                                        "Saved Food updated and food added."
-                                    BarcodeSavePolicy.NORMAL ->
-                                        "Food added."
-                                }
-                        )
+                        val successMessage =
+                            when (savePolicyUsed) {
+                                BarcodeSavePolicy.USE_LOCAL_WITHOUT_UPDATE ->
+                                    "Food added using your saved local food. Saved Food was not changed."
+                                BarcodeSavePolicy.USE_ONLINE_ONCE ->
+                                    "Food added using the online values. Saved Food was not changed."
+                                BarcodeSavePolicy.UPDATE_LOCAL ->
+                                    "Saved Food updated and food added."
+                                BarcodeSavePolicy.NORMAL ->
+                                    "Food added."
+                            }
+
+                        if (historicalFoodLogDate != null) {
+                            returnToHistoricalDay(
+                                successMessage.replace("Food added", "Food added to the selected day")
+                            )
+                        } else {
+                            snackbarHostState.showSnackbar(
+                                message = successMessage
+                            )
+                        }
                     } catch (
                         exception: Exception
                     ) {

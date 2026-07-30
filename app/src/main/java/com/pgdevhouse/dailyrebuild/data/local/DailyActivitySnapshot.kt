@@ -4,7 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 /**
- * A Daily Rebuild-owned snapshot of Health Connect totals at Save Today time.
+ * A Daily Rebuild-owned snapshot of Health Connect totals saved automatically with the day.
  * This is separate from the source health data and can be deleted safely.
  */
 @Entity(tableName = "daily_activity_snapshots")

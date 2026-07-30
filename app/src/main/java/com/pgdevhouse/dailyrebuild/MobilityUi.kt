@@ -1001,6 +1001,10 @@ private fun RandomMobilityRoutineDialog(
         mutableIntStateOf(0)
     }
 
+    var hasStartedCurrentMovement by rememberSaveable {
+        mutableStateOf(false)
+    }
+
     var isPaused by rememberSaveable {
         mutableStateOf(false)
     }
@@ -1028,10 +1032,12 @@ private fun RandomMobilityRoutineDialog(
         screen,
         currentIndex,
         secondsRemaining,
+        hasStartedCurrentMovement,
         isPaused
     ) {
         if (
             screen == "guided" &&
+            hasStartedCurrentMovement &&
             !isPaused &&
             generatedRoutine.isNotEmpty()
         ) {
@@ -1058,6 +1064,8 @@ private fun RandomMobilityRoutineDialog(
                 } else {
                     currentIndex++
                     secondsRemaining = movementSeconds
+                    hasStartedCurrentMovement = false
+                    isPaused = false
                 }
             }
         }
@@ -1169,6 +1177,7 @@ private fun RandomMobilityRoutineDialog(
                             completedIds.clear()
                             skippedIds.clear()
                             notes = ""
+                            hasStartedCurrentMovement = false
                             isPaused = false
                             screen = "guided"
                         }
@@ -1183,9 +1192,16 @@ private fun RandomMobilityRoutineDialog(
                             secondsRemaining,
                         movementSeconds =
                             movementSeconds,
+                        hasStartedCurrentMovement =
+                            hasStartedCurrentMovement,
                         isPaused = isPaused,
-                        onPauseToggle = {
-                            isPaused = !isPaused
+                        onStartPauseToggle = {
+                            if (!hasStartedCurrentMovement) {
+                                hasStartedCurrentMovement = true
+                                isPaused = false
+                            } else {
+                                isPaused = !isPaused
+                            }
                         },
                         onPrevious = {
                             if (currentIndex > 0) {
@@ -1202,6 +1218,7 @@ private fun RandomMobilityRoutineDialog(
                                 )
                                 secondsRemaining =
                                     movementSeconds
+                                hasStartedCurrentMovement = false
                                 isPaused = false
                             }
                         },
@@ -1231,6 +1248,7 @@ private fun RandomMobilityRoutineDialog(
                                 currentIndex++
                                 secondsRemaining =
                                     movementSeconds
+                                hasStartedCurrentMovement = false
                                 isPaused = false
                             }
                         },
@@ -1573,8 +1591,9 @@ private fun MobilityGuidedPage(
     currentIndex: Int,
     secondsRemaining: Int,
     movementSeconds: Int,
+    hasStartedCurrentMovement: Boolean,
     isPaused: Boolean,
-    onPauseToggle: () -> Unit,
+    onStartPauseToggle: () -> Unit,
     onPrevious: () -> Unit,
     onSkip: () -> Unit,
     onStop: () -> Unit
@@ -1636,7 +1655,14 @@ private fun MobilityGuidedPage(
         )
 
         Text(
-            text = if (isPaused) "Paused" else "Seconds remaining",
+            text = when {
+                !hasStartedCurrentMovement ->
+                    "Ready — timer has not started"
+                isPaused ->
+                    "Paused"
+                else ->
+                    "Seconds remaining"
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -1663,18 +1689,26 @@ private fun MobilityGuidedPage(
 
         Text(
             text =
-                "Use a comfortable range. Skipping is always allowed.",
+                "Read the instructions and get into position. " +
+                    "The timer begins only when you tap Start. " +
+                    "Use a comfortable range; skipping is always allowed.",
             style = MaterialTheme.typography.bodySmall,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Button(
-            onClick = onPauseToggle,
+            onClick = onStartPauseToggle,
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp)
         ) {
-            Text(if (isPaused) "Resume" else "Pause")
+            Text(
+                when {
+                    !hasStartedCurrentMovement -> "Start"
+                    isPaused -> "Resume"
+                    else -> "Pause"
+                }
+            )
         }
 
         Row(

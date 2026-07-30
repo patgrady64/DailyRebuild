@@ -54,9 +54,9 @@ class PermissionsRationaleActivity : ComponentActivity() {
                                 "Daily Rebuild requests read-only access " +
                                     "to your steps, walking distance, and " +
                                     "recorded activity time. These totals appear " +
-                                    "on your dashboard and can be saved as " +
-                                    "a Daily Rebuild snapshot when you tap " +
-                                    "Save Today."
+                                    "on your dashboard and are stored in the " +
+                                    "day's Daily Rebuild snapshot automatically " +
+                                    "as information changes."
                         )
 
                         Spacer(

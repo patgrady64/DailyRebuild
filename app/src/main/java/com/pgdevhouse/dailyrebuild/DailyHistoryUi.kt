@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,11 +57,10 @@ import java.util.Locale
 import kotlin.math.abs
 
 /**
- * One read-only history day.
+ * One history day.
  *
- * A day can contain a saved DailyRecord, food entries, an activity snapshot,
- * or any combination of them. Food is stored immediately, while the checklist
- * and Health Connect snapshot are stored when Save Today is pressed.
+ * Daily information is stored automatically. Past dates can also be corrected
+ * from History when food or water was forgotten.
  */
 data class DailyHistoryDay(
     val date: String,
@@ -73,6 +73,13 @@ data class DailyHistoryDay(
     val meetingAttendance: List<MeetingAttendance> = emptyList(),
     val careVisits: List<CareVisit> = emptyList(),
     val careAppointments: List<CareAppointment> = emptyList()
+)
+
+data class WaterBottleCounts(
+    val plainReusable: Int = 0,
+    val mioReusable: Int = 0,
+    val plainDisposable: Int = 0,
+    val mioDisposable: Int = 0
 )
 
 
@@ -95,6 +102,13 @@ fun DailyHistoryDialog(
     onFilterChange: (DailyHistoryFilter) -> Unit,
     isLoading: Boolean,
     isDeletingDay: Boolean,
+    isUpdatingDay: Boolean,
+    onAddSavedFood: (DailyHistoryDay) -> Unit,
+    onAddSavedMeal: (DailyHistoryDay) -> Unit,
+    onAddFoodManually: (DailyHistoryDay) -> Unit,
+    onUpdateWater: (DailyHistoryDay, WaterBottleCounts) -> Unit,
+    onDeleteFoodEntry: (DailyHistoryDay, FoodLogEntry) -> Unit,
+    onDeleteMealLog: (DailyHistoryDay, String) -> Unit,
     onDeleteDay: (DailyHistoryDay) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -120,8 +134,27 @@ fun DailyHistoryDialog(
         }
     }
 
-    var dayPendingDeletion by rememberSaveable {
+    var dayPendingDeletion by remember {
         mutableStateOf<String?>(null)
+    }
+
+    var waterEditorDate by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    var foodEntryPendingDeletionId by remember {
+        mutableStateOf<Long?>(null)
+    }
+
+    var mealLogPendingDeletionId by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    LaunchedEffect(selectedDate) {
+        dayPendingDeletion = null
+        waterEditorDate = null
+        foodEntryPendingDeletionId = null
+        mealLogPendingDeletionId = null
     }
 
     val filteredDays =
@@ -130,8 +163,23 @@ fun DailyHistoryDialog(
         }
 
     val selectedDay =
-        filteredDays.firstOrNull {
-            it.date == selectedDate
+        selectedDate?.let { date ->
+            filteredDays.firstOrNull {
+                it.date == date
+            } ?: if (
+                selectedFilter == DailyHistoryFilter.ALL &&
+                runCatching {
+                    !LocalDate.parse(date).isAfter(LocalDate.now())
+                }.getOrDefault(false)
+            ) {
+                DailyHistoryDay(
+                    date = date,
+                    record = null,
+                    foodEntries = emptyList()
+                )
+            } else {
+                null
+            }
         }
 
     val pendingDeletionDay =
@@ -175,8 +223,8 @@ fun DailyHistoryDialog(
                         visibleMonthText =
                             it.toString()
                     },
-                    onSelectDay = {
-                        selectedDate = it.date
+                    onSelectDate = {
+                        selectedDate = it
                     },
                     onDismiss = onDismiss
                 )
@@ -184,16 +232,119 @@ fun DailyHistoryDialog(
                 DailyHistoryDetailPage(
                     day = selectedDay,
                     isDeletingDay = isDeletingDay,
+                    isUpdatingDay = isUpdatingDay,
                     onBack = {
                         selectedDate = null
                     },
+                    onAddSavedFood = { onAddSavedFood(selectedDay) },
+                    onAddSavedMeal = { onAddSavedMeal(selectedDay) },
+                    onAddFoodManually = { onAddFoodManually(selectedDay) },
+                    onEditWater = { waterEditorDate = selectedDay.date },
+                    onRequestDeleteFoodEntry = { entry ->
+                        foodEntryPendingDeletionId = entry.id
+                    },
+                    onRequestDeleteMeal = { mealLogId ->
+                        mealLogPendingDeletionId = mealLogId
+                    },
                     onRequestDelete = {
-                        dayPendingDeletion =
-                            selectedDay.date
+                        dayPendingDeletion = selectedDay.date
                     }
                 )
             }
         }
+    }
+
+    val waterEditorDay =
+        waterEditorDate?.let { date ->
+            days.firstOrNull { it.date == date }
+                ?: if (
+                    runCatching {
+                        !LocalDate.parse(date).isAfter(LocalDate.now())
+                    }.getOrDefault(false)
+                ) {
+                    DailyHistoryDay(
+                        date = date,
+                        record = null,
+                        foodEntries = emptyList()
+                    )
+                } else {
+                    null
+                }
+        }
+    if (waterEditorDay != null) {
+        HistoricalWaterEditorDialog(
+            day = waterEditorDay,
+            isSaving = isUpdatingDay,
+            onCountsChange = { counts ->
+                onUpdateWater(waterEditorDay, counts)
+            },
+            onDismiss = { waterEditorDate = null }
+        )
+    }
+
+    val pendingFoodEntry = selectedDay?.foodEntries?.firstOrNull {
+        it.id == foodEntryPendingDeletionId
+    }
+    if (pendingFoodEntry != null && selectedDay != null) {
+        AlertDialog(
+            onDismissRequest = {
+                foodEntryPendingDeletionId = null
+            },
+            title = { Text("Remove Food Entry?") },
+            text = {
+                Text("Remove ${pendingFoodEntry.productNameSnapshot} from ${formatHistoryDate(selectedDay.date)}?")
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isUpdatingDay,
+                    onClick = {
+                        onDeleteFoodEntry(selectedDay, pendingFoodEntry)
+                        foodEntryPendingDeletionId = null
+                    }
+                ) { Text(if (isUpdatingDay) "Removing…" else "Remove") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { foodEntryPendingDeletionId = null }
+                ) { Text("Cancel") }
+            }
+        )
+    }
+
+    val pendingMealLogId = mealLogPendingDeletionId
+    val pendingMealEntries =
+        if (pendingMealLogId == null) {
+            emptyList()
+        } else {
+            selectedDay?.foodEntries?.filter {
+                it.mealLogId == pendingMealLogId
+            }.orEmpty()
+        }
+    if (pendingMealEntries.isNotEmpty() && selectedDay != null && pendingMealLogId != null) {
+        val mealName = pendingMealEntries.first().mealName?.takeIf { it.isNotBlank() } ?: "Saved Meal"
+        AlertDialog(
+            onDismissRequest = {
+                mealLogPendingDeletionId = null
+            },
+            title = { Text("Remove Logged Meal?") },
+            text = {
+                Text("Remove $mealName and all of its ingredients from ${formatHistoryDate(selectedDay.date)}?")
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isUpdatingDay,
+                    onClick = {
+                        onDeleteMealLog(selectedDay, pendingMealLogId)
+                        mealLogPendingDeletionId = null
+                    }
+                ) { Text(if (isUpdatingDay) "Removing…" else "Remove Meal") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { mealLogPendingDeletionId = null }
+                ) { Text("Cancel") }
+            }
+        )
     }
 
     if (pendingDeletionDay != null) {
@@ -258,7 +409,7 @@ private fun DailyHistoryCalendarPage(
     isLoading: Boolean,
     visibleMonth: YearMonth,
     onVisibleMonthChange: (YearMonth) -> Unit,
-    onSelectDay: (DailyHistoryDay) -> Unit,
+    onSelectDate: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val currentMonth = YearMonth.now()
@@ -283,7 +434,7 @@ private fun DailyHistoryCalendarPage(
                 )
                 Text(
                     text = if (selectedFilter == DailyHistoryFilter.ALL) {
-                        "Marked dates contain saved records, food, activity, meetings, self-care, or health events."
+                        "Tap any past date to add forgotten food or water. Marked dates already contain saved information."
                     } else {
                         "Showing ${selectedFilter.label.lowercase(Locale.US)} dates only. $allDayCount total saved days remain available."
                     },
@@ -345,7 +496,8 @@ private fun DailyHistoryCalendarPage(
             DailyCalendarMonth(
                 visibleMonth = visibleMonth,
                 days = days,
-                onSelectDay = onSelectDay
+                allowEmptyDates = selectedFilter == DailyHistoryFilter.ALL,
+                onSelectDate = onSelectDate
             )
         }
 
@@ -354,7 +506,7 @@ private fun DailyHistoryCalendarPage(
                 Text("No history yet", style = MaterialTheme.typography.titleMedium)
                 Text(
                     if (selectedFilter == DailyHistoryFilter.ALL) {
-                        "Save a day or log an event to place it on this calendar."
+                        "Tap any past date to add food or water. New information will be saved automatically."
                     } else {
                         "No ${selectedFilter.label.lowercase(Locale.US)} records match this filter."
                     },
@@ -410,7 +562,8 @@ private fun CalendarMonthControls(
 private fun DailyCalendarMonth(
     visibleMonth: YearMonth,
     days: List<DailyHistoryDay>,
-    onSelectDay: (DailyHistoryDay) -> Unit
+    allowEmptyDates: Boolean,
+    onSelectDate: (String) -> Unit
 ) {
     val daysByDate =
         days.associateBy {
@@ -491,14 +644,17 @@ private fun DailyCalendarMonth(
                                 date.toString()
                             ]
 
+                        val isSelectable =
+                            !date.isAfter(LocalDate.now()) &&
+                                (historyDay != null || allowEmptyDates)
+
                         CalendarDayCell(
                             date = date,
                             historyDay = historyDay,
+                            isSelectable = isSelectable,
                             onClick = {
-                                if (historyDay != null) {
-                                    onSelectDay(
-                                        historyDay
-                                    )
+                                if (isSelectable) {
+                                    onSelectDate(date.toString())
                                 }
                             },
                             modifier = Modifier.weight(1f)
@@ -514,6 +670,7 @@ private fun DailyCalendarMonth(
 private fun CalendarDayCell(
     date: LocalDate,
     historyDay: DailyHistoryDay?,
+    isSelectable: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -543,14 +700,14 @@ private fun CalendarDayCell(
         modifier = modifier
             .height(76.dp)
             .padding(2.dp)
-            .clickable(enabled = historyDay != null, onClick = onClick),
+            .clickable(enabled = isSelectable, onClick = onClick),
         shape = RoundedCornerShape(15.dp),
         colors = CardDefaults.cardColors(
             containerColor = containerColor,
             contentColor = contentColor
         ),
         elevation = CardDefaults.cardElevation(
-            defaultElevation = if (historyDay != null) 2.dp else 0.dp
+            defaultElevation = if (historyDay != null || isSelectable) 2.dp else 0.dp
         )
     ) {
         Column(
@@ -590,9 +747,26 @@ private fun CalendarDayCell(
 private fun DailyHistoryDetailPage(
     day: DailyHistoryDay,
     isDeletingDay: Boolean,
+    isUpdatingDay: Boolean,
     onBack: () -> Unit,
+    onAddSavedFood: () -> Unit,
+    onAddSavedMeal: () -> Unit,
+    onAddFoodManually: () -> Unit,
+    onEditWater: () -> Unit,
+    onRequestDeleteFoodEntry: (FoodLogEntry) -> Unit,
+    onRequestDeleteMeal: (String) -> Unit,
     onRequestDelete: () -> Unit
 ) {
+    val hasSavedData =
+        day.record != null ||
+            day.activitySnapshot != null ||
+            day.mobilitySessions.isNotEmpty() ||
+            day.showerLogged ||
+            day.migraineLogs.isNotEmpty() ||
+            day.meetingAttendance.isNotEmpty() ||
+            day.careVisits.isNotEmpty() ||
+            day.careAppointments.isNotEmpty()
+
     Column(
         modifier = Modifier
             .verticalScroll(rememberScrollState())
@@ -609,16 +783,6 @@ private fun DailyHistoryDetailPage(
                 shape = RoundedCornerShape(16.dp)
             ) { Text("‹ Calendar") }
             Spacer(Modifier.weight(1f))
-            val hasSavedData =
-                day.record != null ||
-                    day.activitySnapshot != null ||
-                    day.mobilitySessions.isNotEmpty() ||
-                    day.showerLogged ||
-                    day.migraineLogs.isNotEmpty() ||
-                    day.meetingAttendance.isNotEmpty() ||
-                    day.careVisits.isNotEmpty() ||
-                    day.careAppointments.isNotEmpty()
-
             RebuildStatusBadge(
                 text =
                     if (
@@ -628,8 +792,10 @@ private fun DailyHistoryDetailPage(
                         "Saved + Food"
                     } else if (hasSavedData) {
                         "Saved"
-                    } else {
+                    } else if (day.foodEntries.isNotEmpty()) {
                         "Food only"
+                    } else {
+                        "Empty date"
                     }
             )
         }
@@ -639,12 +805,54 @@ private fun DailyHistoryDetailPage(
             style = MaterialTheme.typography.headlineMedium
         )
 
+        RebuildSectionCard(
+            title = "Correct this day",
+            subtitle = "Add something you forgot or remove a mistaken food entry.",
+            accentColor = RebuildTeal
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onEditWater,
+                    enabled = !isUpdatingDay,
+                    modifier = Modifier.weight(1f)
+                ) { Text("Edit Water") }
+                OutlinedButton(
+                    onClick = onAddSavedFood,
+                    enabled = !isUpdatingDay,
+                    modifier = Modifier.weight(1f)
+                ) { Text("Saved Food") }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onAddSavedMeal,
+                    enabled = !isUpdatingDay,
+                    modifier = Modifier.weight(1f)
+                ) { Text("Saved Meal") }
+                OutlinedButton(
+                    onClick = onAddFoodManually,
+                    enabled = !isUpdatingDay,
+                    modifier = Modifier.weight(1f)
+                ) { Text("Enter Food") }
+            }
+            Text(
+                text = "Changes to this date are saved automatically.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
         val record = day.record
         if (record == null) {
             RebuildInsetPanel {
-                Text("Checklist not saved", style = MaterialTheme.typography.titleMedium)
+                Text("No daily details yet", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "The daily checklist was not saved, but the day's logged food, activity, mobility, shower, migraine, meeting, appointment, or care-visit information remains available below.",
+                    "No water, checklist, pain, medication, or journal details have been recorded for this date. Anything you add here is saved automatically.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -696,33 +904,142 @@ private fun DailyHistoryDetailPage(
             )
         }
 
-        HistoryFoodCard(entries = day.foodEntries)
+        HistoryFoodCard(
+            entries = day.foodEntries,
+            isUpdating = isUpdatingDay,
+            onRequestDeleteEntry = onRequestDeleteFoodEntry,
+            onRequestDeleteMeal = onRequestDeleteMeal
+        )
         if (record != null) {
             HistoryJournalCard(journalText = record.journalText)
         }
 
-        RebuildInsetPanel(
-            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.42f)
-        ) {
-            Text(
-                text = "Delete this day",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer
-            )
-            Text(
-                text = "Use this for test data or a date recorded by mistake. Saved Foods and Saved Meal templates are not removed.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer
-            )
-            OutlinedButton(
-                onClick = onRequestDelete,
-                enabled = !isDeletingDay,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp)
+        val hasAnythingToDelete =
+            hasSavedData || day.foodEntries.isNotEmpty()
+
+        if (hasAnythingToDelete) {
+            RebuildInsetPanel(
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.42f)
             ) {
-                Text(if (isDeletingDay) "Deleting day…" else "Delete entire day")
+                Text(
+                    text = "Delete this day",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                Text(
+                    text = "Use this for test data or a date recorded by mistake. Saved Foods and Saved Meal templates are not removed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                OutlinedButton(
+                    onClick = onRequestDelete,
+                    enabled = !isDeletingDay,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(if (isDeletingDay) "Deleting day…" else "Delete entire day")
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun HistoricalWaterEditorDialog(
+    day: DailyHistoryDay,
+    isSaving: Boolean,
+    onCountsChange: (WaterBottleCounts) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val record = day.record
+    var counts by remember(day.date) {
+        mutableStateOf(
+            WaterBottleCounts(
+                plainReusable = record?.plainReusableBottleCount ?: 0,
+                mioReusable = record?.mioReusableBottleCount ?: 0,
+                plainDisposable = record?.plainDisposableBottleCount ?: 0,
+                mioDisposable = record?.mioDisposableBottleCount ?: 0
+            )
+        )
+    }
+
+    fun update(newCounts: WaterBottleCounts) {
+        counts = newCounts
+        onCountsChange(newCounts)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Water for ${formatHistoryDate(day.date)}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Each change is saved automatically.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                HistoricalWaterCountRow(
+                    label = "24 oz plain water",
+                    count = counts.plainReusable,
+                    onDecrease = {
+                        if (counts.plainReusable > 0) update(counts.copy(plainReusable = counts.plainReusable - 1))
+                    },
+                    onIncrease = { update(counts.copy(plainReusable = counts.plainReusable + 1)) }
+                )
+                HistoricalWaterCountRow(
+                    label = "24 oz MiO water",
+                    count = counts.mioReusable,
+                    onDecrease = {
+                        if (counts.mioReusable > 0) update(counts.copy(mioReusable = counts.mioReusable - 1))
+                    },
+                    onIncrease = { update(counts.copy(mioReusable = counts.mioReusable + 1)) }
+                )
+                HistoricalWaterCountRow(
+                    label = "16.9 oz plain water",
+                    count = counts.plainDisposable,
+                    onDecrease = {
+                        if (counts.plainDisposable > 0) update(counts.copy(plainDisposable = counts.plainDisposable - 1))
+                    },
+                    onIncrease = { update(counts.copy(plainDisposable = counts.plainDisposable + 1)) }
+                )
+                HistoricalWaterCountRow(
+                    label = "16.9 oz MiO water",
+                    count = counts.mioDisposable,
+                    onDecrease = {
+                        if (counts.mioDisposable > 0) update(counts.copy(mioDisposable = counts.mioDisposable - 1))
+                    },
+                    onIncrease = { update(counts.copy(mioDisposable = counts.mioDisposable + 1)) }
+                )
+                if (isSaving) {
+                    Text(
+                        "Saving…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        }
+    )
+}
+
+@Composable
+private fun HistoricalWaterCountRow(
+    label: String,
+    count: Int,
+    onDecrease: () -> Unit,
+    onIncrease: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(label, modifier = Modifier.weight(1f))
+        OutlinedButton(onClick = onDecrease, enabled = count > 0) { Text("−") }
+        Text(count.toString(), fontWeight = FontWeight.Bold)
+        OutlinedButton(onClick = onIncrease) { Text("+") }
     }
 }
 
@@ -1313,17 +1630,20 @@ private fun HistoryWaterCard(
 private fun HistoryPainCard(
     record: DailyRecord
 ) {
+    val highestPain = maxOf(
+        record.backPain,
+        record.shinPain
+    )
+
     HistorySectionCard(
-        title = "Pain"
+        title = "Highest Pain"
     ) {
         Text(
-            text = "Highest back pain: ${formatHistoryPain(record.backPain)} / 10"
+            text =
+                "Highest pain that day: ${formatHistoryPain(highestPain)} / 10"
         )
         Text(
-            text = "Highest shin-splint pain: ${formatHistoryPain(record.shinPain)} / 10"
-        )
-        Text(
-            text = "Each value is the highest recorded for that day. Daily Rebuild does not use before-and-after workout pain entries.",
+            text = "Older records automatically use the higher of the former back and shin values.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -1398,7 +1718,10 @@ private fun HistoryMedicationCard(
 
 @Composable
 private fun HistoryFoodCard(
-    entries: List<FoodLogEntry>
+    entries: List<FoodLogEntry>,
+    isUpdating: Boolean,
+    onRequestDeleteEntry: (FoodLogEntry) -> Unit,
+    onRequestDeleteMeal: (String) -> Unit
 ) {
     val totalCalories =
         entries.sumOf { it.calories }
@@ -1456,7 +1779,11 @@ private fun HistoryFoodCard(
 
             mealGroups.values.forEachIndexed { index, mealEntries ->
                 HistoryMealGroup(
-                    entries = mealEntries
+                    entries = mealEntries,
+                    isUpdating = isUpdating,
+                    onRequestDelete = {
+                        mealEntries.firstOrNull()?.mealLogId?.let(onRequestDeleteMeal)
+                    }
                 )
 
                 if (
@@ -1472,7 +1799,11 @@ private fun HistoryFoodCard(
             }
 
             individualEntries.forEachIndexed { index, entry ->
-                HistoryFoodEntry(entry)
+                HistoryFoodEntry(
+                    entry = entry,
+                    isUpdating = isUpdating,
+                    onRequestDelete = { onRequestDeleteEntry(entry) }
+                )
 
                 if (index < individualEntries.lastIndex) {
                     HorizontalDivider(
@@ -1488,7 +1819,9 @@ private fun HistoryFoodCard(
 
 @Composable
 private fun HistoryMealGroup(
-    entries: List<FoodLogEntry>
+    entries: List<FoodLogEntry>,
+    isUpdating: Boolean,
+    onRequestDelete: () -> Unit
 ) {
     val mealName =
         entries.firstOrNull()
@@ -1524,11 +1857,18 @@ private fun HistoryMealGroup(
             style = MaterialTheme.typography.bodySmall
         )
     }
+
+    TextButton(
+        onClick = onRequestDelete,
+        enabled = !isUpdating
+    ) { Text("Remove logged meal") }
 }
 
 @Composable
 private fun HistoryFoodEntry(
-    entry: FoodLogEntry
+    entry: FoodLogEntry,
+    isUpdating: Boolean,
+    onRequestDelete: () -> Unit
 ) {
     if (!entry.mealName.isNullOrBlank()) {
         Text(
@@ -1547,6 +1887,10 @@ private fun HistoryFoodEntry(
                 "${formatHistoryNumber(entry.calories)} calories",
         style = MaterialTheme.typography.bodySmall
     )
+    TextButton(
+        onClick = onRequestDelete,
+        enabled = !isUpdating
+    ) { Text("Remove") }
 }
 
 @Composable
