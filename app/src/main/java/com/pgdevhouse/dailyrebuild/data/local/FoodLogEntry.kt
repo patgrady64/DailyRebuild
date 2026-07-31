@@ -60,6 +60,16 @@ data class FoodLogEntry(
     val mealLogId: String? = null,
 
     /*
+     * Saved-meal identity and accumulated quantity.
+     *
+     * These remain null / 1.0 for individual foods and older meal logs.
+     * Re-adding the same saved meal on the same date updates the original
+     * meal group instead of creating a second card.
+     */
+    val savedMealId: Long? = null,
+    val mealQuantity: Double = 1.0,
+
+    /*
      * Nutrition is saved as a snapshot.
      *
      * If the product information is corrected later,

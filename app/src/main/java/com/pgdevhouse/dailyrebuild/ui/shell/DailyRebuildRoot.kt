@@ -4476,117 +4476,296 @@ fun DailyRebuildApp(
                                 it.id
                             }
 
-                        /*
-                         * Every saved-meal addition gets a different ID.
-                         * Two PBJ additions therefore remain separate groups.
-                         */
-                        val mealLogId =
-                            UUID.randomUUID().toString()
+                        val sortedIngredients =
+                            savedMeal.ingredients.sortedBy {
+                                it.sortOrder
+                            }
 
-                        val entriesToAdd =
-                            savedMeal.ingredients
-                                .sortedBy {
-                                    it.sortOrder
-                                }
-                                .map { ingredient ->
-                                    val product =
-                                        productsById[
-                                            ingredient.productId
-                                        ] ?: error(
-                                            "Saved meal contains a missing food."
-                                        )
-
-                                    val totalAmount =
-                                        ingredient.amount * multiplier
-
-                                    val servings =
-                                        when (
-                                            ingredient.amountMode
-                                        ) {
-                                            MealAmountMode
-                                                .LABEL_SERVINGS -> {
-                                                totalAmount
-                                            }
-
-                                            else -> {
-                                                if (
-                                                    product.servingQuantity <= 0.0
-                                                ) {
-                                                    error(
-                                                        "Saved food has an invalid serving size."
-                                                    )
-                                                }
-
-                                                totalAmount /
-                                                    product.servingQuantity
-                                            }
-                                        }
-
-                                    FoodLogEntry(
-                                        date = activeFoodLogDate,
-
-                                        productId = product.id,
-
-                                        quantity = totalAmount,
-
-                                        unit =
-                                            if (
-                                                ingredient.amountMode ==
-                                                MealAmountMode
-                                                    .LABEL_SERVINGS
-                                            ) {
-                                                "servings"
-                                            } else {
-                                                product.servingUnit
-                                            },
-
-                                        mealName =
-                                            savedMeal.meal.name,
-
-                                        mealLogId =
-                                            mealLogId,
-
-                                        productNameSnapshot =
-                                            product.name,
-
-                                        calories =
-                                            product
-                                                .caloriesPerServing *
-                                                servings,
-
-                                        proteinGrams =
-                                            product
-                                                .proteinGramsPerServing *
-                                                servings,
-
-                                        carbohydrateGrams =
-                                            product
-                                                .carbohydrateGramsPerServing *
-                                                servings,
-
-                                        fatGrams =
-                                            product
-                                                .fatGramsPerServing *
-                                                servings,
-
-                                        sodiumMilligrams =
-                                            product
-                                                .sodiumMilligramsPerServing *
-                                                servings
-                                    )
-                                }
-
-                        if (entriesToAdd.isEmpty()) {
+                        if (sortedIngredients.isEmpty()) {
                             error(
                                 "Saved meal has no ingredients."
                             )
                         }
 
-                        database.withTransaction {
-                            entriesToAdd.forEach { entry ->
-                                foodDao.addFoodEntry(
-                                    entry
+                        fun unitForIngredient(
+                            ingredient: SavedMealIngredient,
+                            product: FoodProduct
+                        ): String =
+                            if (
+                                ingredient.amountMode ==
+                                MealAmountMode.LABEL_SERVINGS
+                            ) {
+                                "servings"
+                            } else {
+                                product.servingUnit
+                            }
+
+                        fun normalizedIngredientKey(
+                            productId: Long,
+                            unit: String
+                        ): String =
+                            "$productId|${unit.trim().lowercase(Locale.US)}"
+
+                        val expectedIngredientKeys =
+                            sortedIngredients.map { ingredient ->
+                                val product =
+                                    productsById[ingredient.productId]
+                                        ?: error(
+                                            "Saved meal contains a missing food."
+                                        )
+
+                                normalizedIngredientKey(
+                                    productId = product.id,
+                                    unit = unitForIngredient(
+                                        ingredient,
+                                        product
+                                    )
                                 )
+                            }.sorted()
+
+                        val existingMealGroup =
+                            foodDao.getEntriesForDate(activeFoodLogDate)
+                                .filter {
+                                    !it.mealLogId.isNullOrBlank()
+                                }
+                                .groupBy {
+                                    it.mealLogId.orEmpty()
+                                }
+                                .values
+                                .firstOrNull { group ->
+                                    val first = group.firstOrNull()
+                                        ?: return@firstOrNull false
+
+                                    if (
+                                        first.savedMealId ==
+                                        savedMeal.meal.id
+                                    ) {
+                                        true
+                                    } else if (
+                                        first.savedMealId == null &&
+                                        first.mealName?.trim()
+                                            ?.equals(
+                                                savedMeal.meal.name.trim(),
+                                                ignoreCase = true
+                                            ) == true
+                                    ) {
+                                        group.map { entry ->
+                                            normalizedIngredientKey(
+                                                productId = entry.productId,
+                                                unit = entry.unit
+                                            )
+                                        }.sorted() == expectedIngredientKeys
+                                    } else {
+                                        false
+                                    }
+                                }
+
+                        val mealLogId =
+                            existingMealGroup
+                                ?.firstOrNull()
+                                ?.mealLogId
+                                ?.takeIf { it.isNotBlank() }
+                                ?: UUID.randomUUID().toString()
+
+                        val existingMealQuantity =
+                            if (existingMealGroup == null) {
+                                0.0
+                            } else {
+                                val first = existingMealGroup.first()
+
+                                if (first.savedMealId != null) {
+                                    existingMealGroup.maxOf {
+                                        it.mealQuantity
+                                    }.coerceAtLeast(0.0)
+                                } else {
+                                    /*
+                                     * Version-15 meal logs do not have a
+                                     * savedMealId. Infer their original
+                                     * multiplier from ingredient amounts so
+                                     * the first merge keeps the correct total.
+                                     */
+                                    val inferredMultipliers =
+                                        sortedIngredients.mapNotNull { ingredient ->
+                                            val product =
+                                                productsById[ingredient.productId]
+                                                    ?: return@mapNotNull null
+                                            val unit = unitForIngredient(
+                                                ingredient,
+                                                product
+                                            )
+                                            val existingEntry =
+                                                existingMealGroup.firstOrNull { entry ->
+                                                    entry.productId == product.id &&
+                                                        entry.unit.trim().equals(
+                                                            unit.trim(),
+                                                            ignoreCase = true
+                                                        )
+                                                }
+
+                                            if (
+                                                existingEntry == null ||
+                                                ingredient.amount <= 0.0
+                                            ) {
+                                                null
+                                            } else {
+                                                existingEntry.quantity /
+                                                    ingredient.amount
+                                            }
+                                        }.filter { it > 0.0 }
+
+                                    inferredMultipliers
+                                        .average()
+                                        .takeIf { !it.isNaN() && it > 0.0 }
+                                        ?: 1.0
+                                }
+                            }
+
+                        val updatedMealQuantity =
+                            existingMealQuantity + multiplier
+                        val updatedMealQuantityText =
+                            if (updatedMealQuantity % 1.0 == 0.0) {
+                                updatedMealQuantity.toLong().toString()
+                            } else {
+                                String.format(
+                                    Locale.US,
+                                    "%.2f",
+                                    updatedMealQuantity
+                                ).trimEnd('0').trimEnd('.')
+                            }
+
+                        val entriesToAdd =
+                            sortedIngredients.map { ingredient ->
+                                val product =
+                                    productsById[ingredient.productId]
+                                        ?: error(
+                                            "Saved meal contains a missing food."
+                                        )
+
+                                val totalAmount =
+                                    ingredient.amount * multiplier
+
+                                val servings =
+                                    when (ingredient.amountMode) {
+                                        MealAmountMode.LABEL_SERVINGS -> {
+                                            totalAmount
+                                        }
+
+                                        else -> {
+                                            if (
+                                                product.servingQuantity <= 0.0
+                                            ) {
+                                                error(
+                                                    "Saved food has an invalid serving size."
+                                                )
+                                            }
+
+                                            totalAmount /
+                                                product.servingQuantity
+                                        }
+                                    }
+
+                                FoodLogEntry(
+                                    date = activeFoodLogDate,
+                                    productId = product.id,
+                                    quantity = totalAmount,
+                                    unit = unitForIngredient(
+                                        ingredient,
+                                        product
+                                    ),
+                                    mealName = savedMeal.meal.name,
+                                    mealLogId = mealLogId,
+                                    savedMealId = savedMeal.meal.id,
+                                    mealQuantity = updatedMealQuantity,
+                                    productNameSnapshot = product.name,
+                                    calories =
+                                        product.caloriesPerServing * servings,
+                                    proteinGrams =
+                                        product.proteinGramsPerServing * servings,
+                                    carbohydrateGrams =
+                                        product.carbohydrateGramsPerServing * servings,
+                                    fatGrams =
+                                        product.fatGramsPerServing * servings,
+                                    sodiumMilligrams =
+                                        product.sodiumMilligramsPerServing * servings
+                                )
+                            }
+
+                        database.withTransaction {
+                            if (existingMealGroup == null) {
+                                entriesToAdd.forEach { entry ->
+                                    foodDao.addFoodEntry(entry)
+                                }
+                            } else {
+                                val availableExisting =
+                                    existingMealGroup.toMutableList()
+
+                                entriesToAdd.forEach { addedEntry ->
+                                    val existingEntry =
+                                        availableExisting.firstOrNull { current ->
+                                            current.productId ==
+                                                addedEntry.productId &&
+                                                current.unit.trim().equals(
+                                                    addedEntry.unit.trim(),
+                                                    ignoreCase = true
+                                                )
+                                        }
+
+                                    if (existingEntry == null) {
+                                        foodDao.addFoodEntry(
+                                            addedEntry.copy(
+                                                mealLogId = mealLogId
+                                            )
+                                        )
+                                    } else {
+                                        foodDao.updateFoodEntry(
+                                            existingEntry.copy(
+                                                quantity =
+                                                    existingEntry.quantity +
+                                                        addedEntry.quantity,
+                                                mealName = savedMeal.meal.name,
+                                                savedMealId =
+                                                    savedMeal.meal.id,
+                                                mealQuantity =
+                                                    updatedMealQuantity,
+                                                calories =
+                                                    existingEntry.calories +
+                                                        addedEntry.calories,
+                                                proteinGrams =
+                                                    existingEntry.proteinGrams +
+                                                        addedEntry.proteinGrams,
+                                                carbohydrateGrams =
+                                                    existingEntry.carbohydrateGrams +
+                                                        addedEntry.carbohydrateGrams,
+                                                fatGrams =
+                                                    existingEntry.fatGrams +
+                                                        addedEntry.fatGrams,
+                                                sodiumMilligrams =
+                                                    existingEntry.sodiumMilligrams +
+                                                        addedEntry.sodiumMilligrams
+                                            )
+                                        )
+                                        availableExisting.remove(
+                                            existingEntry
+                                        )
+                                    }
+                                }
+
+                                /*
+                                 * Keep every ingredient row in the group on
+                                 * the same accumulated meal quantity, even if
+                                 * the saved-meal recipe changed after the
+                                 * original log was created.
+                                 */
+                                availableExisting.forEach { existingEntry ->
+                                    foodDao.updateFoodEntry(
+                                        existingEntry.copy(
+                                            mealName = savedMeal.meal.name,
+                                            savedMealId = savedMeal.meal.id,
+                                            mealQuantity =
+                                                updatedMealQuantity
+                                        )
+                                    )
+                                }
                             }
                         }
 
@@ -4595,12 +4774,22 @@ fun DailyRebuildApp(
 
                         if (historicalFoodLogDate != null) {
                             returnToHistoricalDay(
-                                "${savedMeal.meal.name} added to the selected day."
+                                if (existingMealGroup == null) {
+                                    "${savedMeal.meal.name} added to the selected day."
+                                } else {
+                                    "${savedMeal.meal.name} quantity updated to " +
+                                        "$updatedMealQuantityText on the selected day."
+                                }
                             )
                         } else {
                             snackbarHostState.showSnackbar(
                                 message =
-                                    "${savedMeal.meal.name} added to today."
+                                    if (existingMealGroup == null) {
+                                        "${savedMeal.meal.name} added to today."
+                                    } else {
+                                        "${savedMeal.meal.name} quantity updated to " +
+                                            "$updatedMealQuantityText."
+                                    }
                             )
                         }
                     } catch (

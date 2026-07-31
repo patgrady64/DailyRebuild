@@ -1898,6 +1898,10 @@ private fun HistoryMealGroup(
                 it.isNotBlank()
             }
             ?: "Saved Meal"
+    val mealQuantity =
+        entries.maxOfOrNull { it.mealQuantity }
+            ?.takeIf { it > 0.0 }
+            ?: 1.0
 
     Text(
         text = mealName,
@@ -1907,7 +1911,8 @@ private fun HistoryMealGroup(
 
     Text(
         text =
-            "${formatHistoryNumber(entries.sumOf { it.calories })} calories  •  " +
+            "Quantity ${formatHistoryNumber(mealQuantity)}  •  " +
+                "${formatHistoryNumber(entries.sumOf { it.calories })} calories  •  " +
                 "${formatHistoryNumber(entries.sumOf { it.proteinGrams })} g protein",
         style = MaterialTheme.typography.bodySmall
     )

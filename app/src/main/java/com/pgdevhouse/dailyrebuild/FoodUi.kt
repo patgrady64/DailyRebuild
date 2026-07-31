@@ -315,6 +315,10 @@ private fun LoggedMealCard(
     val carbohydrates = meal.entries.sumOf { it.carbohydrateGrams }
     val fat = meal.entries.sumOf { it.fatGrams }
     val sodium = meal.entries.sumOf { it.sodiumMilligrams }
+    val mealQuantity =
+        meal.entries.maxOfOrNull { it.mealQuantity }
+            ?.takeIf { it > 0.0 }
+            ?: 1.0
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -338,7 +342,10 @@ private fun LoggedMealCard(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        text = "${meal.entries.size} ingredients · ${formatFoodNumber(calories)} calories",
+                        text =
+                            "Quantity ${formatFoodNumber(mealQuantity)} · " +
+                                "${meal.entries.size} ingredients · " +
+                                "${formatFoodNumber(calories)} calories",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
