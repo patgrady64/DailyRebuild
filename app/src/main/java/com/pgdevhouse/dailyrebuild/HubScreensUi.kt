@@ -1044,6 +1044,7 @@ private fun TodayPriorityCard(
     state: TodayScreenState,
     actions: TodayScreenActions
 ) {
+    var showAnchorDetails by rememberSaveable { mutableStateOf(false) }
     val title: String
     val message: String
     val button: String
@@ -1064,6 +1065,13 @@ private fun TodayPriorityCard(
             message = "No water has been recorded yet."
             button = "Add Water"
             action = actions.onOpenWater
+        }
+        !state.walkCompleted &&
+            DailyRebuildPreferenceIds.LOG_MOVEMENT in state.preferences.enabledLogSections -> {
+            title = "Take a walk"
+            message = "Connected activity will check the Walk anchor automatically after 500 steps or 0.25 miles."
+            button = "Open Movement"
+            action = actions.onOpenMobility
         }
         !state.mobilityCompleted &&
             DailyRebuildPreferenceIds.LOG_MOVEMENT in state.preferences.enabledLogSections -> {
@@ -1100,16 +1108,27 @@ private fun TodayPriorityCard(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Surface(
+                modifier = Modifier.clickable { showAnchorDetails = true },
                 shape = RoundedCornerShape(20.dp),
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.70f)
             ) {
-                Text(
-                    status,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "View anchors ›",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             Text(
                 title,
@@ -1127,6 +1146,143 @@ private fun TodayPriorityCard(
             ) {
                 Text(button)
             }
+        }
+    }
+
+    if (showAnchorDetails) {
+        AlertDialog(
+            onDismissRequest = { showAnchorDetails = false },
+            shape = RoundedCornerShape(24.dp),
+            title = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "Today’s daily anchors",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        "These are the four basic things the daily-anchor count is measuring.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    DailyAnchorDetailsRow(
+                        title = "Food recorded",
+                        description = "At least one food or saved meal has been logged today.",
+                        complete = state.foodRecorded,
+                        actionLabel = "Open Food",
+                        onAction = {
+                            showAnchorDetails = false
+                            actions.onOpenFood()
+                        }
+                    )
+                    DailyAnchorDetailsRow(
+                        title = "Walk",
+                        description = "A walk was completed today. Connected activity marks this automatically after at least 500 steps or 0.25 miles.",
+                        complete = state.walkCompleted,
+                        actionLabel = if (state.walkCompleted) "Mark not done" else "Mark done",
+                        onAction = {
+                            actions.onWalkCompletedChange(!state.walkCompleted)
+                        }
+                    )
+                    DailyAnchorDetailsRow(
+                        title = "Back and shin pain recorded",
+                        description = "Today’s highest back and shin pain values have been recorded.",
+                        complete = state.painRecorded,
+                        actionLabel = "Log Pain",
+                        onAction = {
+                            showAnchorDetails = false
+                            actions.onOpenPain()
+                        }
+                    )
+                    DailyAnchorDetailsRow(
+                        title = "Mobility or stretching",
+                        description = "A mobility or stretching session was completed today.",
+                        complete = state.mobilityCompleted,
+                        actionLabel = "Open Mobility",
+                        onAction = {
+                            showAnchorDetails = false
+                            actions.onOpenMobility()
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAnchorDetails = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun DailyAnchorDetailsRow(
+    title: String,
+    description: String,
+    complete: Boolean,
+    actionLabel: String,
+    onAction: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = if (complete) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f)
+        }
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    if (complete) "✓" else "○",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (complete) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    fontWeight = FontWeight.Bold
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(title, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (complete) "Complete today" else "Not completed yet",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (complete) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+                TextButton(onClick = onAction) {
+                    Text(actionLabel)
+                }
+            }
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -1169,7 +1325,7 @@ private fun DailyAnchorPanel(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         DailyAnchorRow("Food recorded", state.foodRecorded, actions.onFoodRecordedChange)
-        DailyAnchorRow("Walk or intentional movement", state.walkCompleted, actions.onWalkCompletedChange)
+        DailyAnchorRow("Walk", state.walkCompleted, actions.onWalkCompletedChange)
         DailyAnchorRow("Back and shin pain recorded", state.painRecorded, actions.onPainRecordedChange)
         DailyAnchorRow("Mobility or stretching", state.mobilityCompleted, actions.onMobilityCompletedChange)
     }

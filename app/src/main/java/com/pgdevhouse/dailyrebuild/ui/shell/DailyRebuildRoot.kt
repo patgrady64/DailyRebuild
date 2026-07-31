@@ -1548,6 +1548,31 @@ fun DailyRebuildApp(
                 null
         }
 
+    /*
+     * A walk is one of the four daily anchors. Health Connect already gives
+     * Daily Rebuild the day's step and distance totals, but the anchor used to
+     * be a completely separate manual checkbox. Mark it automatically after
+     * connected activity reaches a small, meaningful walking amount. The user
+     * can still correct the checkbox manually afterward.
+     */
+    val walkDetectedFromActivity =
+        displayedActivity.steps >= 500L ||
+            displayedActivity.distanceMiles >= 0.25
+
+    LaunchedEffect(
+        todayDate,
+        displayedActivity.steps,
+        displayedActivity.distanceMiles
+    ) {
+        if (
+            todayDate == LocalDate.now().toString() &&
+            walkDetectedFromActivity &&
+            !walkCompleted
+        ) {
+            walkCompleted = true
+        }
+    }
+
     fun refreshMeetingData() {
         coroutineScope.launch {
             try {
