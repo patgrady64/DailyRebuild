@@ -192,7 +192,6 @@ private fun MigraineHistoryRow(
         }
     }
 }
-
 @Composable
 fun MigraineLogDialog(
     onDismiss: () -> Unit,
@@ -201,241 +200,129 @@ fun MigraineLogDialog(
     val context = LocalContext.current
     val initialDateTime = remember { LocalDateTime.now() }
 
-    var dateText by rememberSaveable {
-        mutableStateOf(initialDateTime.toLocalDate().toString())
-    }
-    var selectedHour by rememberSaveable {
-        mutableIntStateOf(initialDateTime.hour)
-    }
-    var selectedMinute by rememberSaveable {
-        mutableIntStateOf(initialDateTime.minute)
-    }
-    var durationText by rememberSaveable {
-        mutableStateOf("")
-    }
-    var visualAura by rememberSaveable {
-        mutableStateOf(true)
-    }
-    var headPain by rememberSaveable {
-        mutableStateOf(false)
-    }
-    var foggyAfterward by rememberSaveable {
-        mutableStateOf(true)
-    }
-    var notes by rememberSaveable {
-        mutableStateOf("")
-    }
-    var validationMessage by rememberSaveable {
-        mutableStateOf<String?>(null)
-    }
+    var dateText by rememberSaveable { mutableStateOf(initialDateTime.toLocalDate().toString()) }
+    var selectedHour by rememberSaveable { mutableIntStateOf(initialDateTime.hour) }
+    var selectedMinute by rememberSaveable { mutableIntStateOf(initialDateTime.minute) }
+    var durationText by rememberSaveable { mutableStateOf("") }
+    var visualAura by rememberSaveable { mutableStateOf(true) }
+    var headPain by rememberSaveable { mutableStateOf(false) }
+    var foggyAfterward by rememberSaveable { mutableStateOf(true) }
+    var notes by rememberSaveable { mutableStateOf("") }
+    var validationMessage by rememberSaveable { mutableStateOf<String?>(null) }
 
-    val selectedDate =
-        runCatching { LocalDate.parse(dateText) }
-            .getOrDefault(LocalDate.now())
+    val selectedDate = runCatching { LocalDate.parse(dateText) }.getOrDefault(LocalDate.now())
 
-    AlertDialog(
+    RebuildInputDialog(
+        title = "Log migraine or visual aura",
+        subtitle = "Record when it happened, what you experienced, and how long it lasted.",
         onDismissRequest = onDismiss,
-        title = {
-            Text("Log Migraine / Visual Aura")
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 560.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text =
-                        "The date and time default to now. Change them when recording an earlier event.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            DatePickerDialog(
-                                context,
-                                { _, year, month, day ->
-                                    dateText =
-                                        LocalDate.of(
-                                            year,
-                                            month + 1,
-                                            day
-                                        ).toString()
-                                },
-                                selectedDate.year,
-                                selectedDate.monthValue - 1,
-                                selectedDate.dayOfMonth
-                            ).show()
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(
-                            formatMigraineDate(dateText)
-                        )
-                    }
-
-                    OutlinedButton(
-                        onClick = {
-                            TimePickerDialog(
-                                context,
-                                { _, hour, minute ->
-                                    selectedHour = hour
-                                    selectedMinute = minute
-                                },
-                                selectedHour,
-                                selectedMinute,
-                                false
-                            ).show()
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(
-                            formatMigraineTime(
-                                selectedHour,
-                                selectedMinute
-                            )
-                        )
-                    }
-                }
-
-                OutlinedTextField(
-                    value = durationText,
-                    onValueChange = {
-                        durationText =
-                            it.filter(Char::isDigit)
-                                .take(3)
-                    },
-                    label = {
-                        Text("Aura duration in minutes (optional)")
-                    },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number
-                    ),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                MigraineOptionRow(
-                    label = "Visual aura / flickering lines",
-                    checked = visualAura,
-                    onCheckedChange = {
-                        visualAura = it
-                    }
-                )
-
-                MigraineOptionRow(
-                    label = "Head pain",
-                    checked = headPain,
-                    onCheckedChange = {
-                        headPain = it
-                    }
-                )
-
-                MigraineOptionRow(
-                    label = "Felt foggy or out of it afterward",
-                    checked = foggyAfterward,
-                    onCheckedChange = {
-                        foggyAfterward = it
-                    }
-                )
-
-                OutlinedTextField(
-                    value = notes,
-                    onValueChange = {
-                        notes = it
-                    },
-                    label = {
-                        Text("Notes (optional)")
-                    },
-                    minLines = 3,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                validationMessage?.let { message ->
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-
-                Text(
-                    text =
-                        "Call 911 for ongoing or new confusion, trouble speaking, weakness, loss of balance, or sudden vision loss. Do not use this log in place of urgent care.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
+        primaryActionText = "Save event",
+        onPrimaryAction = save@{
+            val date = runCatching { LocalDate.parse(dateText) }.getOrNull()
+            if (date == null) {
+                validationMessage = "Choose a valid date."
+                return@save
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val date =
-                        runCatching {
-                            LocalDate.parse(dateText)
-                        }.getOrNull()
 
-                    if (date == null) {
-                        validationMessage =
-                            "Choose a valid date."
-                        return@TextButton
-                    }
-
-                    val duration =
-                        durationText
-                            .takeIf { it.isNotBlank() }
-                            ?.toIntOrNull()
-
-                    if (
-                        durationText.isNotBlank() &&
-                        duration == null
-                    ) {
-                        validationMessage =
-                            "Enter a valid duration or leave it blank."
-                        return@TextButton
-                    }
-
-                    val occurredAt =
-                        date.atTime(
-                            LocalTime.of(
-                                selectedHour,
-                                selectedMinute
-                            )
-                        ).atZone(
-                            ZoneId.systemDefault()
-                        ).toInstant()
-                            .toEpochMilli()
-
-                    onSave(
-                        MigraineLogDraft(
-                            date = date.toString(),
-                            occurredAt = occurredAt,
-                            auraDurationMinutes = duration,
-                            visualAura = visualAura,
-                            headPain = headPain,
-                            foggyAfterward = foggyAfterward,
-                            notes = notes.trim()
-                        )
-                    )
-                }
-            ) {
-                Text("Save Event")
+            val duration = durationText.takeIf { it.isNotBlank() }?.toIntOrNull()
+            if (durationText.isNotBlank() && duration == null) {
+                validationMessage = "Enter a valid duration or leave it blank."
+                return@save
             }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onDismiss
-            ) {
-                Text("Cancel")
-            }
+
+            val occurredAt = date.atTime(LocalTime.of(selectedHour, selectedMinute))
+                .atZone(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
+
+            onSave(
+                MigraineLogDraft(
+                    date = date.toString(),
+                    occurredAt = occurredAt,
+                    auraDurationMinutes = duration,
+                    visualAura = visualAura,
+                    headPain = headPain,
+                    foggyAfterward = foggyAfterward,
+                    notes = notes.trim()
+                )
+            )
         }
-    )
+    ) {
+        RebuildDialogInfoPanel {
+            Text(
+                text = "The date and time default to now. Change them when recording an earlier event.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = {
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, day ->
+                            dateText = LocalDate.of(year, month + 1, day).toString()
+                            validationMessage = null
+                        },
+                        selectedDate.year,
+                        selectedDate.monthValue - 1,
+                        selectedDate.dayOfMonth
+                    ).show()
+                },
+                modifier = Modifier.weight(1f)
+            ) { Text(formatMigraineDate(dateText)) }
+
+            OutlinedButton(
+                onClick = {
+                    TimePickerDialog(
+                        context,
+                        { _, hour, minute -> selectedHour = hour; selectedMinute = minute },
+                        selectedHour,
+                        selectedMinute,
+                        false
+                    ).show()
+                },
+                modifier = Modifier.weight(1f)
+            ) { Text(formatMigraineTime(selectedHour, selectedMinute)) }
+        }
+
+        OutlinedTextField(
+            value = durationText,
+            onValueChange = { durationText = it.filter(Char::isDigit).take(3); validationMessage = null },
+            label = { Text("Aura duration") },
+            suffix = { Text("minutes") },
+            supportingText = { Text("Optional") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Text("Symptoms", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        MigraineOptionRow("Visual aura or flickering lines", visualAura) { visualAura = it }
+        MigraineOptionRow("Head pain", headPain) { headPain = it }
+        MigraineOptionRow("Felt foggy or out of it afterward", foggyAfterward) { foggyAfterward = it }
+
+        OutlinedTextField(
+            value = notes,
+            onValueChange = { notes = it },
+            label = { Text("Notes (optional)") },
+            minLines = 3,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        validationMessage?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+
+        RebuildDialogInfoPanel(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)) {
+            Text(
+                text = "Call 911 for ongoing or new confusion, trouble speaking, weakness, loss of balance, or sudden vision loss. Do not use this log in place of urgent care.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+        }
+    }
 }
 
 @Composable

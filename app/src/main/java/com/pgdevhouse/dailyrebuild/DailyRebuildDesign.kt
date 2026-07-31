@@ -22,6 +22,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -98,6 +99,15 @@ private val DailyRebuildDarkColors = darkColorScheme(
     onError = Color(0xFF690005)
 )
 
+
+private val DailyRebuildShapes = Shapes(
+    extraSmall = RoundedCornerShape(10.dp),
+    small = RoundedCornerShape(14.dp),
+    medium = RoundedCornerShape(20.dp),
+    large = RoundedCornerShape(28.dp),
+    extraLarge = RoundedCornerShape(32.dp)
+)
+
 private val DailyRebuildTypography = Typography(
     headlineLarge = Typography().headlineLarge.copy(
         fontSize = 32.sp,
@@ -145,6 +155,7 @@ fun DailyRebuildAppTheme(
             DailyRebuildLightColors
         },
         typography = DailyRebuildTypography,
+        shapes = DailyRebuildShapes,
         content = content
     )
 }

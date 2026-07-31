@@ -39,115 +39,57 @@ fun DailyPainDialog(
     onCorrectValues: (backPain: Float, shinPain: Float) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var selectedBackPain by remember(currentBackPain) {
-        mutableFloatStateOf(currentBackPain)
-    }
-    var selectedShinPain by remember(currentShinPain) {
-        mutableFloatStateOf(currentShinPain)
-    }
-    var correctionMode by remember {
-        mutableStateOf(false)
-    }
+    var selectedBackPain by remember(currentBackPain) { mutableFloatStateOf(currentBackPain) }
+    var selectedShinPain by remember(currentShinPain) { mutableFloatStateOf(currentShinPain) }
+    var correctionMode by remember { mutableStateOf(false) }
 
-    AlertDialog(
+    RebuildInputDialog(
+        title = if (correctionMode) "Correct today’s pain" else "Pain today",
+        subtitle = when {
+            correctionMode -> "Set the exact values that should be saved for today."
+            wasRecordedToday -> "Quick logging can raise today’s high values but will not lower them."
+            else -> "Record the highest level experienced so far today."
+        },
         onDismissRequest = onDismiss,
-        title = {
-            Text(
-                if (correctionMode) {
-                    "Correct Today's Pain"
-                } else {
-                    "Pain Today"
-                }
-            )
+        primaryActionText = when {
+            correctionMode -> "Save correction"
+            wasRecordedToday -> "Update daily highs"
+            else -> "Save pain levels"
         },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Text(
-                    text = when {
-                        correctionMode ->
-                            "Set the exact values that should be saved for today. " +
-                                "Correction mode can lower a mistaken value."
-
-                        wasRecordedToday ->
-                            "These are today's highest recorded values. Quick logging " +
-                                "can raise either value, but it will not lower one."
-
-                        else ->
-                            "Record the highest back pain and shin-splint pain you " +
-                                "have experienced so far today."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+        onPrimaryAction = {
+            if (correctionMode) {
+                onCorrectValues(
+                    correctDailyPainValue(selectedBackPain),
+                    correctDailyPainValue(selectedShinPain)
                 )
-
-                if (wasRecordedToday) {
-                    TextButton(
-                        onClick = { correctionMode = !correctionMode }
-                    ) {
-                        Text(
-                            if (correctionMode) {
-                                "Return to Quick Log"
-                            } else {
-                                "Correct a Mistaken Value"
-                            }
-                        )
-                    }
-                }
-
-                DailyPainSlider(
-                    label = "Back pain",
-                    value = selectedBackPain,
-                    onValueChange = { selectedBackPain = it }
+            } else {
+                onSaveDailyHighs(
+                    recordDailyHighestPain(currentBackPain, selectedBackPain),
+                    recordDailyHighestPain(currentShinPain, selectedShinPain)
                 )
-
-                DailyPainSlider(
-                    label = "Shin-splint pain",
-                    value = selectedShinPain,
-                    onValueChange = { selectedShinPain = it }
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    if (correctionMode) {
-                        onCorrectValues(
-                            correctDailyPainValue(selectedBackPain),
-                            correctDailyPainValue(selectedShinPain)
-                        )
-                    } else {
-                        onSaveDailyHighs(
-                            recordDailyHighestPain(
-                                currentBackPain,
-                                selectedBackPain
-                            ),
-                            recordDailyHighestPain(
-                                currentShinPain,
-                                selectedShinPain
-                            )
-                        )
-                    }
-                }
-            ) {
-                Text(
-                    if (correctionMode) {
-                        "Save Correction"
-                    } else if (wasRecordedToday) {
-                        "Update Daily Highs"
-                    } else {
-                        "Save"
-                    }
-                )
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
             }
         }
-    )
+    ) {
+        if (wasRecordedToday) {
+            RebuildDialogInfoPanel {
+                Text(
+                    text = if (correctionMode) {
+                        "Correction mode may lower a value that was entered incorrectly."
+                    } else {
+                        "Already recorded today. Move either slider higher to update the daily high."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(onClick = { correctionMode = !correctionMode }) {
+                    Text(if (correctionMode) "Return to quick log" else "Correct a mistaken value")
+                }
+            }
+        }
+
+        DailyPainSlider("Back pain", selectedBackPain) { selectedBackPain = it }
+        DailyPainSlider("Shin-splint pain", selectedShinPain) { selectedShinPain = it }
+    }
 }
 
 @Composable

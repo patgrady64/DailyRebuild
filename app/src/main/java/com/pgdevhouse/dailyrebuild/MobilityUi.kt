@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -1085,7 +1086,7 @@ private fun RandomMobilityRoutineDialog(
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .safeDrawingPadding(),
+                .safeDrawingPadding().imePadding(),
             color = MaterialTheme.colorScheme.background
         ) {
             when (screen) {
@@ -1822,114 +1823,60 @@ private fun MobilityFinishPage(
         }
     }
 }
-
 @Composable
 private fun QuickMobilityLogDialog(
     isSaving: Boolean,
     onDismiss: () -> Unit,
     onSave: (MobilitySessionDraft) -> Unit
 ) {
-    var minutesText by rememberSaveable {
-        mutableStateOf("")
-    }
-
-    var notes by rememberSaveable {
-        mutableStateOf("")
-    }
-
+    var minutesText by rememberSaveable { mutableStateOf("") }
+    var notes by rememberSaveable { mutableStateOf("") }
     val minutes = minutesText.toIntOrNull()
 
-    AlertDialog(
-        onDismissRequest = {
-            if (!isSaving) {
-                onDismiss()
-            }
-        },
-        title = {
-            Text("Quick Log Mobility")
-        },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    "Use this when you stretched or completed mobility without the guided timer."
+    RebuildInputDialog(
+        title = "Quick log mobility",
+        subtitle = "Use this after stretching or mobility work completed without the guided timer.",
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        primaryActionText = if (isSaving) "Saving…" else "Save session",
+        onPrimaryAction = {
+            onSave(
+                MobilitySessionDraft(
+                    routineName = "Independent Mobility",
+                    plannedMovementIds = emptyList(),
+                    completedMovementIds = emptyList(),
+                    skippedMovementIds = emptyList(),
+                    movementSeconds = 0,
+                    elapsedSeconds = (minutes ?: 0) * 60,
+                    notes = notes.trim()
                 )
+            )
+        },
+        primaryActionEnabled = !isSaving && minutes != null && minutes > 0,
+        secondaryActionEnabled = !isSaving
+    ) {
+        OutlinedTextField(
+            value = minutesText,
+            onValueChange = { minutesText = it.filter(Char::isDigit).take(3) },
+            label = { Text("Time completed") },
+            suffix = { Text("minutes") },
+            supportingText = {
+                Text(if (minutesText.isBlank() || (minutes ?: 0) > 0) "Enter the total active time." else "Enter at least 1 minute.")
+            },
+            isError = minutesText.isNotBlank() && (minutes ?: 0) <= 0,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
 
-                OutlinedTextField(
-                    value = minutesText,
-                    onValueChange = { value ->
-                        minutesText =
-                            value
-                                .filter { it.isDigit() }
-                                .take(3)
-                    },
-                    label = {
-                        Text("Minutes")
-                    },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number
-                    ),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = notes,
-                    onValueChange = {
-                        notes = it
-                    },
-                    label = {
-                        Text("What did you do? (optional)")
-                    },
-                    minLines = 3,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    onSave(
-                        MobilitySessionDraft(
-                            routineName =
-                                "Independent Mobility",
-                            plannedMovementIds =
-                                emptyList(),
-                            completedMovementIds =
-                                emptyList(),
-                            skippedMovementIds =
-                                emptyList(),
-                            movementSeconds = 0,
-                            elapsedSeconds =
-                                (minutes ?: 0) * 60,
-                            notes = notes.trim()
-                        )
-                    )
-                },
-                enabled =
-                    !isSaving &&
-                        minutes != null &&
-                        minutes > 0
-            ) {
-                Text(
-                    if (isSaving) {
-                        "Saving…"
-                    } else {
-                        "Save"
-                    }
-                )
-            }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onDismiss,
-                enabled = !isSaving
-            ) {
-                Text("Cancel")
-            }
-        }
-    )
+        OutlinedTextField(
+            value = notes,
+            onValueChange = { notes = it },
+            label = { Text("What did you do? (optional)") },
+            placeholder = { Text("Example: calf stretch and ankle mobility") },
+            minLines = 3,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 }
 
 @Composable

@@ -4282,125 +4282,78 @@ fun DailyRebuildApp(
     }
 
     if (showBarcodeVerificationDialog) {
-        AlertDialog(
+        val barcodeLengthIsValid =
+            pendingBarcodeText.length == 8 ||
+                pendingBarcodeText.length == 12 ||
+                pendingBarcodeText.length == 13
+
+        RebuildInputDialog(
+            title = "Verify barcode",
+            subtitle = "Compare the scanned number with the digits printed beneath the barcode.",
             onDismissRequest = {
-                showBarcodeVerificationDialog =
-                    false
+                showBarcodeVerificationDialog = false
             },
+            primaryActionText = "Look up food",
+            onPrimaryAction = {
+                val verifiedBarcode = pendingBarcodeText
+                val forMealBuilder = pendingScanForMealBuilder
 
-            title = {
-                Text("Verify Barcode")
+                showBarcodeVerificationDialog = false
+
+                lookupFoodBarcode(
+                    barcodeText = verifiedBarcode,
+                    forMealBuilder = forMealBuilder
+                )
             },
-
-            text = {
-                Column(
-                    verticalArrangement =
-                        Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text =
-                            "Compare this with the digits printed " +
-                                "under the barcode. Correct any digits " +
-                                "before looking up the food."
-                    )
-
-                    OutlinedTextField(
-                        value =
-                            pendingBarcodeText,
-
-                        onValueChange = { newValue ->
-                            pendingBarcodeText =
-                                newValue.filter {
-                                    it.isDigit()
-                                }
-                        },
-
-                        label = {
-                            Text("Printed barcode digits")
-                        },
-
-                        supportingText = {
-                            Text(
-                                "Food barcodes normally contain " +
-                                    "8, 12, or 13 digits. " +
-                                    "This one has ${pendingBarcodeText.length} digits."
-                            )
-                        },
-
-                        singleLine = true,
-
-                        keyboardOptions =
-                            KeyboardOptions(
-                                keyboardType =
-                                    KeyboardType.Number
-                            ),
-
-                        modifier =
-                            Modifier.fillMaxWidth()
-                    )
-                }
-            },
-
-            confirmButton = {
-                TextButton(
-                    enabled =
-                        pendingBarcodeText.length == 8 ||
-                            pendingBarcodeText.length == 12 ||
-                            pendingBarcodeText.length == 13,
-
-                    onClick = {
-                        val verifiedBarcode =
-                            pendingBarcodeText
-
-                        val forMealBuilder =
-                            pendingScanForMealBuilder
-
-                        showBarcodeVerificationDialog =
-                            false
-
-                        lookupFoodBarcode(
-                            barcodeText =
-                                verifiedBarcode,
-
-                            forMealBuilder =
-                                forMealBuilder
-                        )
-                    }
-                ) {
-                    Text("Look Up")
-                }
-            },
-
-            dismissButton = {
-                Row {
-                    TextButton(
-                        onClick = {
-                            showBarcodeVerificationDialog =
-                                false
-                        }
-                    ) {
-                        Text("Cancel")
-                    }
-
-                    TextButton(
-                        onClick = {
-                            val forMealBuilder =
-                                pendingScanForMealBuilder
-
-                            showBarcodeVerificationDialog =
-                                false
-
-                            startFoodBarcodeScan(
-                                forMealBuilder =
-                                    forMealBuilder
-                            )
-                        }
-                    ) {
-                        Text("Scan Again")
-                    }
-                }
+            primaryActionEnabled = barcodeLengthIsValid
+        ) {
+            RebuildDialogInfoPanel {
+                Text(
+                    text = "Correct any digits the scanner missed before continuing.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    text = "Most food barcodes contain 8, 12, or 13 digits.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-        )
+
+            OutlinedTextField(
+                value = pendingBarcodeText,
+                onValueChange = { newValue ->
+                    pendingBarcodeText = newValue.filter(Char::isDigit)
+                },
+                label = { Text("Printed barcode digits") },
+                supportingText = {
+                    Text(
+                        if (barcodeLengthIsValid) {
+                            "${pendingBarcodeText.length} digits — ready to look up."
+                        } else {
+                            "${pendingBarcodeText.length} digits entered."
+                        }
+                    )
+                },
+                isError = pendingBarcodeText.isNotBlank() && !barcodeLengthIsValid,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            OutlinedButton(
+                onClick = {
+                    val forMealBuilder = pendingScanForMealBuilder
+                    showBarcodeVerificationDialog = false
+                    startFoodBarcodeScan(forMealBuilder = forMealBuilder)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text("Scan barcode again")
+            }
+        }
     }
 
     barcodeViewModel.localMatch?.let { localProduct ->

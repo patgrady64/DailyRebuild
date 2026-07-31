@@ -15,7 +15,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedButton
@@ -498,7 +497,6 @@ private fun FoodEntryRow(
         }
     }
 }
-
 @Composable
 fun FoodQuantityEditDialog(
     entry: FoodLogEntry,
@@ -507,81 +505,63 @@ fun FoodQuantityEditDialog(
     onSave: (Double) -> Unit
 ) {
     var quantityText by rememberSaveable(entry.id) {
-        mutableStateOf(
-            entry.quantity.toEditableFoodAmount()
-        )
+        mutableStateOf(entry.quantity.toEditableFoodAmount())
     }
 
-    val parsedQuantity =
-        parseFoodAmount(quantityText)
+    val parsedQuantity = parseFoodAmount(quantityText)
+    val isValid = parsedQuantity != null && parsedQuantity > 0.0
 
-    val isValid =
-        parsedQuantity != null &&
-            parsedQuantity > 0.0
-
-    androidx.compose.material3.AlertDialog(
+    RebuildInputDialog(
+        title = "Update food quantity",
+        subtitle = entry.productNameSnapshot,
         onDismissRequest = {
-            if (!isSaving) {
-                onDismiss()
-            }
+            if (!isSaving) onDismiss()
         },
-        title = {
-            Text("Update quantity")
+        primaryActionText = if (isSaving) "Updating…" else "Update quantity",
+        onPrimaryAction = {
+            parsedQuantity?.let(onSave)
         },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+        primaryActionEnabled = isValid && !isSaving,
+        secondaryActionEnabled = !isSaving
+    ) {
+        RebuildDialogInfoPanel {
+            Text(
+                text = "Current amount",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "${formatFoodNumber(entry.quantity)} ${entry.unit}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Calories and every nutrition total will be recalculated automatically.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        OutlinedTextField(
+            value = quantityText,
+            onValueChange = { quantityText = it },
+            label = { Text("New quantity") },
+            suffix = { Text(entry.unit) },
+            supportingText = {
                 Text(
-                    text = entry.productNameSnapshot,
-                    style = MaterialTheme.typography.titleMedium
-                )
-                OutlinedTextField(
-                    value = quantityText,
-                    onValueChange = {
-                        quantityText = it
-                    },
-                    label = {
-                        Text("Quantity (${entry.unit})")
-                    },
-                    supportingText = {
-                        Text(
-                            "Calories and nutrition totals will update with the new quantity."
-                        )
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Text
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = isValid && !isSaving,
-                onClick = {
-                    parsedQuantity?.let(onSave)
-                }
-            ) {
-                Text(
-                    if (isSaving) {
-                        "Updating…"
+                    if (quantityText.isBlank() || isValid) {
+                        "Whole numbers, decimals, and fractions are accepted."
                     } else {
-                        "Update"
+                        "Enter a quantity greater than zero."
                     }
                 )
-            }
-        },
-        dismissButton = {
-            TextButton(
-                enabled = !isSaving,
-                onClick = onDismiss
-            ) {
-                Text("Cancel")
-            }
-        }
-    )
+            },
+            isError = quantityText.isNotBlank() && !isValid,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 }
 
 @Composable
@@ -755,6 +735,16 @@ fun ManualFoodDialog(
         )
     }
 
+    var showOptionalProductDetails by rememberSaveable(
+        initialFoodKey
+    ) {
+        mutableStateOf(
+            !initialFood?.barcode.isNullOrBlank() ||
+                initialFood?.packageQuantity != null ||
+                !initialFood?.packageUnit.isNullOrBlank()
+        )
+    }
+
     /*
      * The food form may already be open when a barcode scan finishes.
      * In that case, rememberSaveable can retain the blank values that
@@ -827,6 +817,11 @@ fun ManualFoodDialog(
         enterAsLabelServings =
             initialFood != null &&
                 initialFood.servingQuantity < 1.0
+
+        showOptionalProductDetails =
+            !initialFood?.barcode.isNullOrBlank() ||
+                initialFood?.packageQuantity != null ||
+                !initialFood?.packageUnit.isNullOrBlank()
 
         quantityEatenText = "1"
 
@@ -922,6 +917,115 @@ fun ManualFoodDialog(
                 fatPerServing >= 0.0 &&
                 sodiumPerServing >= 0.0
 
+    val validationMessage =
+        when {
+            productName.isBlank() ->
+                "Enter a food name."
+
+            servingQuantity <= 0.0 ->
+                "Enter a serving amount greater than zero."
+
+            servingUnit.isBlank() ->
+                "Enter the serving unit shown on the label."
+
+            !productOnlyMode && amountEntered <= 0.0 ->
+                "Enter how much you ate."
+
+            else ->
+                if (productOnlyMode) {
+                    "Review the food details before saving."
+                } else {
+                    "Review the calculated nutrition before adding this food."
+                }
+        }
+
+    val submitFood: () -> Unit = {
+        val product = FoodProduct(
+            id = initialFood?.productId ?: 0,
+            barcode =
+                barcodeText
+                    .trim()
+                    .ifBlank {
+                        null
+                    },
+            name = productName.trim(),
+            brand = brand.trim(),
+            caloriesPerServing = caloriesPerServing,
+            proteinGramsPerServing = proteinPerServing,
+            carbohydrateGramsPerServing = carbohydratePerServing,
+            fatGramsPerServing = fatPerServing,
+            sodiumMilligramsPerServing = sodiumPerServing,
+            servingQuantity = servingQuantity,
+            servingUnit = servingUnit.trim(),
+            packageQuantity = packageQuantity,
+            packageUnit =
+                packageUnit
+                    .trim()
+                    .ifBlank {
+                        null
+                    },
+            isFavorite = saveAsFavorite
+        )
+
+        val draft = ManualFoodDraft(
+            product = product,
+            quantityEaten =
+                if (productOnlyMode) {
+                    0.0
+                } else {
+                    amountEntered
+                },
+            unit =
+                if (productOnlyMode) {
+                    servingUnit.trim()
+                } else {
+                    foodEntryUnit
+                },
+            mealName =
+                if (productOnlyMode) {
+                    null
+                } else {
+                    mealName
+                        .trim()
+                        .ifBlank {
+                            null
+                        }
+                },
+            calories =
+                if (productOnlyMode) {
+                    0.0
+                } else {
+                    calculatedCalories
+                },
+            proteinGrams =
+                if (productOnlyMode) {
+                    0.0
+                } else {
+                    calculatedProtein
+                },
+            carbohydrateGrams =
+                if (productOnlyMode) {
+                    0.0
+                } else {
+                    calculatedCarbohydrates
+                },
+            fatGrams =
+                if (productOnlyMode) {
+                    0.0
+                } else {
+                    calculatedFat
+                },
+            sodiumMilligrams =
+                if (productOnlyMode) {
+                    0.0
+                } else {
+                    calculatedSodium
+                }
+        )
+
+        onSave(draft)
+    }
+
     Dialog(
         onDismissRequest = {
             if (!isSaving) {
@@ -940,662 +1044,777 @@ fun ManualFoodDialog(
             color = MaterialTheme.colorScheme.background
         ) {
             Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                modifier = Modifier.fillMaxSize()
             ) {
-                RebuildStatusBadge(
-                    text = if (productOnlyMode) "Saved food" else "Daily entry"
-                )
-                Text(
-                    text = dialogTitle
-                        ?: if (productOnlyMode) {
-                            "Create or edit food"
-                        } else {
-                            "Add food"
-                        },
-                    style = MaterialTheme.typography.headlineMedium
-                )
-                Text(
-                    text = if (productOnlyMode) {
-                        "Build a reusable food record from the package label."
-                    } else {
-                        "Choose the amount eaten and review the calculated nutrition before saving."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                if (productOnlyMode && onScanBarcode != null) {
-                    Button(
-                        onClick = onScanBarcode,
-                        enabled =
-                            !isSaving &&
-                                !isScanningBarcode,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text =
-                                if (isScanningBarcode) {
-                                    "Scanning / Looking Up..."
-                                } else {
-                                    "Scan New Food Barcode"
-                                }
-                        )
-                    }
-
-                    Text(
-                        text =
-                            "Scan the package to fill in available " +
-                                "product information, or enter it manually.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
-                if (initialFood != null) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp)
-                        ) {
-                            Text(
-                                text =
-                                    if (initialFood.productId != null) {
-                                        "Saved Product"
-                                    } else {
-                                        "Scanned Product"
-                                    },
-                                fontWeight = FontWeight.Bold
-                            )
-
-                            if (barcodeText.isNotBlank()) {
-                                Text(
-                                    text =
-                                        "Barcode found: $barcodeText"
-                                )
-                            }
-
-                            if (
-                                initialFood
-                                    .originalServingSize
-                                    .isNotBlank()
-                            ) {
-                                Text(
-                                    text =
-                                        "Database serving: " +
-                                                initialFood
-                                                    .originalServingSize
-                                )
-                            }
-
-                            Text(
-                                text =
-                                    "Review and correct the label " +
-                                            "information before adding it.",
-                                style =
-                                    MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = barcodeText,
-
-                    onValueChange = { newValue ->
-                        barcodeText =
-                            newValue.filter {
-                                it.isDigit()
-                            }
-                    },
-
-                    label = {
-                        Text("Barcode — optional")
-                    },
-
-                    supportingText = {
-                        Text(
-                            "Correct this if the scanner did not " +
-                                "match the digits printed on the package."
-                        )
-                    },
-
-                    singleLine = true,
-
-                    keyboardOptions =
-                        KeyboardOptions(
-                            keyboardType =
-                                KeyboardType.Number
-                        ),
-
-                    modifier =
-                        Modifier.fillMaxWidth()
-                )
-
-                Text(
-                    text =
-                        if (productOnlyMode) {
-                            "Enter the product name and the serving shown " +
-                                "on its nutrition label."
-                        } else {
-                            "Enter the serving shown on the nutrition label, " +
-                                "then enter how much you actually ate."
-                        }
-                )
-
-                OutlinedTextField(
-                    value = productName,
-                    onValueChange = {
-                        productName = it
-                    },
-                    label = {
-                        Text("Food name")
-                    },
-                    placeholder = {
-                        Text("Example: Whole Wheat Bread")
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = brand,
-                    onValueChange = {
-                        brand = it
-                    },
-                    label = {
-                        Text("Brand — optional")
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Text(
-                    text = "Nutrition per label serving",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-
-                NumberField(
-                    value = caloriesPerServingText,
-                    onValueChange = {
-                        caloriesPerServingText = it
-                    },
-                    label = "Calories"
-                )
-
-                NumberField(
-                    value = proteinPerServingText,
-                    onValueChange = {
-                        proteinPerServingText = it
-                    },
-                    label = "Protein grams — optional"
-                )
-
-                NumberField(
-                    value = carbohydratePerServingText,
-                    onValueChange = {
-                        carbohydratePerServingText = it
-                    },
-                    label = "Carbohydrate grams — optional"
-                )
-
-                NumberField(
-                    value = fatPerServingText,
-                    onValueChange = {
-                        fatPerServingText = it
-                    },
-                    label = "Fat grams — optional"
-                )
-
-                NumberField(
-                    value = sodiumPerServingText,
-                    onValueChange = {
-                        sodiumPerServingText = it
-                    },
-                    label = "Sodium milligrams — optional"
-                )
-
-                HorizontalDivider()
-
-                Text(
-                    text = "Label serving size",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Text(
-                    text =
-                        "Example: if the label says 2 slices, enter " +
-                                "2 and slices."
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement =
-                        Arrangement.spacedBy(8.dp)
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 ) {
-                    OutlinedTextField(
-                        value = servingQuantityText,
-
-                        onValueChange = { newValue ->
-                            val filteredValue =
-                                newValue.filter {
-                                    it.isDigit() ||
-                                            it == '.' ||
-                                            it == '/' ||
-                                            it == ' '
-                                }
-
-                            if (
-                                filteredValue.count { it == '/' } <= 1 &&
-                                filteredValue.count { it == '.' } <= 1
-                            ) {
-                                servingQuantityText = filteredValue
-                            }
-                        },
-
-                        label = {
-                            Text("Serving amount")
-                        },
-
-                        placeholder = {
-                            Text("Example: 1/4")
-                        },
-
-                        singleLine = true,
-
-                        keyboardOptions = KeyboardOptions(
-                            /*
-                             * Do not use Decimal here.
-                             * URI requests a full keyboard suited to
-                             * text containing characters such as "/".
-                             */
-                            keyboardType = KeyboardType.Uri
-                        ),
-
-                        modifier = Modifier.weight(0.4f)
-                    )
-
-                    OutlinedTextField(
-                        value = servingUnit,
-                        onValueChange = {
-                            servingUnit = it
-                        },
-                        label = {
-                            Text("Unit")
-                        },
-                        placeholder = {
-                            Text("slices")
-                        },
-                        singleLine = true,
-                        modifier = Modifier.weight(0.6f)
-                    )
-                }
-
-                HorizontalDivider()
-
-                Text(
-                    text = "Package information — optional",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Text(
-                    text =
-                        "This records details such as 12 patties in a pack. " +
-                                "Nutrition is still calculated from the label serving."
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement =
-                        Arrangement.spacedBy(8.dp)
-                ) {
-                    NumberField(
-                        value = packageQuantityText,
-
-                        onValueChange = {
-                            packageQuantityText = it
-                        },
-
-                        label = "Package amount",
-
-                        allowFractions = true,
-
-                        modifier = Modifier.weight(0.4f)
-                    )
-
-                    OutlinedTextField(
-                        value = packageUnit,
-                        onValueChange = {
-                            packageUnit = it
-                        },
-                        label = {
-                            Text("Package unit")
-                        },
-                        placeholder = {
-                            Text("patties")
-                        },
-                        singleLine = true,
-                        modifier = Modifier.weight(0.6f)
-                    )
-                }
-
-                HorizontalDivider()
-
-                if (!productOnlyMode) {
-                    Text(
-                        text = "Amount eaten",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Text(
-                        text = "How do you want to enter this amount?"
-                    )
-
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement =
-                            Arrangement.spacedBy(8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 18.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        if (enterAsLabelServings) {
-                            Button(
-                                onClick = {
-                                    enterAsLabelServings = true
-                                },
-                                modifier = Modifier.weight(1f)
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            RebuildStatusBadge(
+                                text =
+                                    if (productOnlyMode) {
+                                        "Saved food"
+                                    } else {
+                                        "Food log"
+                                    },
+                                backgroundColor = MaterialTheme.colorScheme.surface,
+                                contentColor = MaterialTheme.colorScheme.primary
+                            )
+
+                            Text(
+                                text =
+                                    dialogTitle
+                                        ?: if (productOnlyMode) {
+                                            "Create or edit food"
+                                        } else {
+                                            "Add food"
+                                        },
+                                style = MaterialTheme.typography.headlineMedium
+                            )
+
+                            Text(
+                                text =
+                                    if (productOnlyMode) {
+                                        "Create a clean, reusable food record from the nutrition label."
+                                    } else {
+                                        "Enter the food, choose the amount eaten, and check the totals before adding it."
+                                    },
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+
+                        TextButton(
+                            onClick = onDismiss,
+                            enabled = !isSaving
+                        ) {
+                            Text("Close")
+                        }
+                    }
+                }
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    FoodFormSectionCard(
+                        title = "Food details",
+                        subtitle = "Start with the name. Barcode and package details are optional."
+                    ) {
+                        if (initialFood != null) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                             ) {
-                                Text("Label Servings")
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = {
-                                    enterAsLabelServings = true
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Label Servings")
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text =
+                                            if (initialFood.productId != null) {
+                                                "Saved food loaded"
+                                            } else {
+                                                "Barcode result loaded"
+                                            },
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+
+                                    if (barcodeText.isNotBlank()) {
+                                        Text(
+                                            text = "Barcode $barcodeText",
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
+
+                                    if (initialFood.originalServingSize.isNotBlank()) {
+                                        Text(
+                                            text =
+                                                "Source serving: " +
+                                                    initialFood.originalServingSize,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+
+                                    Text(
+                                        text = "Review the fields below before saving.",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
                             }
                         }
 
-                        if (!enterAsLabelServings) {
-                            Button(
-                                onClick = {
-                                    enterAsLabelServings = false
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Measured Amount")
-                            }
-                        } else {
+                        if (onScanBarcode != null) {
                             OutlinedButton(
-                                onClick = {
-                                    enterAsLabelServings = false
-                                },
-                                modifier = Modifier.weight(1f)
+                                onClick = onScanBarcode,
+                                enabled = !isScanningBarcode && !isSaving,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp)
                             ) {
-                                Text("Measured Amount")
+                                Text(
+                                    if (isScanningBarcode) {
+                                        "Opening scanner..."
+                                    } else if (barcodeText.isBlank()) {
+                                        "Scan a barcode"
+                                    } else {
+                                        "Scan a different barcode"
+                                    }
+                                )
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = productName,
+                            onValueChange = {
+                                productName = it
+                            },
+                            label = {
+                                Text("Food name")
+                            },
+                            placeholder = {
+                                Text("Example: Mashed Potatoes")
+                            },
+                            supportingText = {
+                                Text(
+                                    if (productName.isBlank()) {
+                                        "Required"
+                                    } else {
+                                        "This is the name shown in your food log."
+                                    }
+                                )
+                            },
+                            isError = productName.isBlank(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        OutlinedTextField(
+                            value = brand,
+                            onValueChange = {
+                                brand = it
+                            },
+                            label = {
+                                Text("Brand")
+                            },
+                            placeholder = {
+                                Text("Optional")
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(
+                                    horizontal = 10.dp,
+                                    vertical = 4.dp
+                                ),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = saveAsFavorite,
+                                    onCheckedChange = {
+                                        saveAsFavorite = it
+                                    }
+                                )
+
+                                Column(
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = "Favorite food",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        text = "Keep it easy to find next time.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        TextButton(
+                            onClick = {
+                                showOptionalProductDetails =
+                                    !showOptionalProductDetails
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                if (showOptionalProductDetails) {
+                                    "Hide optional product details"
+                                } else {
+                                    "Show barcode and package details"
+                                }
+                            )
+                        }
+
+                        if (showOptionalProductDetails) {
+                            OutlinedTextField(
+                                value = barcodeText,
+                                onValueChange = { newValue ->
+                                    barcodeText =
+                                        newValue.filter {
+                                            it.isDigit()
+                                        }
+                                },
+                                label = {
+                                    Text("Barcode")
+                                },
+                                placeholder = {
+                                    Text("Optional")
+                                },
+                                supportingText = {
+                                    Text("Use the digits printed under the barcode.")
+                                },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Number
+                                ),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Text(
+                                text = "Package size",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+
+                            Text(
+                                text =
+                                    "Optional. Example: 12 patties. Nutrition still uses the label serving below.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                NumberField(
+                                    value = packageQuantityText,
+                                    onValueChange = {
+                                        packageQuantityText = it
+                                    },
+                                    label = "Amount",
+                                    allowFractions = true,
+                                    modifier = Modifier.weight(0.4f)
+                                )
+
+                                OutlinedTextField(
+                                    value = packageUnit,
+                                    onValueChange = {
+                                        packageUnit = it
+                                    },
+                                    label = {
+                                        Text("Unit")
+                                    },
+                                    placeholder = {
+                                        Text("patties")
+                                    },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier.weight(0.6f)
+                                )
                             }
                         }
                     }
 
-                    Text(
-                        text =
-                            if (enterAsLabelServings) {
-                                "Enter how many nutrition-label servings you ate."
-                            } else {
-                                "Enter how many $servingUnit you ate."
-                            },
-                        style = MaterialTheme.typography.bodySmall
-                    )
-
-                    NumberField(
-                        value = quantityEatenText,
-
-                        onValueChange = {
-                            quantityEatenText = it
-                        },
-
-                        label =
-                            if (enterAsLabelServings) {
-                                "Number of label servings"
-                            } else {
-                                "Amount in $servingUnit"
-                            },
-
-                        allowFractions = true
-                    )
-
-                    OutlinedTextField(
-                        value = mealName,
-                        onValueChange = {
-                            mealName = it
-                        },
-                        label = {
-                            Text("Meal name — optional")
-                        },
-                        placeholder = {
-                            Text("Four Hamburgers")
-                        },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Card(
-                        modifier = Modifier.fillMaxWidth()
+                    FoodFormSectionCard(
+                        title = "Nutrition label",
+                        subtitle = "Enter the values for one label serving. Leave an optional nutrient blank when it is unknown."
                     ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp)
+                        NumberField(
+                            value = caloriesPerServingText,
+                            onValueChange = {
+                                caloriesPerServingText = it
+                            },
+                            label = "Calories per serving"
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text(
-                                text = "Calculated amount",
-                                fontWeight = FontWeight.Bold
+                            NumberField(
+                                value = proteinPerServingText,
+                                onValueChange = {
+                                    proteinPerServingText = it
+                                },
+                                label = "Protein (g)",
+                                modifier = Modifier.weight(1f)
                             )
+
+                            NumberField(
+                                value = carbohydratePerServingText,
+                                onValueChange = {
+                                    carbohydratePerServingText = it
+                                },
+                                label = "Carbs (g)",
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            NumberField(
+                                value = fatPerServingText,
+                                onValueChange = {
+                                    fatPerServingText = it
+                                },
+                                label = "Fat (g)",
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            NumberField(
+                                value = sodiumPerServingText,
+                                onValueChange = {
+                                    sodiumPerServingText = it
+                                },
+                                label = "Sodium (mg)",
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    FoodFormSectionCard(
+                        title = "Label serving size",
+                        subtitle = "Match the serving written on the package. Example: 2 slices or 1/4 cup."
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            NumberField(
+                                value = servingQuantityText,
+                                onValueChange = {
+                                    servingQuantityText = it
+                                },
+                                label = "Amount",
+                                allowFractions = true,
+                                supportingText =
+                                    if (servingQuantity > 0.0) {
+                                        null
+                                    } else {
+                                        "Enter a value greater than zero."
+                                    },
+                                isError = servingQuantity <= 0.0,
+                                modifier = Modifier.weight(0.4f)
+                            )
+
+                            OutlinedTextField(
+                                value = servingUnit,
+                                onValueChange = {
+                                    servingUnit = it
+                                },
+                                label = {
+                                    Text("Unit")
+                                },
+                                placeholder = {
+                                    Text("slices")
+                                },
+                                supportingText = {
+                                    if (servingUnit.isBlank()) {
+                                        Text("Required")
+                                    }
+                                },
+                                isError = servingUnit.isBlank(),
+                                singleLine = true,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.weight(0.6f)
+                            )
+                        }
+                    }
+
+                    if (!productOnlyMode) {
+                        FoodFormSectionCard(
+                            title = "How much did you eat?",
+                            subtitle = "Choose the entry style that matches how you measured it."
+                        ) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(18.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    if (enterAsLabelServings) {
+                                        Button(
+                                            onClick = {
+                                                enterAsLabelServings = true
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(14.dp)
+                                        ) {
+                                            Text("Label servings")
+                                        }
+                                    } else {
+                                        OutlinedButton(
+                                            onClick = {
+                                                enterAsLabelServings = true
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(14.dp)
+                                        ) {
+                                            Text("Label servings")
+                                        }
+                                    }
+
+                                    if (!enterAsLabelServings) {
+                                        Button(
+                                            onClick = {
+                                                enterAsLabelServings = false
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(14.dp)
+                                        ) {
+                                            Text("Measured amount")
+                                        }
+                                    } else {
+                                        OutlinedButton(
+                                            onClick = {
+                                                enterAsLabelServings = false
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(14.dp)
+                                        ) {
+                                            Text("Measured amount")
+                                        }
+                                    }
+                                }
+                            }
 
                             Text(
                                 text =
                                     if (enterAsLabelServings) {
-                                        "${formatFoodNumber(amountEntered)} " +
-                                                "label servings = " +
-                                                "${formatFoodNumber(measuredAmountEaten)} " +
-                                                servingUnit
+                                        "Enter the number of complete or partial label servings you ate."
                                     } else {
-                                        "${formatFoodNumber(amountEntered)} " +
-                                                "$servingUnit = " +
-                                                "${formatFoodNumber(servingsEaten)} " +
-                                                "label servings"
-                                    }
+                                        "Enter the amount in ${servingUnit.ifBlank { "units" }}."
+                                    },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            NumberField(
+                                value = quantityEatenText,
+                                onValueChange = {
+                                    quantityEatenText = it
+                                },
+                                label =
+                                    if (enterAsLabelServings) {
+                                        "Servings eaten"
+                                    } else {
+                                        "Amount eaten (${servingUnit.ifBlank { "units" }})"
+                                    },
+                                allowFractions = true,
+                                supportingText =
+                                    if (amountEntered > 0.0) {
+                                        "Fractions such as 1/2 and 1 1/2 are accepted."
+                                    } else {
+                                        "Enter a value greater than zero."
+                                    },
+                                isError = amountEntered <= 0.0
                             )
 
                             Text(
-                                text =
-                                    "${formatFoodNumber(calculatedCalories)} " +
-                                            "calories",
-                                style =
-                                    MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
+                                text = "Quick amount",
+                                style = MaterialTheme.typography.labelLarge
                             )
 
-                            Text(
-                                text =
-                                    "${formatFoodNumber(calculatedProtein)} g protein  •  " +
-                                            "${formatFoodNumber(calculatedCarbohydrates)} g carbs"
-                            )
-
-                            Text(
-                                text =
-                                    "${formatFoodNumber(calculatedFat)} g fat  •  " +
-                                            "${formatFoodNumber(calculatedSodium)} mg sodium"
-                            )
-                        }
-                    }
-
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment =
-                        Alignment.CenterVertically
-                ) {
-                    Checkbox(
-                        checked = saveAsFavorite,
-                        onCheckedChange = {
-                            saveAsFavorite = it
-                        }
-                    )
-
-                    Text(
-                        text = "Save as favorite food"
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement =
-                        Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onDismiss,
-                        enabled = !isSaving,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Cancel")
-                    }
-
-                    Button(
-                        onClick = {
-                            val product = FoodProduct(
-                                id = initialFood?.productId ?: 0,
-                                barcode =
-                                    barcodeText
-                                        .trim()
-                                        .ifBlank {
-                                            null
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf("0.5", "1", "2").forEach { quickAmount ->
+                                    OutlinedButton(
+                                        onClick = {
+                                            quantityEatenText = quickAmount
                                         },
-                                name = productName.trim(),
-                                brand = brand.trim(),
-
-                                caloriesPerServing =
-                                    caloriesPerServing,
-
-                                proteinGramsPerServing =
-                                    proteinPerServing,
-
-                                carbohydrateGramsPerServing =
-                                    carbohydratePerServing,
-
-                                fatGramsPerServing =
-                                    fatPerServing,
-
-                                sodiumMilligramsPerServing =
-                                    sodiumPerServing,
-
-                                servingQuantity =
-                                    servingQuantity,
-
-                                servingUnit =
-                                    servingUnit.trim(),
-
-                                packageQuantity =
-                                    packageQuantity,
-
-                                packageUnit =
-                                    packageUnit
-                                        .trim()
-                                        .ifBlank {
-                                            null
-                                        },
-
-                                isFavorite =
-                                    saveAsFavorite
-                            )
-
-                            val draft = ManualFoodDraft(
-                                product = product,
-
-                                quantityEaten =
-                                    if (productOnlyMode) {
-                                        0.0
-                                    } else {
-                                        amountEntered
-                                    },
-
-                                unit =
-                                    if (productOnlyMode) {
-                                        servingUnit.trim()
-                                    } else {
-                                        foodEntryUnit
-                                    },
-
-                                mealName =
-                                    if (productOnlyMode) {
-                                        null
-                                    } else {
-                                        mealName
-                                            .trim()
-                                            .ifBlank {
-                                                null
-                                            }
-                                    },
-
-                                calories =
-                                    if (productOnlyMode) {
-                                        0.0
-                                    } else {
-                                        calculatedCalories
-                                    },
-
-                                proteinGrams =
-                                    if (productOnlyMode) {
-                                        0.0
-                                    } else {
-                                        calculatedProtein
-                                    },
-
-                                carbohydrateGrams =
-                                    if (productOnlyMode) {
-                                        0.0
-                                    } else {
-                                        calculatedCarbohydrates
-                                    },
-
-                                fatGrams =
-                                    if (productOnlyMode) {
-                                        0.0
-                                    } else {
-                                        calculatedFat
-                                    },
-
-                                sodiumMilligrams =
-                                    if (productOnlyMode) {
-                                        0.0
-                                    } else {
-                                        calculatedSodium
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(14.dp)
+                                    ) {
+                                        Text(quickAmount)
                                     }
-                            )
-
-                            onSave(draft)
-                        },
-                        enabled =
-                            canSave && !isSaving,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(
-                            if (isSaving) {
-                                "Saving..."
-                            } else if (productOnlyMode) {
-                                "Save Food"
-                            } else {
-                                "Add Food"
+                                }
                             }
+
+                            OutlinedTextField(
+                                value = mealName,
+                                onValueChange = {
+                                    mealName = it
+                                },
+                                label = {
+                                    Text("Meal label")
+                                },
+                                placeholder = {
+                                    Text("Optional, such as Breakfast")
+                                },
+                                supportingText = {
+                                    Text("Use this only when a label helps organize the day.")
+                                },
+                                singleLine = true,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        FoodNutritionPreview(
+                            amountDescription =
+                                if (enterAsLabelServings) {
+                                    "${formatFoodNumber(amountEntered)} label servings = " +
+                                        "${formatFoodNumber(measuredAmountEaten)} " +
+                                        servingUnit.ifBlank { "units" }
+                                } else {
+                                    "${formatFoodNumber(amountEntered)} " +
+                                        servingUnit.ifBlank { "units" } +
+                                        " = ${formatFoodNumber(servingsEaten)} label servings"
+                                },
+                            calories = calculatedCalories,
+                            protein = calculatedProtein,
+                            carbohydrates = calculatedCarbohydrates,
+                            fat = calculatedFat,
+                            sodium = calculatedSodium
+                        )
+                    } else {
+                        FoodNutritionPreview(
+                            title = "Saved food preview",
+                            amountDescription =
+                                "Per label serving: ${formatFoodNumber(servingQuantity)} " +
+                                    servingUnit.ifBlank { "units" },
+                            calories = caloriesPerServing,
+                            protein = proteinPerServing,
+                            carbohydrates = carbohydratePerServing,
+                            fat = fatPerServing,
+                            sodium = sodiumPerServing
                         )
                     }
                 }
+
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    shadowElevation = 8.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = validationMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color =
+                                if (canSave) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    MaterialTheme.colorScheme.error
+                                }
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onDismiss,
+                                enabled = !isSaving,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Text("Cancel")
+                            }
+
+                            Button(
+                                onClick = submitFood,
+                                enabled = canSave && !isSaving,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Text(
+                                    if (isSaving) {
+                                        "Saving..."
+                                    } else if (productOnlyMode) {
+                                        "Save food"
+                                    } else {
+                                        "Add food"
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
+        }
+    }
+
+}
+
+@Composable
+private fun FoodFormSectionCard(
+    title: String,
+    subtitle: String? = null,
+    content: @Composable () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 1.dp
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge
+            )
+
+            subtitle?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            content()
+        }
+    }
+}
+
+@Composable
+private fun FoodNutritionPreview(
+    amountDescription: String,
+    calories: Double,
+    protein: Double,
+    carbohydrates: Double,
+    fat: Double,
+    sodium: Double,
+    title: String = "Nutrition for this entry"
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+
+            Text(
+                text = "${formatFoodNumber(calories)} calories",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+
+            Text(
+                text = amountDescription,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FoodPreviewMetric(
+                    label = "Protein",
+                    value = "${formatFoodNumber(protein)} g",
+                    modifier = Modifier.weight(1f)
+                )
+
+                FoodPreviewMetric(
+                    label = "Carbs",
+                    value = "${formatFoodNumber(carbohydrates)} g",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FoodPreviewMetric(
+                    label = "Fat",
+                    value = "${formatFoodNumber(fat)} g",
+                    modifier = Modifier.weight(1f)
+                )
+
+                FoodPreviewMetric(
+                    label = "Sodium",
+                    value = "${formatFoodNumber(sodium)} mg",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FoodPreviewMetric(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+        contentColor = MaterialTheme.colorScheme.onSurface
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleMedium
+            )
+
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -1606,25 +1825,26 @@ private fun NumberField(
     onValueChange: (String) -> Unit,
     label: String,
     allowFractions: Boolean = false,
+    supportingText: String? = null,
+    isError: Boolean = false,
     modifier: Modifier = Modifier.fillMaxWidth()
 ) {
     OutlinedTextField(
         value = value,
 
         onValueChange = { newValue ->
-
             val filteredValue =
                 if (allowFractions) {
                     newValue.filter {
                         it.isDigit() ||
-                                it == '.' ||
-                                it == '/' ||
-                                it == ' '
+                            it == '.' ||
+                            it == '/' ||
+                            it == ' '
                     }
                 } else {
                     newValue.filter {
                         it.isDigit() ||
-                                it == '.'
+                            it == '.'
                     }
                 }
 
@@ -1641,7 +1861,7 @@ private fun NumberField(
             val isAllowed =
                 if (allowFractions) {
                     decimalCount <= 2 &&
-                            slashCount <= 1
+                        slashCount <= 1
                 } else {
                     decimalCount <= 1
                 }
@@ -1655,15 +1875,20 @@ private fun NumberField(
             Text(label)
         },
 
+        supportingText =
+            supportingText?.let { message ->
+                {
+                    Text(message)
+                }
+            },
+
+        isError = isError,
         singleLine = true,
+        shape = RoundedCornerShape(16.dp),
 
         keyboardOptions = KeyboardOptions(
             keyboardType =
                 if (allowFractions) {
-                    /*
-                     * Decimal keyboards usually do not
-                     * provide a slash key.
-                     */
                     KeyboardType.Text
                 } else {
                     KeyboardType.Decimal

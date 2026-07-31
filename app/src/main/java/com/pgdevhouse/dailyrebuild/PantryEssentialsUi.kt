@@ -296,7 +296,6 @@ private fun PantryEssentialRow(
         }
     }
 }
-
 @Composable
 private fun PantryEssentialEditorDialog(
     existing: PantryEssential?,
@@ -304,158 +303,83 @@ private fun PantryEssentialEditorDialog(
     onSave: (PantryEssential) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var name by rememberSaveable(existing?.id) {
-        mutableStateOf(existing?.name.orEmpty())
-    }
-    var category by rememberSaveable(existing?.id) {
-        mutableStateOf(existing?.category ?: pantryCategories.first())
-    }
-    var status by rememberSaveable(existing?.id) {
-        mutableStateOf(existing?.status ?: PantryEssentialStatus.HAVE)
-    }
-    var preferredProduct by rememberSaveable(existing?.id) {
-        mutableStateOf(existing?.preferredProduct.orEmpty())
-    }
-    var brandPreference by rememberSaveable(existing?.id) {
-        mutableStateOf(existing?.brandPreference ?: "Any brand")
-    }
-    var priceText by rememberSaveable(existing?.id) {
-        mutableStateOf(existing?.expectedPrice?.toString().orEmpty())
-    }
-    var walmartUrl by rememberSaveable(existing?.id) {
-        mutableStateOf(existing?.walmartUrl.orEmpty())
-    }
-    var notes by rememberSaveable(existing?.id) {
-        mutableStateOf(existing?.notes.orEmpty())
-    }
+    var name by rememberSaveable(existing?.id) { mutableStateOf(existing?.name.orEmpty()) }
+    var category by rememberSaveable(existing?.id) { mutableStateOf(existing?.category ?: pantryCategories.first()) }
+    var status by rememberSaveable(existing?.id) { mutableStateOf(existing?.status ?: PantryEssentialStatus.HAVE) }
+    var preferredProduct by rememberSaveable(existing?.id) { mutableStateOf(existing?.preferredProduct.orEmpty()) }
+    var brandPreference by rememberSaveable(existing?.id) { mutableStateOf(existing?.brandPreference ?: "Any brand") }
+    var priceText by rememberSaveable(existing?.id) { mutableStateOf(existing?.expectedPrice?.toString().orEmpty()) }
+    var walmartUrl by rememberSaveable(existing?.id) { mutableStateOf(existing?.walmartUrl.orEmpty()) }
+    var notes by rememberSaveable(existing?.id) { mutableStateOf(existing?.notes.orEmpty()) }
 
     val parsedPrice = priceText.toDoubleOrNull()
-    val valid = name.isNotBlank() &&
-        (priceText.isBlank() || parsedPrice != null)
+    val valid = name.isNotBlank() && (priceText.isBlank() || parsedPrice != null)
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(if (existing == null) "Add Pantry Essential" else "Edit Pantry Essential")
+    RebuildInputDialog(
+        title = if (existing == null) "Add pantry essential" else "Edit pantry essential",
+        subtitle = "Keep the item, preferred product, and shopping status together.",
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        primaryActionText = if (isSaving) "Saving…" else if (existing == null) "Add item" else "Save changes",
+        onPrimaryAction = {
+            onSave(
+                PantryEssential(
+                    id = existing?.id ?: 0L,
+                    name = name.trim(),
+                    category = category,
+                    status = status,
+                    preferredProduct = preferredProduct.trim(),
+                    brandPreference = brandPreference.trim().ifBlank { "Any brand" },
+                    expectedPrice = parsedPrice,
+                    walmartUrl = walmartUrl.trim(),
+                    notes = notes.trim(),
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
         },
-        text = {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Item name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+        primaryActionEnabled = valid && !isSaving,
+        secondaryActionEnabled = !isSaving
+    ) {
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            label = { Text("Item name *") },
+            placeholder = { Text("Example: laundry detergent") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
 
-                Text("Status", fontWeight = FontWeight.SemiBold)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
-                        selected = status == PantryEssentialStatus.HAVE,
-                        onClick = { status = PantryEssentialStatus.HAVE },
-                        label = { Text("Have") }
-                    )
-                    FilterChip(
-                        selected = status == PantryEssentialStatus.NEED,
-                        onClick = { status = PantryEssentialStatus.NEED },
-                        label = { Text("Need") }
-                    )
-                }
-
-                Text("Category", fontWeight = FontWeight.SemiBold)
-                pantryCategories.chunked(2).forEach { rowItems ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        rowItems.forEach { option ->
-                            FilterChip(
-                                selected = category == option,
-                                onClick = { category = option },
-                                label = { Text(option) }
-                            )
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = preferredProduct,
-                    onValueChange = { preferredProduct = it },
-                    label = { Text("Preferred Walmart product (optional)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = brandPreference,
-                    onValueChange = { brandPreference = it },
-                    label = { Text("Brand preference") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = priceText,
-                    onValueChange = { value ->
-                        priceText = value.filter {
-                            it.isDigit() || it == '.'
-                        }.take(8)
-                    },
-                    label = { Text("Expected price (optional)") },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Decimal
-                    ),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = walmartUrl,
-                    onValueChange = { walmartUrl = it },
-                    label = { Text("Walmart link (optional)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = notes,
-                    onValueChange = { notes = it },
-                    label = { Text("Notes") },
-                    minLines = 2,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = valid && !isSaving,
-                onClick = {
-                    onSave(
-                        PantryEssential(
-                            id = existing?.id ?: 0L,
-                            name = name.trim(),
-                            category = category,
-                            status = status,
-                            preferredProduct = preferredProduct.trim(),
-                            brandPreference = brandPreference.trim().ifBlank { "Any brand" },
-                            expectedPrice = parsedPrice,
-                            walmartUrl = walmartUrl.trim(),
-                            notes = notes.trim(),
-                            updatedAt = System.currentTimeMillis()
-                        )
-                    )
-                }
-            ) {
-                Text(if (isSaving) "Saving…" else "Save")
-            }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onDismiss,
-                enabled = !isSaving
-            ) { Text("Cancel") }
+        Text("Current status", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = status == PantryEssentialStatus.HAVE, onClick = { status = PantryEssentialStatus.HAVE }, label = { Text("Have it") })
+            FilterChip(selected = status == PantryEssentialStatus.NEED, onClick = { status = PantryEssentialStatus.NEED }, label = { Text("Need it") })
         }
-    )
+
+        Text("Category", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+        pantryCategories.chunked(2).forEach { rowItems ->
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                rowItems.forEach { option ->
+                    FilterChip(selected = category == option, onClick = { category = option }, label = { Text(option) })
+                }
+            }
+        }
+
+        Text("Shopping preference", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+        OutlinedTextField(preferredProduct, { preferredProduct = it }, label = { Text("Preferred Walmart product") }, supportingText = { Text("Optional") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(brandPreference, { brandPreference = it }, label = { Text("Brand preference") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+            value = priceText,
+            onValueChange = { priceText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(8) },
+            label = { Text("Expected price") },
+            prefix = { Text("\$") },
+            supportingText = { Text(if (priceText.isBlank() || parsedPrice != null) "Optional" else "Enter a valid price.") },
+            isError = priceText.isNotBlank() && parsedPrice == null,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(walmartUrl, { walmartUrl = it }, label = { Text("Walmart link") }, supportingText = { Text("Optional") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(notes, { notes = it }, label = { Text("Notes") }, minLines = 3, modifier = Modifier.fillMaxWidth())
+    }
 }
 
 @Composable

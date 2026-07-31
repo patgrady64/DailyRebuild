@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
@@ -108,7 +109,7 @@ fun HealthProfileFeature(
     RebuildSectionCard(
         title = "Health profile & goals",
         subtitle =
-            "Private local tracking for goals, measurements, daily back and shin pain, and your medication reference list.",
+            "Private local tracking for goals, measurements, daily highest pain, and your medication reference list.",
         accentColor = RebuildAmber
     ) {
         if (isLoading || data == null) {
@@ -395,7 +396,7 @@ private fun HealthProfileDialog(
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .safeDrawingPadding(),
+                .safeDrawingPadding().imePadding(),
             color = MaterialTheme.colorScheme.background
         ) {
             Column(
@@ -552,12 +553,12 @@ private fun HealthProfileDialog(
                     )
 
                     RebuildSectionCard(
-                        title = "Daily Pain",
-                        subtitle = "Track one daily high for back pain and one for shin-splint pain.",
+                        title = "Daily Highest Pain",
+                        subtitle = "Pain is now managed as one daily value: the highest pain experienced that day.",
                         accentColor = RebuildAmber
                     ) {
                         Text(
-                            text = "Use Pain from Today or the Health quick-log area. If either pain increases later, raise that pain's daily value. There are no before-and-after workout entries.",
+                            text = "Use Highest Pain from Home or the Health quick-log area. If pain increases later, update the same daily value. The former before-and-after activity form is no longer part of the interface.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -1200,34 +1201,19 @@ private fun MedicationReferenceSection(
         }
     }
 }
-
 @Composable
 private fun MeasurementEditorDialog(
     type: String,
     onDismiss: () -> Unit,
     onSave: (HealthMeasurement) -> Unit
 ) {
-    var date by rememberSaveable {
-        mutableStateOf(LocalDate.now().toString())
-    }
-    var primary by rememberSaveable {
-        mutableStateOf("")
-    }
-    var secondary by rememberSaveable {
-        mutableStateOf("")
-    }
-    var tertiary by rememberSaveable {
-        mutableStateOf("")
-    }
-    var quaternary by rememberSaveable {
-        mutableStateOf("")
-    }
-    var notes by rememberSaveable {
-        mutableStateOf("")
-    }
-    var error by remember {
-        mutableStateOf<String?>(null)
-    }
+    var date by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
+    var primary by rememberSaveable { mutableStateOf("") }
+    var secondary by rememberSaveable { mutableStateOf("") }
+    var tertiary by rememberSaveable { mutableStateOf("") }
+    var quaternary by rememberSaveable { mutableStateOf("") }
+    var notes by rememberSaveable { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
 
     val title = when (type) {
         HealthMeasurementType.WEIGHT -> "Record weight"
@@ -1236,134 +1222,87 @@ private fun MeasurementEditorDialog(
         else -> "Record cholesterol"
     }
 
-    AlertDialog(
+    RebuildInputDialog(
+        title = title,
+        subtitle = "Add a dated result to your personal health history.",
         onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedTextField(
-                    value = date,
-                    onValueChange = { date = it },
-                    label = { Text("Date") },
-                    supportingText = { Text("YYYY-MM-DD") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+        primaryActionText = "Save measurement",
+        onPrimaryAction = save@{
+            val validDate = runCatching { LocalDate.parse(date) }.getOrNull()
+            val primaryValue = primary.toDoubleOrNull()
+            val secondaryValue = secondary.toDoubleOrNull()
+
+            when {
+                validDate == null -> error = "Use YYYY-MM-DD for the date."
+                primaryValue == null -> error = "Enter the main measurement value."
+                type == HealthMeasurementType.BLOOD_PRESSURE && secondaryValue == null ->
+                    error = "Enter both systolic and diastolic values."
+                else -> onSave(
+                    HealthMeasurement(
+                        recordedDate = date,
+                        type = type,
+                        primaryValue = primaryValue,
+                        secondaryValue = secondaryValue,
+                        tertiaryValue = tertiary.toDoubleOrNull(),
+                        quaternaryValue = quaternary.toDoubleOrNull(),
+                        notes = notes.trim()
+                    )
                 )
+            }
+        }
+    ) {
+        OutlinedTextField(
+            value = date,
+            onValueChange = { date = it; error = null },
+            label = { Text("Date") },
+            supportingText = { Text("Use YYYY-MM-DD") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
 
-                when (type) {
-                    HealthMeasurementType.WEIGHT -> {
-                        NumericField(
-                            value = primary,
-                            onValueChange = { primary = it },
-                            label = "Weight (lb)"
-                        )
-                    }
-                    HealthMeasurementType.A1C -> {
-                        NumericField(
-                            value = primary,
-                            onValueChange = { primary = it },
-                            label = "A1C (%)"
-                        )
-                    }
-                    HealthMeasurementType.BLOOD_PRESSURE -> {
-                        NumericField(
-                            value = primary,
-                            onValueChange = { primary = it },
-                            label = "Systolic"
-                        )
-                        NumericField(
-                            value = secondary,
-                            onValueChange = { secondary = it },
-                            label = "Diastolic"
-                        )
-                    }
-                    HealthMeasurementType.CHOLESTEROL -> {
-                        NumericField(
-                            value = primary,
-                            onValueChange = { primary = it },
-                            label = "Total cholesterol"
-                        )
-                        NumericField(
-                            value = secondary,
-                            onValueChange = { secondary = it },
-                            label = "LDL (optional)"
-                        )
-                        NumericField(
-                            value = tertiary,
-                            onValueChange = { tertiary = it },
-                            label = "HDL (optional)"
-                        )
-                        NumericField(
-                            value = quaternary,
-                            onValueChange = { quaternary = it },
-                            label = "Triglycerides (optional)"
-                        )
-                    }
-                }
-
-                OutlinedTextField(
-                    value = notes,
-                    onValueChange = { notes = it },
-                    label = { Text("Notes (optional)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                error?.let {
-                    Text(
-                        text = it,
-                        color = MaterialTheme.colorScheme.error
+        when (type) {
+            HealthMeasurementType.WEIGHT -> NumericField(primary, { primary = it; error = null }, "Weight (lb)")
+            HealthMeasurementType.A1C -> NumericField(primary, { primary = it; error = null }, "A1C (%)")
+            HealthMeasurementType.BLOOD_PRESSURE -> {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = primary,
+                        onValueChange = { primary = it; error = null },
+                        label = { Text("Systolic") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = secondary,
+                        onValueChange = { secondary = it; error = null },
+                        label = { Text("Diastolic") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val validDate = runCatching {
-                        LocalDate.parse(date)
-                    }.getOrNull()
-                    val primaryValue = primary.toDoubleOrNull()
-                    val secondaryValue = secondary.toDoubleOrNull()
-
-                    when {
-                        validDate == null -> {
-                            error = "Use YYYY-MM-DD for the date."
-                        }
-                        primaryValue == null -> {
-                            error = "Enter the main measurement value."
-                        }
-                        type == HealthMeasurementType.BLOOD_PRESSURE &&
-                            secondaryValue == null -> {
-                            error = "Enter both systolic and diastolic values."
-                        }
-                        else -> {
-                            onSave(
-                                HealthMeasurement(
-                                    recordedDate = date,
-                                    type = type,
-                                    primaryValue = primaryValue,
-                                    secondaryValue = secondaryValue,
-                                    tertiaryValue = tertiary.toDoubleOrNull(),
-                                    quaternaryValue = quaternary.toDoubleOrNull(),
-                                    notes = notes.trim()
-                                )
-                            )
-                        }
-                    }
-                }
-            ) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+            HealthMeasurementType.CHOLESTEROL -> {
+                NumericField(primary, { primary = it; error = null }, "Total cholesterol")
+                NumericField(secondary, { secondary = it }, "LDL (optional)")
+                NumericField(tertiary, { tertiary = it }, "HDL (optional)")
+                NumericField(quaternary, { quaternary = it }, "Triglycerides (optional)")
             }
         }
-    )
+
+        OutlinedTextField(
+            value = notes,
+            onValueChange = { notes = it },
+            label = { Text("Notes (optional)") },
+            minLines = 2,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        error?.let {
+            Text(text = it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }
 
 @Composable
@@ -1383,184 +1322,114 @@ private fun NumericField(
         )
     )
 }
-
 @Composable
 private fun MedicationEditorDialog(
     initial: MedicationEntry?,
     onDismiss: () -> Unit,
     onSave: (MedicationEntry) -> Unit
 ) {
-    var name by rememberSaveable {
-        mutableStateOf(initial?.name ?: "")
-    }
-    var milligrams by rememberSaveable {
-        mutableStateOf(initial?.milligrams?.let(::formatHealthNumber) ?: "")
-    }
-    var numberPerDose by rememberSaveable {
-        mutableStateOf(initial?.numberPerDose?.let(::formatHealthNumber) ?: "")
-    }
-    var timesPerDay by rememberSaveable {
-        mutableStateOf(initial?.timesPerDay?.let(::formatHealthNumber) ?: "")
-    }
-    var purchaseSource by rememberSaveable {
-        mutableStateOf(initial?.purchaseSource ?: "")
-    }
-    var pricePerBottle by rememberSaveable {
-        mutableStateOf(initial?.pricePerBottle ?: "")
-    }
-    var numberPerBottle by rememberSaveable {
-        mutableStateOf(initial?.numberPerBottle?.toString() ?: "")
-    }
-    var pricePerPill by rememberSaveable {
-        mutableStateOf(initial?.pricePerPill ?: "")
-    }
-    var purchasesPerYear by rememberSaveable {
-        mutableStateOf(initial?.purchasesPerYear?.let(::formatHealthNumber) ?: "")
-    }
-    var notes by rememberSaveable {
-        mutableStateOf(initial?.notes ?: "")
-    }
-    var isActive by rememberSaveable {
-        mutableStateOf(initial?.isActive ?: true)
-    }
-    var error by remember {
-        mutableStateOf<String?>(null)
-    }
+    var name by rememberSaveable { mutableStateOf(initial?.name ?: "") }
+    var milligrams by rememberSaveable { mutableStateOf(initial?.milligrams?.let(::formatHealthNumber) ?: "") }
+    var numberPerDose by rememberSaveable { mutableStateOf(initial?.numberPerDose?.let(::formatHealthNumber) ?: "") }
+    var timesPerDay by rememberSaveable { mutableStateOf(initial?.timesPerDay?.let(::formatHealthNumber) ?: "") }
+    var purchaseSource by rememberSaveable { mutableStateOf(initial?.purchaseSource ?: "") }
+    var pricePerBottle by rememberSaveable { mutableStateOf(initial?.pricePerBottle ?: "") }
+    var numberPerBottle by rememberSaveable { mutableStateOf(initial?.numberPerBottle?.toString() ?: "") }
+    var pricePerPill by rememberSaveable { mutableStateOf(initial?.pricePerPill ?: "") }
+    var purchasesPerYear by rememberSaveable { mutableStateOf(initial?.purchasesPerYear?.let(::formatHealthNumber) ?: "") }
+    var notes by rememberSaveable { mutableStateOf(initial?.notes ?: "") }
+    var isActive by rememberSaveable { mutableStateOf(initial?.isActive ?: true) }
+    var error by remember { mutableStateOf<String?>(null) }
 
-    AlertDialog(
+    RebuildInputDialog(
+        title = if (initial == null) "Add medication reference" else "Edit medication reference",
+        subtitle = "This is a personal reference entry, not a medication reminder or treatment recommendation.",
         onDismissRequest = onDismiss,
-        title = {
-            Text(
-                if (initial == null) {
-                    "Add medication reference"
-                } else {
-                    "Edit medication reference"
-                }
-            )
-        },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Name") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                NumericField(
-                    value = milligrams,
-                    onValueChange = { milligrams = it },
-                    label = "Milligrams (optional)"
-                )
-                NumericField(
-                    value = numberPerDose,
-                    onValueChange = { numberPerDose = it },
-                    label = "Number per dose"
-                )
-                NumericField(
-                    value = timesPerDay,
-                    onValueChange = { timesPerDay = it },
-                    label = "Times per day"
-                )
-                OutlinedTextField(
-                    value = purchaseSource,
-                    onValueChange = { purchaseSource = it },
-                    label = { Text("Purchase source") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = pricePerBottle,
-                    onValueChange = { pricePerBottle = it },
-                    label = { Text("Price per bottle") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = numberPerBottle,
-                    onValueChange = { numberPerBottle = it },
-                    label = { Text("Number per bottle") },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number
+        primaryActionText = if (initial == null) "Add reference" else "Save changes",
+        onPrimaryAction = {
+            if (name.trim().isBlank()) {
+                error = "Enter a medication name."
+            } else {
+                onSave(
+                    MedicationEntry(
+                        id = initial?.id ?: 0L,
+                        name = name.trim(),
+                        milligrams = milligrams.toDoubleOrNull(),
+                        numberPerDose = numberPerDose.toDoubleOrNull(),
+                        timesPerDay = timesPerDay.toDoubleOrNull(),
+                        purchaseSource = purchaseSource.trim(),
+                        pricePerBottle = pricePerBottle.trim(),
+                        numberPerBottle = numberPerBottle.toIntOrNull(),
+                        pricePerPill = pricePerPill.trim(),
+                        purchasesPerYear = purchasesPerYear.toDoubleOrNull(),
+                        notes = notes.trim(),
+                        isActive = isActive,
+                        sortOrder = initial?.sortOrder ?: 1000
                     )
                 )
-                OutlinedTextField(
-                    value = pricePerPill,
-                    onValueChange = { pricePerPill = it },
-                    label = { Text("Price per pill") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                NumericField(
-                    value = purchasesPerYear,
-                    onValueChange = { purchasesPerYear = it },
-                    label = "Purchases per year"
-                )
-                OutlinedTextField(
-                    value = notes,
-                    onValueChange = { notes = it },
-                    label = { Text("Reference notes") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 2
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Checkbox(
-                        checked = isActive,
-                        onCheckedChange = { isActive = it }
-                    )
-                    Text("Currently on my reference list")
-                }
-                Text(
-                    text =
-                        "Changing this entry only changes the app reference. It is not medication advice.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                error?.let {
-                    Text(
-                        text = it,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    if (name.trim().isBlank()) {
-                        error = "Enter a name."
-                    } else {
-                        onSave(
-                            MedicationEntry(
-                                id = initial?.id ?: 0L,
-                                name = name.trim(),
-                                milligrams = milligrams.toDoubleOrNull(),
-                                numberPerDose = numberPerDose.toDoubleOrNull(),
-                                timesPerDay = timesPerDay.toDoubleOrNull(),
-                                purchaseSource = purchaseSource.trim(),
-                                pricePerBottle = pricePerBottle.trim(),
-                                numberPerBottle = numberPerBottle.toIntOrNull(),
-                                pricePerPill = pricePerPill.trim(),
-                                purchasesPerYear = purchasesPerYear.toDoubleOrNull(),
-                                notes = notes.trim(),
-                                isActive = isActive,
-                                sortOrder = initial?.sortOrder ?: 1000
-                            )
-                        )
-                    }
-                }
-            ) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
             }
         }
-    )
+    ) {
+        Text("Medication details", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it; error = null },
+            label = { Text("Name *") },
+            singleLine = true,
+            isError = error != null && name.isBlank(),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = milligrams,
+                onValueChange = { milligrams = it },
+                label = { Text("Milligrams") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+                value = numberPerDose,
+                onValueChange = { numberPerDose = it },
+                label = { Text("Per dose") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.weight(1f)
+            )
+        }
+        NumericField(timesPerDay, { timesPerDay = it }, "Times per day")
+
+        Text("Purchase reference", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        OutlinedTextField(purchaseSource, { purchaseSource = it }, label = { Text("Purchase source") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(pricePerBottle, { pricePerBottle = it }, label = { Text("Bottle price") }, singleLine = true, modifier = Modifier.weight(1f))
+            OutlinedTextField(numberPerBottle, { numberPerBottle = it.filter(Char::isDigit) }, label = { Text("Pills per bottle") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(pricePerPill, { pricePerPill = it }, label = { Text("Price per pill") }, singleLine = true, modifier = Modifier.weight(1f))
+            OutlinedTextField(purchasesPerYear, { purchasesPerYear = it }, label = { Text("Purchases/year") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f))
+        }
+
+        OutlinedTextField(notes, { notes = it }, label = { Text("Reference notes") }, minLines = 3, modifier = Modifier.fillMaxWidth())
+
+        RebuildInsetPanel {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = isActive, onCheckedChange = { isActive = it })
+                Column {
+                    Text("Currently on my reference list", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Turning this off keeps the old entry without showing it as current.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        error?.let {
+            Text(text = it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }
 
 private fun measurementDisplayValue(

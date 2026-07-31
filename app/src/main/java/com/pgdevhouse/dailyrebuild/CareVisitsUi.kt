@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
@@ -247,7 +248,7 @@ fun CareVisitStartDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
-            modifier = Modifier.fillMaxSize().safeDrawingPadding(),
+            modifier = Modifier.fillMaxSize().safeDrawingPadding().imePadding(),
             color = MaterialTheme.colorScheme.background
         ) {
             Column(
@@ -373,7 +374,7 @@ fun CareProviderPickerDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
-            modifier = Modifier.fillMaxSize().safeDrawingPadding(),
+            modifier = Modifier.fillMaxSize().safeDrawingPadding().imePadding(),
             color = MaterialTheme.colorScheme.background
         ) {
             Column(
@@ -459,7 +460,6 @@ fun CareProviderPickerDialog(
         }
     }
 }
-
 @Composable
 fun CarePlaceEditorDialog(
     existingPlace: CarePlace?,
@@ -467,115 +467,96 @@ fun CarePlaceEditorDialog(
     onSave: (CarePlaceDraft) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var name by rememberSaveable(existingPlace?.id) {
-        mutableStateOf(existingPlace?.name.orEmpty())
-    }
-    var category by rememberSaveable(existingPlace?.id) {
-        mutableStateOf(existingPlace?.placeCategory ?: "Medical")
-    }
-    var address by rememberSaveable(existingPlace?.id) {
-        mutableStateOf(existingPlace?.address.orEmpty())
-    }
-    var city by rememberSaveable(existingPlace?.id) {
-        mutableStateOf(existingPlace?.city.orEmpty())
-    }
-    var state by rememberSaveable(existingPlace?.id) {
-        mutableStateOf(existingPlace?.state.orEmpty())
-    }
-    var zip by rememberSaveable(existingPlace?.id) {
-        mutableStateOf(existingPlace?.zipCode.orEmpty())
-    }
-    var phone by rememberSaveable(existingPlace?.id) {
-        mutableStateOf(existingPlace?.phone.orEmpty())
-    }
-    var website by rememberSaveable(existingPlace?.id) {
-        mutableStateOf(existingPlace?.website.orEmpty())
-    }
-    var portal by rememberSaveable(existingPlace?.id) {
-        mutableStateOf(existingPlace?.patientPortal.orEmpty())
-    }
-    var notes by rememberSaveable(existingPlace?.id) {
-        mutableStateOf(existingPlace?.notes.orEmpty())
-    }
-    var active by rememberSaveable(existingPlace?.id) {
-        mutableStateOf(existingPlace?.active ?: true)
-    }
+    var name by rememberSaveable(existingPlace?.id) { mutableStateOf(existingPlace?.name.orEmpty()) }
+    var category by rememberSaveable(existingPlace?.id) { mutableStateOf(existingPlace?.placeCategory ?: "Medical") }
+    var address by rememberSaveable(existingPlace?.id) { mutableStateOf(existingPlace?.address.orEmpty()) }
+    var city by rememberSaveable(existingPlace?.id) { mutableStateOf(existingPlace?.city.orEmpty()) }
+    var state by rememberSaveable(existingPlace?.id) { mutableStateOf(existingPlace?.state.orEmpty()) }
+    var zip by rememberSaveable(existingPlace?.id) { mutableStateOf(existingPlace?.zipCode.orEmpty()) }
+    var phone by rememberSaveable(existingPlace?.id) { mutableStateOf(existingPlace?.phone.orEmpty()) }
+    var website by rememberSaveable(existingPlace?.id) { mutableStateOf(existingPlace?.website.orEmpty()) }
+    var portal by rememberSaveable(existingPlace?.id) { mutableStateOf(existingPlace?.patientPortal.orEmpty()) }
+    var notes by rememberSaveable(existingPlace?.id) { mutableStateOf(existingPlace?.notes.orEmpty()) }
+    var active by rememberSaveable(existingPlace?.id) { mutableStateOf(existingPlace?.active ?: true) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
 
-    AlertDialog(
+    RebuildInputDialog(
+        title = if (existingPlace == null) "Add care place" else "Edit care place",
+        subtitle = "Save the location once so appointments and visits can reuse it.",
         onDismissRequest = { if (!isSaving) onDismiss() },
-        title = {
-            Text(if (existingPlace == null) "Add Care Place" else "Edit Care Place")
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 580.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedTextField(name, { name = it }, label = { Text("Place / practice name *") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(category, { category = it }, label = { Text("Place category") }, placeholder = { Text("Medical, vision, dental…") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(address, { address = it }, label = { Text("Street address *") }, modifier = Modifier.fillMaxWidth())
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(city, { city = it }, label = { Text("City *") }, modifier = Modifier.weight(1f))
-                    OutlinedTextField(state, { state = it }, label = { Text("State *") }, modifier = Modifier.weight(0.65f))
-                }
-                OutlinedTextField(zip, { zip = it }, label = { Text("ZIP code") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(phone, { phone = it }, label = { Text("Phone") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(website, { website = it }, label = { Text("Website") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(portal, { portal = it }, label = { Text("Patient portal") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(notes, { notes = it }, label = { Text("Place notes") }, minLines = 2, modifier = Modifier.fillMaxWidth())
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { active = !active },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Checkbox(checked = active, onCheckedChange = { active = it })
-                    Text("Active place")
-                }
-
-                error?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
+        primaryActionText = if (isSaving) "Saving…" else if (existingPlace == null) "Add place" else "Save changes",
+        onPrimaryAction = {
+            if (name.isBlank() || address.isBlank() || city.isBlank() || state.isBlank()) {
+                error = "Enter the place name, address, city, and state."
+            } else {
+                onSave(
+                    CarePlaceDraft(
+                        id = existingPlace?.id ?: 0L,
+                        name = name.trim(),
+                        placeCategory = category.trim().ifBlank { "Medical" },
+                        address = address.trim(),
+                        city = city.trim(),
+                        state = state.trim(),
+                        zipCode = zip.trim(),
+                        phone = phone.trim(),
+                        website = website.trim(),
+                        patientPortal = portal.trim(),
+                        notes = notes.trim(),
+                        active = active,
+                        createdAt = existingPlace?.createdAt ?: System.currentTimeMillis()
+                    )
+                )
             }
         },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (name.isBlank() || address.isBlank() || city.isBlank() || state.isBlank()) {
-                        error = "Enter the place name, address, city, and state."
-                    } else {
-                        onSave(
-                            CarePlaceDraft(
-                                id = existingPlace?.id ?: 0L,
-                                name = name.trim(),
-                                placeCategory = category.trim().ifBlank { "Medical" },
-                                address = address.trim(),
-                                city = city.trim(),
-                                state = state.trim(),
-                                zipCode = zip.trim(),
-                                phone = phone.trim(),
-                                website = website.trim(),
-                                patientPortal = portal.trim(),
-                                notes = notes.trim(),
-                                active = active,
-                                createdAt = existingPlace?.createdAt ?: System.currentTimeMillis()
-                            )
-                        )
-                    }
-                },
-                enabled = !isSaving
-            ) { Text(if (isSaving) "Saving…" else "Save") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isSaving) { Text("Cancel") }
+        primaryActionEnabled = !isSaving,
+        secondaryActionEnabled = !isSaving
+    ) {
+        Text(
+            text = "Required information",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold
+        )
+        OutlinedTextField(name, { name = it; error = null }, label = { Text("Place or practice name *") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(category, { category = it }, label = { Text("Care category") }, placeholder = { Text("Medical, vision, dental…") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(address, { address = it; error = null }, label = { Text("Street address *") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(city, { city = it; error = null }, label = { Text("City *") }, singleLine = true, modifier = Modifier.weight(1.25f))
+            OutlinedTextField(state, { state = it.uppercase().take(2); error = null }, label = { Text("State *") }, singleLine = true, modifier = Modifier.weight(0.7f))
         }
-    )
-}
+        OutlinedTextField(zip, { zip = it.filter(Char::isDigit).take(10) }, label = { Text("ZIP code") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth())
 
+        Text(
+            text = "Contact and reference details",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold
+        )
+        OutlinedTextField(phone, { phone = it }, label = { Text("Phone") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(website, { website = it }, label = { Text("Website") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(portal, { portal = it }, label = { Text("Patient portal") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(notes, { notes = it }, label = { Text("Notes") }, minLines = 3, modifier = Modifier.fillMaxWidth())
+
+        RebuildInsetPanel {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { active = !active },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(checked = active, onCheckedChange = { active = it })
+                Column {
+                    Text("Active place", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Inactive places stay in history but are hidden from normal pickers.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
 @Composable
 fun CareProviderEditorDialog(
     place: CarePlace,
@@ -584,86 +565,77 @@ fun CareProviderEditorDialog(
     onSave: (CareProviderDraft) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var name by rememberSaveable(existingProvider?.id) {
-        mutableStateOf(existingProvider?.name.orEmpty())
-    }
-    var credentials by rememberSaveable(existingProvider?.id) {
-        mutableStateOf(existingProvider?.credentials.orEmpty())
-    }
-    var specialty by rememberSaveable(existingProvider?.id) {
-        mutableStateOf(existingProvider?.specialty.orEmpty())
-    }
-    var phone by rememberSaveable(existingProvider?.id) {
-        mutableStateOf(existingProvider?.phone.orEmpty())
-    }
-    var notes by rememberSaveable(existingProvider?.id) {
-        mutableStateOf(existingProvider?.notes.orEmpty())
-    }
-    var active by rememberSaveable(existingProvider?.id) {
-        mutableStateOf(existingProvider?.active ?: true)
-    }
+    var name by rememberSaveable(existingProvider?.id) { mutableStateOf(existingProvider?.name.orEmpty()) }
+    var credentials by rememberSaveable(existingProvider?.id) { mutableStateOf(existingProvider?.credentials.orEmpty()) }
+    var specialty by rememberSaveable(existingProvider?.id) { mutableStateOf(existingProvider?.specialty.orEmpty()) }
+    var phone by rememberSaveable(existingProvider?.id) { mutableStateOf(existingProvider?.phone.orEmpty()) }
+    var notes by rememberSaveable(existingProvider?.id) { mutableStateOf(existingProvider?.notes.orEmpty()) }
+    var active by rememberSaveable(existingProvider?.id) { mutableStateOf(existingProvider?.active ?: true) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
 
-    AlertDialog(
+    RebuildInputDialog(
+        title = if (existingProvider == null) "Add provider" else "Edit provider",
+        subtitle = place.name,
         onDismissRequest = { if (!isSaving) onDismiss() },
-        title = { Text(if (existingProvider == null) "Add Provider" else "Edit Provider") },
-        text = {
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 520.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = place.name,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+        primaryActionText = if (isSaving) "Saving…" else if (existingProvider == null) "Add provider" else "Save changes",
+        onPrimaryAction = {
+            if (name.isBlank()) {
+                error = "Enter the provider name."
+            } else {
+                onSave(
+                    CareProviderDraft(
+                        id = existingProvider?.id ?: 0L,
+                        placeId = place.id,
+                        name = name.trim(),
+                        credentials = credentials.trim(),
+                        specialty = specialty.trim(),
+                        phone = phone.trim(),
+                        notes = notes.trim(),
+                        active = active,
+                        createdAt = existingProvider?.createdAt ?: System.currentTimeMillis()
+                    )
                 )
-                OutlinedTextField(name, { name = it }, label = { Text("Provider / doctor name *") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(credentials, { credentials = it }, label = { Text("Credentials") }, placeholder = { Text("MD, DO, DDS, OD, NP…") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(specialty, { specialty = it }, label = { Text("Specialty") }, placeholder = { Text("Cardiology, optometry, dentistry…") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(phone, { phone = it }, label = { Text("Direct phone / extension") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(notes, { notes = it }, label = { Text("Provider notes") }, minLines = 2, modifier = Modifier.fillMaxWidth())
-                Row(
-                    modifier = Modifier.fillMaxWidth().clickable { active = !active },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Checkbox(checked = active, onCheckedChange = { active = it })
-                    Text("Active provider")
-                }
-                error?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
             }
         },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (name.isBlank()) {
-                        error = "Enter the provider name."
-                    } else {
-                        onSave(
-                            CareProviderDraft(
-                                id = existingProvider?.id ?: 0L,
-                                placeId = place.id,
-                                name = name.trim(),
-                                credentials = credentials.trim(),
-                                specialty = specialty.trim(),
-                                phone = phone.trim(),
-                                notes = notes.trim(),
-                                active = active,
-                                createdAt = existingProvider?.createdAt ?: System.currentTimeMillis()
-                            )
-                        )
-                    }
-                },
-                enabled = !isSaving
-            ) { Text(if (isSaving) "Saving…" else "Save") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isSaving) { Text("Cancel") }
+        primaryActionEnabled = !isSaving,
+        secondaryActionEnabled = !isSaving
+    ) {
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it; error = null },
+            label = { Text("Provider or doctor name *") },
+            singleLine = true,
+            isError = error != null && name.isBlank(),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(credentials, { credentials = it }, label = { Text("Credentials") }, placeholder = { Text("MD, DO, NP…") }, singleLine = true, modifier = Modifier.weight(0.8f))
+            OutlinedTextField(specialty, { specialty = it }, label = { Text("Specialty") }, singleLine = true, modifier = Modifier.weight(1.2f))
         }
-    )
+        OutlinedTextField(phone, { phone = it }, label = { Text("Direct phone or extension") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(notes, { notes = it }, label = { Text("Provider notes") }, minLines = 3, modifier = Modifier.fillMaxWidth())
+
+        RebuildInsetPanel {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { active = !active },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(checked = active, onCheckedChange = { active = it })
+                Column {
+                    Text("Active provider", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Inactive providers remain attached to older appointments and visits.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }
 
 private class CareVisitFormState(
@@ -1358,7 +1330,7 @@ fun CareVisitEditorDialog(
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .safeDrawingPadding(),
+                .safeDrawingPadding().imePadding(),
             color = MaterialTheme.colorScheme.background
         ) {
             Column(
@@ -1515,7 +1487,7 @@ fun CareVisitHistoryDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
-            modifier = Modifier.fillMaxSize().safeDrawingPadding(),
+            modifier = Modifier.fillMaxSize().safeDrawingPadding().imePadding(),
             color = MaterialTheme.colorScheme.background
         ) {
             Column(

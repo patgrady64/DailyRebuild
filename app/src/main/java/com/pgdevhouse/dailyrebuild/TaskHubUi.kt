@@ -88,7 +88,7 @@ fun HealthQuickLogScreen(
                     onClick = onLogHighestPain,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(16.dp)
-                ) { Text("Pain") }
+                ) { Text("Highest Pain") }
                 OutlinedButton(
                     onClick = onLogMigraine,
                     modifier = Modifier.weight(1f)

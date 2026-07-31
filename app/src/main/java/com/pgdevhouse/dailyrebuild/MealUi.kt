@@ -1051,7 +1051,7 @@ fun SavedMealsDialog(
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .safeDrawingPadding(),
+                .safeDrawingPadding().imePadding(),
             color = MaterialTheme.colorScheme.background
         ) {
             Column(
