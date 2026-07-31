@@ -319,6 +319,17 @@ fun DailyRebuildApp(
         )
     }
 
+    /*
+     * Full food history is kept in memory for the Today screen's recent and
+     * frequently used shortcuts. It is refreshed after every food change so
+     * corrections and deletions are reflected immediately.
+     */
+    var allFoodEntries by remember {
+        mutableStateOf<List<FoodLogEntry>>(
+            emptyList()
+        )
+    }
+
     var savedProducts by remember {
         mutableStateOf<List<FoodProduct>>(
             emptyList()
@@ -427,6 +438,10 @@ fun DailyRebuildApp(
      */
     var showeredToday by remember {
         mutableStateOf(false)
+    }
+
+    var showerLogToday by remember {
+        mutableStateOf<ShowerLog?>(null)
     }
 
     var showerDatesThisWeek by remember {
@@ -951,8 +966,10 @@ fun DailyRebuildApp(
 
         journalText = ""
         foodEntries = emptyList()
+        allFoodEntries = emptyList()
         mobilitySessionsToday = emptyList()
         showeredToday = false
+        showerLogToday = null
         showerDatesThisWeek = emptyList()
         lifeMaintenanceLogs = emptyList()
         savedActivitySnapshot = null
@@ -1037,7 +1054,8 @@ fun DailyRebuildApp(
             } ?: emptyList()
 
             showerDatesThisWeek = weeklyShowerLogs.map { it.date }
-            showeredToday = weeklyShowerLogs.any { it.date == todayDate }
+            showerLogToday = weeklyShowerLogs.firstOrNull { it.date == todayDate }
+            showeredToday = showerLogToday != null
 
             lifeMaintenanceLogs = loadFeature(
                 feature = "life maintenance",
@@ -1132,6 +1150,13 @@ fun DailyRebuildApp(
                 userMessage = "Could not load today’s food entries."
             ) {
                 foodDao.getEntriesForDate(todayDate)
+            } ?: emptyList()
+
+            allFoodEntries = loadFeature(
+                feature = "food history shortcuts",
+                userMessage = "Could not load recent and frequently used foods."
+            ) {
+                foodDao.getAllEntries()
             } ?: emptyList()
 
             savedProducts = loadFeature(
@@ -1290,6 +1315,33 @@ fun DailyRebuildApp(
 
     val totalCaloriesToday =
         foodEntries.sumOf { it.calories }
+
+    val totalProteinToday =
+        foodEntries.sumOf { it.proteinGrams }
+
+    val todayRepeatShortcuts =
+        remember(allFoodEntries) {
+            buildTodayRepeatShortcuts(allFoodEntries)
+        }
+
+    val todayActivityItems =
+        remember(
+            todayDate,
+            foodEntries,
+            mobilitySessionsToday,
+            showerLogToday,
+            lifeMaintenanceLogs,
+            meetingAttendanceHistory
+        ) {
+            buildTodayActivityItems(
+                date = todayDate,
+                foodEntries = foodEntries,
+                mobilitySessions = mobilitySessionsToday,
+                showerLog = showerLogToday,
+                maintenanceLogs = lifeMaintenanceLogs,
+                meetingAttendance = meetingAttendanceHistory
+            )
+        }
 
     val showerCountThisWeek =
         showerDatesThisWeek.size
@@ -2447,12 +2499,12 @@ fun DailyRebuildApp(
     fun logShowerToday() {
         coroutineScope.launch {
             try {
-                showerLogDao.save(
-                    ShowerLog(
-                        date = todayDate
-                    )
+                val savedShowerLog = ShowerLog(
+                    date = todayDate
                 )
+                showerLogDao.save(savedShowerLog)
 
+                showerLogToday = savedShowerLog
                 showeredToday = true
 
                 if (todayDate !in showerDatesThisWeek) {
@@ -2481,6 +2533,7 @@ fun DailyRebuildApp(
                     todayDate
                 )
 
+                showerLogToday = null
                 showeredToday = false
                 showerDatesThisWeek =
                     showerDatesThisWeek.filterNot {
@@ -3075,6 +3128,7 @@ fun DailyRebuildApp(
         date: String
     ): List<FoodLogEntry> {
         val entries = foodDao.getEntriesForDate(date)
+        allFoodEntries = foodDao.getAllEntries()
 
         if (date == todayDate) {
             foodEntries = entries
@@ -3163,6 +3217,212 @@ fun DailyRebuildApp(
 
                 foodDao.updateFoodEntry(merged)
                 merged to true
+            }
+        }
+    }
+
+    fun repeatTodayShortcut(
+        shortcut: TodayRepeatShortcut,
+        requestedQuantity: Double
+    ) {
+        if (requestedQuantity <= 0.0) return
+
+        coroutineScope.launch {
+            try {
+                when (shortcut.type) {
+                    TodayRepeatShortcutType.FOOD -> {
+                        val source = shortcut.sourceEntries.firstOrNull()
+                            ?: error("The saved food shortcut is no longer available.")
+
+                        val repeatedEntry = scaleFoodEntryToQuantity(
+                            entry = source,
+                            newQuantity = requestedQuantity
+                        ).copy(
+                            id = 0L,
+                            date = todayDate,
+                            mealLogId = null,
+                            savedMealId = null,
+                            mealQuantity = 1.0,
+                            createdAt = System.currentTimeMillis()
+                        )
+
+                        val (savedEntry, merged) =
+                            addOrMergeIndividualFoodEntry(repeatedEntry)
+
+                        synchronizeFoodRecordedForDate(todayDate)
+
+                        snackbarHostState.showSnackbar(
+                            if (merged) {
+                                "${savedEntry.productNameSnapshot} quantity increased."
+                            } else {
+                                "${savedEntry.productNameSnapshot} added to today."
+                            }
+                        )
+                    }
+
+                    TodayRepeatShortcutType.MEAL -> {
+                        val sourceEntries = shortcut.sourceEntries
+                        val firstSource = sourceEntries.firstOrNull()
+                            ?: error("The saved meal shortcut is no longer available.")
+
+                        val sourceMealQuantity =
+                            sourceEntries.maxOfOrNull { it.mealQuantity }
+                                ?.takeIf { it > 0.0 }
+                                ?: 1.0
+                        val scale = requestedQuantity / sourceMealQuantity
+                        val mealName =
+                            firstSource.mealName?.takeIf { it.isNotBlank() }
+                                ?: shortcut.title
+                        val savedMealId = firstSource.savedMealId
+
+                        fun ingredientKey(entry: FoodLogEntry): String =
+                            "${entry.productId}|${entry.unit.trim().lowercase(Locale.US)}"
+
+                        val expectedIngredientKeys =
+                            sourceEntries.map(::ingredientKey).sorted()
+
+                        val currentMealGroups =
+                            foodDao.getEntriesForDate(todayDate)
+                                .filter { !it.mealLogId.isNullOrBlank() }
+                                .groupBy { it.mealLogId.orEmpty() }
+                                .values
+
+                        val existingMealGroup =
+                            currentMealGroups.firstOrNull { group ->
+                                val first = group.firstOrNull()
+                                    ?: return@firstOrNull false
+
+                                when {
+                                    savedMealId != null &&
+                                        first.savedMealId == savedMealId -> true
+
+                                    first.savedMealId == null &&
+                                        first.mealName?.trim()
+                                            ?.equals(
+                                                mealName.trim(),
+                                                ignoreCase = true
+                                            ) == true -> {
+                                        group.map(::ingredientKey).sorted() ==
+                                            expectedIngredientKeys
+                                    }
+
+                                    else -> false
+                                }
+                            }
+
+                        val existingMealQuantity =
+                            existingMealGroup
+                                ?.maxOfOrNull { it.mealQuantity }
+                                ?.takeIf { it > 0.0 }
+                                ?: if (existingMealGroup == null) 0.0 else 1.0
+
+                        val updatedMealQuantity =
+                            existingMealQuantity + requestedQuantity
+                        val mealLogId =
+                            existingMealGroup
+                                ?.firstOrNull()
+                                ?.mealLogId
+                                ?.takeIf { it.isNotBlank() }
+                                ?: UUID.randomUUID().toString()
+                        val now = System.currentTimeMillis()
+
+                        val entriesToAdd = sourceEntries.map { source ->
+                            source.copy(
+                                id = 0L,
+                                date = todayDate,
+                                quantity = source.quantity * scale,
+                                mealName = mealName,
+                                mealLogId = mealLogId,
+                                savedMealId = savedMealId,
+                                mealQuantity = updatedMealQuantity,
+                                calories = source.calories * scale,
+                                proteinGrams = source.proteinGrams * scale,
+                                carbohydrateGrams =
+                                    source.carbohydrateGrams * scale,
+                                fatGrams = source.fatGrams * scale,
+                                sodiumMilligrams =
+                                    source.sodiumMilligrams * scale,
+                                createdAt = now
+                            )
+                        }
+
+                        database.withTransaction {
+                            if (existingMealGroup == null) {
+                                entriesToAdd.forEach { entry ->
+                                    foodDao.addFoodEntry(entry)
+                                }
+                            } else {
+                                val availableExisting =
+                                    existingMealGroup.toMutableList()
+
+                                entriesToAdd.forEach { addedEntry ->
+                                    val existingEntry =
+                                        availableExisting.firstOrNull { current ->
+                                            current.productId == addedEntry.productId &&
+                                                current.unit.trim().equals(
+                                                    addedEntry.unit.trim(),
+                                                    ignoreCase = true
+                                                )
+                                        }
+
+                                    if (existingEntry == null) {
+                                        foodDao.addFoodEntry(addedEntry)
+                                    } else {
+                                        foodDao.updateFoodEntry(
+                                            existingEntry.copy(
+                                                quantity =
+                                                    existingEntry.quantity +
+                                                        addedEntry.quantity,
+                                                mealName = mealName,
+                                                savedMealId = savedMealId,
+                                                mealQuantity =
+                                                    updatedMealQuantity,
+                                                calories =
+                                                    existingEntry.calories +
+                                                        addedEntry.calories,
+                                                proteinGrams =
+                                                    existingEntry.proteinGrams +
+                                                        addedEntry.proteinGrams,
+                                                carbohydrateGrams =
+                                                    existingEntry.carbohydrateGrams +
+                                                        addedEntry.carbohydrateGrams,
+                                                fatGrams =
+                                                    existingEntry.fatGrams +
+                                                        addedEntry.fatGrams,
+                                                sodiumMilligrams =
+                                                    existingEntry.sodiumMilligrams +
+                                                        addedEntry.sodiumMilligrams
+                                            )
+                                        )
+                                        availableExisting.remove(existingEntry)
+                                    }
+                                }
+
+                                availableExisting.forEach { existingEntry ->
+                                    foodDao.updateFoodEntry(
+                                        existingEntry.copy(
+                                            mealName = mealName,
+                                            savedMealId = savedMealId,
+                                            mealQuantity = updatedMealQuantity
+                                        )
+                                    )
+                                }
+                            }
+                        }
+
+                        synchronizeFoodRecordedForDate(todayDate)
+
+                        snackbarHostState.showSnackbar(
+                            "$mealName quantity updated to " +
+                                formatCompactNumber(updatedMealQuantity) +
+                                "."
+                        )
+                    }
+                }
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    "Could not repeat that food or meal."
+                )
             }
         }
     }
@@ -3488,6 +3748,7 @@ fun DailyRebuildApp(
                         backPain = backPain,
                         shinPain = shinPain,
                         calories = totalCaloriesToday,
+                        proteinGrams = totalProteinToday,
                         calorieGoal = currentCalorieGoal,
                         waterOunces = totalWaterOunces,
                         showerDatesThisWeek = showerDatesThisWeek,
@@ -3510,6 +3771,8 @@ fun DailyRebuildApp(
                             .map { LifeMaintenanceTasks.labelFor(it.taskKey) }
                             .sorted(),
                         iopOccurrence = nextIopOccurrence,
+                        repeatShortcuts = todayRepeatShortcuts,
+                        activityItems = todayActivityItems,
                         preferences = appPreferences,
                         isSaving = isSaving || isSavingLifeMaintenance || isSavingIopGroup
                     ),
@@ -3554,6 +3817,9 @@ fun DailyRebuildApp(
                         },
                         onOpenIopGroups = {
                             navigationViewModel.openIopGroups()
+                        },
+                        onRepeatShortcut = { shortcut, quantity ->
+                            repeatTodayShortcut(shortcut, quantity)
                         },
                         onFoodRecordedChange = { foodRecorded = it },
                         onWalkCompletedChange = { walkCompleted = it },

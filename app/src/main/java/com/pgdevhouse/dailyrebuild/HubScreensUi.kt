@@ -10,9 +10,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -29,12 +32,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.pgdevhouse.dailyrebuild.data.local.CareAppointment
 import com.pgdevhouse.dailyrebuild.data.local.CareVisit
@@ -65,6 +70,7 @@ data class TodayScreenState(
     val backPain: Float,
     val shinPain: Float,
     val calories: Double,
+    val proteinGrams: Double,
     val calorieGoal: Int?,
     val waterOunces: Double,
     val showerDatesThisWeek: List<String>,
@@ -84,6 +90,8 @@ data class TodayScreenState(
     val journalText: String,
     val maintenanceCompletedToday: List<String>,
     val iopOccurrence: IopOccurrence?,
+    val repeatShortcuts: TodayShortcutCollection,
+    val activityItems: List<TodayActivityItem>,
     val preferences: DailyRebuildPreferences,
     val isSaving: Boolean
 )
@@ -103,6 +111,7 @@ data class TodayScreenActions(
     val onRemoveShower: () -> Unit,
     val onOpenLifeMaintenance: () -> Unit,
     val onOpenIopGroups: () -> Unit,
+    val onRepeatShortcut: (TodayRepeatShortcut, Double) -> Unit,
     val onFoodRecordedChange: (Boolean) -> Unit,
     val onWalkCompletedChange: (Boolean) -> Unit,
     val onPainRecordedChange: (Boolean) -> Unit,
@@ -131,7 +140,7 @@ fun TodayScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         HubScreenHeader(
@@ -145,69 +154,25 @@ fun TodayScreen(
         }
 
         if (DailyRebuildPreferenceIds.TODAY_GLANCE in visibleSections) {
-            RebuildSectionCard(
-                title = "Today at a Glance",
-                accentColor = RebuildBlue
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    RebuildMetricPill(
-                        label = "calories",
-                        value = if (state.calorieGoal == null) {
-                            state.calories.toInt().toString()
-                        } else {
-                            "${state.calories.toInt()} / ${state.calorieGoal}"
-                        },
-                        modifier = Modifier.weight(1f),
-                        color = MaterialTheme.colorScheme.primaryContainer
-                    )
-                    RebuildMetricPill(
-                        label = "water",
-                        value = formatPreferredWater(
-                            state.waterOunces,
-                            state.preferences.waterUnit
-                        ),
-                        modifier = Modifier.weight(1f),
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    RebuildMetricPill(
-                        label = "back pain",
-                        value = if (state.painRecorded) {
-                            "${state.backPain.toInt()} / 10"
-                        } else {
-                            "Not logged"
-                        },
-                        modifier = Modifier.weight(1f),
-                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
-                    RebuildMetricPill(
-                        label = "shin pain",
-                        value = if (state.painRecorded) {
-                            "${state.shinPain.toInt()} / 10"
-                        } else {
-                            "Not logged"
-                        },
-                        modifier = Modifier.weight(1f),
-                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
-                }
-                RebuildMetricPill(
-                    label = "anchors",
-                    value = "${state.completedTasks} / 4",
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.surfaceVariant
+            TodayAtAGlanceCard(state)
+        }
+
+        if (DailyRebuildPreferenceIds.TODAY_QUICK_LOG in visibleSections) {
+            TodayQuickLogSection(state, actions)
+        }
+
+        if (
+            DailyRebuildPreferenceIds.TODAY_RECENT in visibleSections &&
+            (
+                state.repeatShortcuts.recent.isNotEmpty() ||
+                    state.repeatShortcuts.frequent.isNotEmpty()
                 )
-            }
+        ) {
+            TodayRecentAndFrequentSection(
+                shortcuts = state.repeatShortcuts,
+                onRepeat = actions.onRepeatShortcut,
+                onOpenFood = actions.onOpenFood
+            )
         }
 
         if (DailyRebuildPreferenceIds.TODAY_APPOINTMENTS in visibleSections) {
@@ -236,6 +201,16 @@ fun TodayScreen(
                 meetingsThisWeek = state.meetingsThisWeek,
                 onOpenMeetings = actions.onOpenMeetings,
                 onLogMeeting = actions.onLogMeeting
+            )
+        }
+
+        if (DailyRebuildPreferenceIds.TODAY_ACTIVITY in visibleSections) {
+            TodayActivityTimeline(
+                items = state.activityItems,
+                onOpenFood = actions.onOpenFood,
+                onOpenMobility = actions.onOpenMobility,
+                onOpenMeetings = actions.onOpenMeetings,
+                onOpenMaintenance = actions.onOpenLifeMaintenance
             )
         }
 
@@ -282,44 +257,15 @@ fun TodayScreen(
             }
         }
 
-        if (DailyRebuildPreferenceIds.TODAY_QUICK_LOG in visibleSections) {
-            TodayQuickLogSection(state, actions)
-        }
-
         if (DailyRebuildPreferenceIds.TODAY_SAVE_STATUS in visibleSections) {
-            RebuildInsetPanel(
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    if (state.isSaving) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            text = if (state.isSaving) "Saving changes…" else "Saved automatically",
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "Food, water, meals, showers, life maintenance, check-ins, and notes are saved as you add or change them.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
+            TodaySaveStatus(isSaving = state.isSaving)
         }
 
         if (DailyRebuildPreferenceIds.TODAY_MORE in visibleSections) {
             OutlinedButton(
                 onClick = { showMoreToday = !showMoreToday },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
             ) {
                 Text(if (showMoreToday) "Hide More Today" else "More Today")
             }
@@ -391,6 +337,101 @@ fun TodayScreen(
 }
 
 @Composable
+private fun TodayAtAGlanceCard(
+    state: TodayScreenState
+) {
+    val highestPain = maxOf(state.backPain, state.shinPain)
+
+    RebuildSectionCard(
+        title = "Today at a Glance",
+        subtitle = "The details you are most likely to check during the day.",
+        accentColor = RebuildBlue
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            TodayMetricTile(
+                label = "Calories",
+                value = state.calories.toInt().toString(),
+                supporting = state.calorieGoal?.let { "Goal $it" } ?: "Logged today",
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.primaryContainer
+            )
+            TodayMetricTile(
+                label = "Protein",
+                value = "${formatCompactNumber(state.proteinGrams)} g",
+                supporting = "Logged today",
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.secondaryContainer
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            TodayMetricTile(
+                label = "Water",
+                value = formatPreferredWater(
+                    state.waterOunces,
+                    state.preferences.waterUnit
+                ),
+                supporting = if (state.waterOunces > 0.0) "Recorded" else "Not logged",
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.tertiaryContainer
+            )
+            TodayMetricTile(
+                label = "Highest pain",
+                value = if (state.painRecorded) {
+                    "${highestPain.toInt()} / 10"
+                } else {
+                    "—"
+                },
+                supporting = if (state.painRecorded) "Back or shin" else "Not logged",
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun TodayMetricTile(
+    label: String,
+    value: String,
+    supporting: String,
+    modifier: Modifier = Modifier,
+    color: Color
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(18.dp),
+        color = color
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                value,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                supporting,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
 private fun TodayQuickLogSection(
     state: TodayScreenState,
     actions: TodayScreenActions
@@ -405,6 +446,7 @@ private fun TodayQuickLogSection(
 
     RebuildSectionCard(
         title = "Quick Log",
+        subtitle = "The controls you use most, in the order you chose.",
         accentColor = RebuildAmber
     ) {
         if (visibleActions.isEmpty()) {
@@ -416,7 +458,7 @@ private fun TodayQuickLogSection(
             visibleActions.chunked(2).forEach { rowActions ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     rowActions.forEach { actionId ->
                         TodayQuickLogButton(
@@ -433,13 +475,6 @@ private fun TodayQuickLogSection(
             }
         }
 
-        if (state.showeredToday && DailyRebuildPreferenceIds.QUICK_SHOWER in visibleActions) {
-            Text(
-                text = "Today’s shower was saved immediately. Use More Today → Showering to remove it if it was logged by mistake.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
         if (
             state.maintenanceCompletedToday.isNotEmpty() &&
             DailyRebuildPreferenceIds.QUICK_MAINTENANCE in visibleActions
@@ -461,58 +496,504 @@ private fun TodayQuickLogButton(
     modifier: Modifier = Modifier
 ) {
     val label: String
+    val supporting: String
     val enabled: Boolean
     val onClick: () -> Unit
+    val accent: Color
 
     when (actionId) {
         DailyRebuildPreferenceIds.QUICK_FOOD -> {
             label = "Food"
+            supporting = if (state.foodRecorded) {
+                "${state.calories.toInt()} calories"
+            } else {
+                "Add food or a meal"
+            }
             enabled = true
             onClick = actions.onOpenFood
+            accent = RebuildBlue
         }
         DailyRebuildPreferenceIds.QUICK_WATER -> {
             label = "Water"
+            supporting = if (state.waterOunces > 0.0) {
+                formatPreferredWater(state.waterOunces, state.preferences.waterUnit)
+            } else {
+                "Add a bottle"
+            }
             enabled = true
             onClick = actions.onOpenWater
+            accent = RebuildBlue
         }
         DailyRebuildPreferenceIds.QUICK_MOBILITY -> {
             label = "Mobility"
+            supporting = if (state.mobilityCompleted) "Logged today" else "Start a routine"
             enabled = true
             onClick = actions.onOpenMobility
+            accent = RebuildGreen
         }
         DailyRebuildPreferenceIds.QUICK_PAIN -> {
             label = "Pain"
+            supporting = if (state.painRecorded) {
+                "${maxOf(state.backPain, state.shinPain).toInt()} / 10 highest"
+            } else {
+                "Record current levels"
+            }
             enabled = true
             onClick = actions.onOpenPain
+            accent = RebuildAmber
         }
         DailyRebuildPreferenceIds.QUICK_SHOWER -> {
-            label = if (state.showeredToday) "✓ Shower Logged" else "Log Shower"
+            label = if (state.showeredToday) "Shower logged" else "Shower"
+            supporting = if (state.showeredToday) "Saved today" else "One tap to log"
             enabled = !state.showeredToday
             onClick = actions.onLogShower
+            accent = RebuildGreen
         }
         DailyRebuildPreferenceIds.QUICK_MAINTENANCE -> {
-            label = "Life Maintenance"
+            label = "Maintenance"
+            supporting = when (state.maintenanceCompletedToday.size) {
+                0 -> "Laundry, bedding, and more"
+                1 -> "1 item completed"
+                else -> "${state.maintenanceCompletedToday.size} items completed"
+            }
             enabled = true
             onClick = actions.onOpenLifeMaintenance
+            accent = RebuildGreen
         }
         DailyRebuildPreferenceIds.QUICK_MEETINGS -> {
             label = "Meeting"
+            supporting = "${state.meetingsThisWeek} logged this week"
             enabled = true
             onClick = actions.onLogMeeting
+            accent = RebuildBlue
         }
         else -> {
             label = "Health"
+            supporting = "Measurements and events"
             enabled = true
             onClick = actions.onOpenHealth
+            accent = RebuildAmber
         }
     }
 
-    OutlinedButton(
-        onClick = onClick,
-        enabled = enabled,
+    Surface(
         modifier = modifier
+            .clickable(enabled = enabled, onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        color = if (enabled) {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.58f)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f)
+        },
+        tonalElevation = 1.dp
     ) {
-        Text(label)
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = accent.copy(alpha = 0.18f)
+            ) {
+                Text(
+                    text = if (!enabled && actionId == DailyRebuildPreferenceIds.QUICK_SHOWER) {
+                        "✓"
+                    } else {
+                        "LOG"
+                    },
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accent,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                label,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                supporting,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun TodayRecentAndFrequentSection(
+    shortcuts: TodayShortcutCollection,
+    onRepeat: (TodayRepeatShortcut, Double) -> Unit,
+    onOpenFood: () -> Unit
+) {
+    var selectedMode by rememberSaveable { mutableStateOf("recent") }
+    var quantityShortcut by remember { mutableStateOf<TodayRepeatShortcut?>(null) }
+    var quantityText by rememberSaveable { mutableStateOf("") }
+
+    val selectedShortcuts =
+        if (selectedMode == "frequent") shortcuts.frequent else shortcuts.recent
+
+    RebuildSectionCard(
+        title = "Recent & Frequently Used",
+        subtitle = "Repeat a food or saved meal without rebuilding the entry.",
+        accentColor = RebuildGreen
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = selectedMode == "recent",
+                onClick = { selectedMode = "recent" },
+                label = { Text("Recent") }
+            )
+            FilterChip(
+                selected = selectedMode == "frequent",
+                onClick = { selectedMode = "frequent" },
+                label = { Text("Frequently Used") }
+            )
+        }
+
+        if (selectedShortcuts.isEmpty()) {
+            Text(
+                "Log a few foods or meals and shortcuts will appear here.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            selectedShortcuts.take(4).forEach { shortcut ->
+                TodayRepeatShortcutCard(
+                    shortcut = shortcut,
+                    showUsageCount = selectedMode == "frequent",
+                    onAddAgain = {
+                        onRepeat(shortcut, shortcut.defaultQuantity)
+                    },
+                    onChangeQuantity = {
+                        quantityShortcut = shortcut
+                        quantityText = formatCompactNumber(shortcut.defaultQuantity)
+                    }
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            TextButton(onClick = onOpenFood) {
+                Text("Open Food")
+            }
+        }
+    }
+
+    quantityShortcut?.let { shortcut ->
+        val parsedQuantity = quantityText.toDoubleOrNull()
+
+        AlertDialog(
+            onDismissRequest = {
+                quantityShortcut = null
+                quantityText = ""
+            },
+            title = {
+                Text(
+                    if (shortcut.type == TodayRepeatShortcutType.MEAL) {
+                        "Choose Meal Quantity"
+                    } else {
+                        "Choose Food Quantity"
+                    }
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        shortcut.title,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        if (shortcut.type == TodayRepeatShortcutType.MEAL) {
+                            "Enter how many of this saved meal to add."
+                        } else {
+                            "Enter the amount to add in ${shortcut.quantityUnit}."
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = quantityText,
+                        onValueChange = { value ->
+                            quantityText = value.filter {
+                                it.isDigit() || it == '.'
+                            }
+                        },
+                        label = {
+                            Text(
+                                if (shortcut.type == TodayRepeatShortcutType.MEAL) {
+                                    "Meal quantity"
+                                } else {
+                                    "Quantity (${shortcut.quantityUnit})"
+                                }
+                            )
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Decimal
+                        ),
+                        isError = quantityText.isNotBlank() &&
+                            (parsedQuantity == null || parsedQuantity <= 0.0),
+                        supportingText = {
+                            if (
+                                quantityText.isNotBlank() &&
+                                (parsedQuantity == null || parsedQuantity <= 0.0)
+                            ) {
+                                Text("Enter a number greater than zero.")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val quantity = parsedQuantity ?: return@Button
+                        onRepeat(shortcut, quantity)
+                        quantityShortcut = null
+                        quantityText = ""
+                    },
+                    enabled = parsedQuantity != null && parsedQuantity > 0.0
+                ) {
+                    Text("Add to Today")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        quantityShortcut = null
+                        quantityText = ""
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            },
+            shape = RoundedCornerShape(24.dp)
+        )
+    }
+}
+
+@Composable
+private fun TodayRepeatShortcutCard(
+    shortcut: TodayRepeatShortcut,
+    showUsageCount: Boolean,
+    onAddAgain: () -> Unit,
+    onChangeQuantity: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        shortcut.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        shortcut.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (shortcut.type == TodayRepeatShortcutType.MEAL) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.primaryContainer
+                    }
+                ) {
+                    Text(
+                        if (shortcut.type == TodayRepeatShortcutType.MEAL) "MEAL" else "FOOD",
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            if (showUsageCount) {
+                Text(
+                    "Logged ${shortcut.usageCount} ${if (shortcut.usageCount == 1) "time" else "times"}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onAddAgain,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("Add Again")
+                }
+                OutlinedButton(
+                    onClick = onChangeQuantity,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("Change Amount")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TodayActivityTimeline(
+    items: List<TodayActivityItem>,
+    onOpenFood: () -> Unit,
+    onOpenMobility: () -> Unit,
+    onOpenMeetings: () -> Unit,
+    onOpenMaintenance: () -> Unit
+) {
+    RebuildSectionCard(
+        title = "Today’s Activity",
+        subtitle = "A time-ordered view of records that were added today.",
+        accentColor = RebuildBlue
+    ) {
+        if (items.isEmpty()) {
+            RebuildInsetPanel {
+                Text(
+                    "No time-stamped activity yet.",
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    "Food, saved meals, mobility, showers, meetings, and maintenance will appear here as they are logged.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            items.forEachIndexed { index, item ->
+                TodayActivityRow(item)
+                if (index < items.lastIndex) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 12.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                TextButton(onClick = onOpenFood) { Text("Food") }
+                TextButton(onClick = onOpenMobility) { Text("Mobility") }
+                TextButton(onClick = onOpenMeetings) { Text("Meetings") }
+                TextButton(onClick = onOpenMaintenance) { Text("Maintenance") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TodayActivityRow(
+    item: TodayActivityItem
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 9.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.width(62.dp)
+        ) {
+            Text(
+                formatActivityClockTime(item.occurredAt),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                item.category,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                item.title,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                item.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun TodaySaveStatus(
+    isSaving: Boolean
+) {
+    RebuildInsetPanel(
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (isSaving) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(30.dp),
+                    color = RebuildGreen.copy(alpha = 0.18f)
+                ) {
+                    Text(
+                        "✓",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        color = RebuildGreen,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = if (isSaving) "Saving changes…" else "Everything is saved",
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "Daily Rebuild saves changes as you make them.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 
@@ -550,6 +1031,14 @@ private fun formatPreferredDistance(
     return String.format(Locale.US, "%.2f", value)
 }
 
+private fun formatActivityClockTime(timestamp: Long): String {
+    return runCatching {
+        java.time.Instant.ofEpochMilli(timestamp)
+            .atZone(java.time.ZoneId.systemDefault())
+            .format(DateTimeFormatter.ofPattern("h:mm a", Locale.US))
+    }.getOrDefault("")
+}
+
 @Composable
 private fun TodayPriorityCard(
     state: TodayScreenState,
@@ -559,19 +1048,20 @@ private fun TodayPriorityCard(
     val message: String
     val button: String
     val action: () -> Unit
+    val status = "${state.completedTasks} of 4 daily anchors"
 
     when {
         !state.foodRecorded &&
             DailyRebuildPreferenceIds.LOG_FOOD in state.preferences.enabledLogSections -> {
-            title = "Log today’s meal"
-            message = "Food is the most important unfinished item for today."
+            title = "Log today’s food"
+            message = "Start with a food, saved meal, or recent shortcut."
             button = "Open Food"
             action = actions.onOpenFood
         }
         state.waterOunces <= 0.0 &&
             DailyRebuildPreferenceIds.LOG_FOOD in state.preferences.enabledLogSections -> {
-            title = "Log your water"
-            message = "No water has been recorded today."
+            title = "Add today’s first water"
+            message = "No water has been recorded yet."
             button = "Add Water"
             action = actions.onOpenWater
         }
@@ -585,30 +1075,58 @@ private fun TodayPriorityCard(
         !state.painRecorded &&
             DailyRebuildPreferenceIds.LOG_HEALTH in state.preferences.enabledLogSections -> {
             title = "Record today’s pain"
-            message = "Log the highest back pain and shin-splint pain experienced so far today."
+            message = "Save the highest back and shin pain experienced so far."
             button = "Log Pain"
             action = actions.onOpenPain
         }
         else -> {
             title = "Today is up to date"
-            message = "Your four daily anchors are complete, and every change has already been saved."
+            message = "The main daily anchors are complete. Keep logging only what is useful."
             button = "View History"
             action = actions.onOpenHistory
         }
     }
 
-    RebuildSectionCard(
-        title = "Next Step",
-        subtitle = title,
-        accentColor = RebuildGreen
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.78f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Button(
-            onClick = action,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(button)
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.70f)
+            ) {
+                Text(
+                    status,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                message,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Button(
+                onClick = action,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text(button)
+            }
         }
     }
 }

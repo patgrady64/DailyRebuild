@@ -53,6 +53,8 @@ private val todaySectionOptions = listOf(
     PreferenceOption(DailyRebuildPreferenceIds.TODAY_MEETINGS, "Recovery meetings"),
     PreferenceOption(DailyRebuildPreferenceIds.TODAY_MOVEMENT, "Movement Today"),
     PreferenceOption(DailyRebuildPreferenceIds.TODAY_QUICK_LOG, "Quick Log"),
+    PreferenceOption(DailyRebuildPreferenceIds.TODAY_RECENT, "Recent & Frequently Used"),
+    PreferenceOption(DailyRebuildPreferenceIds.TODAY_ACTIVITY, "Today’s Activity"),
     PreferenceOption(DailyRebuildPreferenceIds.TODAY_SAVE_STATUS, "Automatic-save status"),
     PreferenceOption(DailyRebuildPreferenceIds.TODAY_MORE, "More Today")
 )

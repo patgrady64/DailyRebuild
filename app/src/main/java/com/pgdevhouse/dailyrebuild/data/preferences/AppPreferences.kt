@@ -25,6 +25,8 @@ object DailyRebuildPreferenceIds {
     const val TODAY_MEETINGS = "meetings"
     const val TODAY_MOVEMENT = "movement"
     const val TODAY_QUICK_LOG = "quick_log"
+    const val TODAY_RECENT = "recent_frequent"
+    const val TODAY_ACTIVITY = "today_activity"
     const val TODAY_SAVE_STATUS = "save_status"
     const val TODAY_MORE = "more"
 
@@ -82,6 +84,8 @@ data class DailyRebuildPreferences(
             DailyRebuildPreferenceIds.TODAY_MEETINGS,
             DailyRebuildPreferenceIds.TODAY_MOVEMENT,
             DailyRebuildPreferenceIds.TODAY_QUICK_LOG,
+            DailyRebuildPreferenceIds.TODAY_RECENT,
+            DailyRebuildPreferenceIds.TODAY_ACTIVITY,
             DailyRebuildPreferenceIds.TODAY_SAVE_STATUS,
             DailyRebuildPreferenceIds.TODAY_MORE
         )
@@ -113,6 +117,26 @@ class AppPreferencesRepository(
         ).intersect(DailyRebuildPreferences.defaultLogSections)
             .ifEmpty { setOf(DailyRebuildPreferenceIds.LOG_FOOD) }
 
+        val storedTodaySections = readSet(
+            KEY_VISIBLE_TODAY_SECTIONS,
+            DailyRebuildPreferences.defaultTodaySections
+        ).intersect(DailyRebuildPreferences.defaultTodaySections)
+
+        val visibleTodaySections =
+            if (!preferences.getBoolean(KEY_TODAY_PHASE2_INITIALIZED, false)) {
+                val upgraded = storedTodaySections + setOf(
+                    DailyRebuildPreferenceIds.TODAY_RECENT,
+                    DailyRebuildPreferenceIds.TODAY_ACTIVITY
+                )
+                preferences.edit()
+                    .putStringSet(KEY_VISIBLE_TODAY_SECTIONS, upgraded)
+                    .putBoolean(KEY_TODAY_PHASE2_INITIALIZED, true)
+                    .apply()
+                upgraded
+            } else {
+                storedTodaySections
+            }
+
         return DailyRebuildPreferences(
             enabledLogSections = enabledLogSections,
             quickLogOrder = readOrderedList(
@@ -123,10 +147,7 @@ class AppPreferencesRepository(
                 KEY_HIDDEN_QUICK_LOG_ACTIONS,
                 emptySet()
             ),
-            visibleTodaySections = readSet(
-                KEY_VISIBLE_TODAY_SECTIONS,
-                DailyRebuildPreferences.defaultTodaySections
-            ),
+            visibleTodaySections = visibleTodaySections,
             statsOrder = readOrderedList(
                 KEY_STATS_ORDER,
                 DailyRebuildPreferences.defaultStatsOrder
@@ -228,5 +249,6 @@ class AppPreferencesRepository(
         private const val KEY_FOOD_MASS_UNIT = "food_mass_unit"
         private const val KEY_HEIGHT_UNIT = "height_unit"
         private const val KEY_IOP_DEFAULTS_INITIALIZED = "iop_defaults_initialized"
+        private const val KEY_TODAY_PHASE2_INITIALIZED = "today_phase2_initialized"
     }
 }
