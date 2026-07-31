@@ -576,6 +576,7 @@ data class FoodHubActions(
     val onOpenSavedFoods: () -> Unit,
     val onBuildMeal: () -> Unit,
     val onOpenSavedMeals: () -> Unit,
+    val onUpdateEntryQuantity: (FoodLogEntry, Double) -> Unit,
     val onDeleteEntry: (FoodLogEntry) -> Unit,
     val onDeleteMealLog: (String) -> Unit,
     val onSavePantryItem: (PantryEssential) -> Unit,
@@ -633,6 +634,7 @@ fun FoodHubScreen(
                     onOpenSavedFoods = actions.onOpenSavedFoods,
                     onBuildMeal = actions.onBuildMeal,
                     onOpenSavedMeals = actions.onOpenSavedMeals,
+                    onUpdateQuantity = actions.onUpdateEntryQuantity,
                     onDeleteEntry = actions.onDeleteEntry,
                     onDeleteMealLog = actions.onDeleteMealLog
                 )

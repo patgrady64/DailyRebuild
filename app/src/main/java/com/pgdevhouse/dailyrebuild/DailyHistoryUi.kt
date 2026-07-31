@@ -110,6 +110,7 @@ fun DailyHistoryDialog(
     onAddSavedMeal: (DailyHistoryDay) -> Unit,
     onAddFoodManually: (DailyHistoryDay) -> Unit,
     onUpdateWater: (DailyHistoryDay, WaterBottleCounts) -> Unit,
+    onUpdateFoodEntryQuantity: (DailyHistoryDay, FoodLogEntry, Double) -> Unit,
     onDeleteFoodEntry: (DailyHistoryDay, FoodLogEntry) -> Unit,
     onDeleteMealLog: (DailyHistoryDay, String) -> Unit,
     onDeleteDay: (DailyHistoryDay) -> Unit,
@@ -149,6 +150,10 @@ fun DailyHistoryDialog(
         mutableStateOf<Long?>(null)
     }
 
+    var foodEntryQuantityEditorId by remember {
+        mutableStateOf<Long?>(null)
+    }
+
     var mealLogPendingDeletionId by remember {
         mutableStateOf<String?>(null)
     }
@@ -157,6 +162,7 @@ fun DailyHistoryDialog(
         dayPendingDeletion = null
         waterEditorDate = null
         foodEntryPendingDeletionId = null
+        foodEntryQuantityEditorId = null
         mealLogPendingDeletionId = null
     }
 
@@ -243,6 +249,9 @@ fun DailyHistoryDialog(
                     onAddSavedMeal = { onAddSavedMeal(selectedDay) },
                     onAddFoodManually = { onAddFoodManually(selectedDay) },
                     onEditWater = { waterEditorDate = selectedDay.date },
+                    onRequestEditFoodEntry = { entry ->
+                        foodEntryQuantityEditorId = entry.id
+                    },
                     onRequestDeleteFoodEntry = { entry ->
                         foodEntryPendingDeletionId = entry.id
                     },
@@ -282,6 +291,31 @@ fun DailyHistoryDialog(
                 onUpdateWater(waterEditorDay, counts)
             },
             onDismiss = { waterEditorDate = null }
+        )
+    }
+
+    val quantityEditorEntry =
+        selectedDay?.foodEntries?.firstOrNull {
+            it.id == foodEntryQuantityEditorId
+        }
+
+    if (quantityEditorEntry != null && selectedDay != null) {
+        FoodQuantityEditDialog(
+            entry = quantityEditorEntry,
+            isSaving = isUpdatingDay,
+            onDismiss = {
+                if (!isUpdatingDay) {
+                    foodEntryQuantityEditorId = null
+                }
+            },
+            onSave = { newQuantity ->
+                foodEntryQuantityEditorId = null
+                onUpdateFoodEntryQuantity(
+                    selectedDay,
+                    quantityEditorEntry,
+                    newQuantity
+                )
+            }
         )
     }
 
@@ -759,6 +793,7 @@ private fun DailyHistoryDetailPage(
     onAddSavedMeal: () -> Unit,
     onAddFoodManually: () -> Unit,
     onEditWater: () -> Unit,
+    onRequestEditFoodEntry: (FoodLogEntry) -> Unit,
     onRequestDeleteFoodEntry: (FoodLogEntry) -> Unit,
     onRequestDeleteMeal: (String) -> Unit,
     onRequestDelete: () -> Unit
@@ -918,6 +953,7 @@ private fun DailyHistoryDetailPage(
         HistoryFoodCard(
             entries = day.foodEntries,
             isUpdating = isUpdatingDay,
+            onRequestEditEntry = onRequestEditFoodEntry,
             onRequestDeleteEntry = onRequestDeleteFoodEntry,
             onRequestDeleteMeal = onRequestDeleteMeal
         )
@@ -1750,6 +1786,7 @@ private fun HistoryMedicationCard(
 private fun HistoryFoodCard(
     entries: List<FoodLogEntry>,
     isUpdating: Boolean,
+    onRequestEditEntry: (FoodLogEntry) -> Unit,
     onRequestDeleteEntry: (FoodLogEntry) -> Unit,
     onRequestDeleteMeal: (String) -> Unit
 ) {
@@ -1832,6 +1869,7 @@ private fun HistoryFoodCard(
                 HistoryFoodEntry(
                     entry = entry,
                     isUpdating = isUpdating,
+                    onRequestEdit = { onRequestEditEntry(entry) },
                     onRequestDelete = { onRequestDeleteEntry(entry) }
                 )
 
@@ -1898,6 +1936,7 @@ private fun HistoryMealGroup(
 private fun HistoryFoodEntry(
     entry: FoodLogEntry,
     isUpdating: Boolean,
+    onRequestEdit: () -> Unit,
     onRequestDelete: () -> Unit
 ) {
     if (!entry.mealName.isNullOrBlank()) {
@@ -1917,10 +1956,19 @@ private fun HistoryFoodEntry(
                 "${formatHistoryNumber(entry.calories)} calories",
         style = MaterialTheme.typography.bodySmall
     )
-    TextButton(
-        onClick = onRequestDelete,
-        enabled = !isUpdating
-    ) { Text("Remove") }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        TextButton(
+            onClick = onRequestEdit,
+            enabled = !isUpdating
+        ) { Text("Edit quantity") }
+
+        TextButton(
+            onClick = onRequestDelete,
+            enabled = !isUpdating
+        ) { Text("Remove") }
+    }
 }
 
 @Composable

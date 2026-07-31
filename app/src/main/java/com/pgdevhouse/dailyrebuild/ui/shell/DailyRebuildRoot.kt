@@ -2934,6 +2934,78 @@ fun DailyRebuildApp(
         return entries
     }
 
+    fun scaleFoodEntryToQuantity(
+        entry: FoodLogEntry,
+        newQuantity: Double
+    ): FoodLogEntry {
+        require(newQuantity > 0.0) {
+            "Food quantity must be greater than zero."
+        }
+
+        val nutritionScale =
+            if (entry.quantity > 0.0) {
+                newQuantity / entry.quantity
+            } else {
+                1.0
+            }
+
+        return entry.copy(
+            quantity = newQuantity,
+            calories = entry.calories * nutritionScale,
+            proteinGrams = entry.proteinGrams * nutritionScale,
+            carbohydrateGrams = entry.carbohydrateGrams * nutritionScale,
+            fatGrams = entry.fatGrams * nutritionScale,
+            sodiumMilligrams = entry.sodiumMilligrams * nutritionScale
+        )
+    }
+
+    suspend fun addOrMergeIndividualFoodEntry(
+        entry: FoodLogEntry
+    ): Pair<FoodLogEntry, Boolean> {
+        if (!entry.mealLogId.isNullOrBlank()) {
+            val newId = foodDao.addFoodEntry(entry)
+            return entry.copy(id = newId) to false
+        }
+
+        return database.withTransaction {
+            val existing =
+                foodDao.findMergeableIndividualEntry(
+                    date = entry.date,
+                    productId = entry.productId,
+                    productNameSnapshot = entry.productNameSnapshot,
+                    unit = entry.unit,
+                    mealName = entry.mealName
+                )
+
+            if (existing == null) {
+                val newId = foodDao.addFoodEntry(entry)
+                entry.copy(id = newId) to false
+            } else {
+                val merged =
+                    existing.copy(
+                        quantity = existing.quantity + entry.quantity,
+                        productNameSnapshot = entry.productNameSnapshot,
+                        calories = existing.calories + entry.calories,
+                        proteinGrams =
+                            existing.proteinGrams +
+                                entry.proteinGrams,
+                        carbohydrateGrams =
+                            existing.carbohydrateGrams +
+                                entry.carbohydrateGrams,
+                        fatGrams =
+                            existing.fatGrams +
+                                entry.fatGrams,
+                        sodiumMilligrams =
+                            existing.sodiumMilligrams +
+                                entry.sodiumMilligrams
+                    )
+
+                foodDao.updateFoodEntry(merged)
+                merged to true
+            }
+        }
+    }
+
     fun returnToHistoricalDay(
         successMessage: String? = null
     ) {
@@ -2979,6 +3051,38 @@ fun DailyRebuildApp(
                 snackbarHostState.showSnackbar(
                     message =
                         "Could not load saved meals."
+                )
+            }
+        }
+    }
+
+    fun updateFoodEntryQuantity(
+        entry: FoodLogEntry,
+        newQuantity: Double
+    ) {
+        coroutineScope.launch {
+            try {
+                val updatedEntry =
+                    scaleFoodEntryToQuantity(
+                        entry = entry,
+                        newQuantity = newQuantity
+                    )
+
+                foodDao.updateFoodEntry(updatedEntry)
+                synchronizeFoodRecordedForDate(entry.date)
+
+                if (selectedMainTab == AppNavigationViewModel.STATS_TAB) {
+                    statsViewModel.refresh()
+                }
+
+                snackbarHostState.showSnackbar(
+                    message = "Food quantity updated."
+                )
+            } catch (
+                exception: Exception
+            ) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not update the food quantity."
                 )
             }
         }
@@ -3101,6 +3205,9 @@ fun DailyRebuildApp(
         onOpenSavedFoods = { openSavedFoodsScreen() },
         onBuildMeal = { openMealBuilderScreen() },
         onOpenSavedMeals = { openSavedMealsScreen() },
+        onUpdateEntryQuantity = { entry, quantity ->
+            updateFoodEntryQuantity(entry, quantity)
+        },
         onDeleteEntry = { deleteFoodEntry(it) },
         onDeleteMealLog = { deleteMealLog(it) },
         onSavePantryItem = { item -> savePantryEssential(item) },
@@ -4890,6 +4997,41 @@ fun DailyRebuildApp(
                 }
             },
 
+            onUpdateFoodEntryQuantity = { day, entry, newQuantity ->
+                coroutineScope.launch {
+                    isUpdatingHistoryDay = true
+                    try {
+                        val updatedEntry =
+                            scaleFoodEntryToQuantity(
+                                entry = entry,
+                                newQuantity = newQuantity
+                            )
+
+                        foodDao.updateFoodEntry(updatedEntry)
+                        synchronizeFoodRecordedForDate(day.date)
+
+                        if (day.date == todayDate) {
+                            dayReloadToken++
+                        }
+
+                        historyViewModel.refresh()
+                        statsViewModel.refresh()
+
+                        snackbarHostState.showSnackbar(
+                            "Food quantity updated."
+                        )
+                    } catch (
+                        exception: Exception
+                    ) {
+                        snackbarHostState.showSnackbar(
+                            "Could not update that food quantity."
+                        )
+                    } finally {
+                        isUpdatingHistoryDay = false
+                    }
+                }
+            },
+
             onDeleteFoodEntry = { day, entry ->
                 coroutineScope.launch {
                     isUpdatingHistoryDay = true
@@ -5164,9 +5306,10 @@ fun DailyRebuildApp(
                                         .sodiumMilligrams
                             )
 
-                        foodDao.addFoodEntry(
-                            entry
-                        )
+                        val (
+                            savedEntry,
+                            mergedWithExisting
+                        ) = addOrMergeIndividualFoodEntry(entry)
 
                         synchronizeFoodRecordedForDate(activeFoodLogDate)
 
@@ -5176,20 +5319,31 @@ fun DailyRebuildApp(
                         barcodeViewModel.resetSavePolicy()
 
                         val successMessage =
-                            when (savePolicyUsed) {
-                                BarcodeSavePolicy.USE_LOCAL_WITHOUT_UPDATE ->
-                                    "Food added using your saved local food. Saved Food was not changed."
-                                BarcodeSavePolicy.USE_ONLINE_ONCE ->
-                                    "Food added using the online values. Saved Food was not changed."
-                                BarcodeSavePolicy.UPDATE_LOCAL ->
-                                    "Saved Food updated and food added."
-                                BarcodeSavePolicy.NORMAL ->
-                                    "Food added."
+                            if (mergedWithExisting) {
+                                "${savedEntry.productNameSnapshot} was already logged, so its quantity was increased."
+                            } else {
+                                when (savePolicyUsed) {
+                                    BarcodeSavePolicy.USE_LOCAL_WITHOUT_UPDATE ->
+                                        "Food added using your saved local food. Saved Food was not changed."
+                                    BarcodeSavePolicy.USE_ONLINE_ONCE ->
+                                        "Food added using the online values. Saved Food was not changed."
+                                    BarcodeSavePolicy.UPDATE_LOCAL ->
+                                        "Saved Food updated and food added."
+                                    BarcodeSavePolicy.NORMAL ->
+                                        "Food added."
+                                }
                             }
 
                         if (historicalFoodLogDate != null) {
                             returnToHistoricalDay(
-                                successMessage.replace("Food added", "Food added to the selected day")
+                                if (mergedWithExisting) {
+                                    "${savedEntry.productNameSnapshot} quantity increased on the selected day."
+                                } else {
+                                    successMessage.replace(
+                                        "Food added",
+                                        "Food added to the selected day"
+                                    )
+                                }
                             )
                         } else {
                             snackbarHostState.showSnackbar(

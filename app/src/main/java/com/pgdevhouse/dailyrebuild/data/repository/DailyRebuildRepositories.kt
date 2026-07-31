@@ -87,6 +87,22 @@ class FoodRepository internal constructor(database: DailyRebuildDatabase) {
     suspend fun getAllProducts(): List<FoodProduct> = dao.getAllProducts()
     suspend fun getFavoriteProducts(): List<FoodProduct> = dao.getFavoriteProducts()
     suspend fun addFoodEntry(entry: FoodLogEntry): Long = dao.addFoodEntry(entry)
+    suspend fun updateFoodEntry(entry: FoodLogEntry): Int = dao.updateFoodEntry(entry)
+
+    suspend fun findMergeableIndividualEntry(
+        date: String,
+        productId: Long,
+        productNameSnapshot: String,
+        unit: String,
+        mealName: String?
+    ): FoodLogEntry? = dao.findMergeableIndividualEntry(
+        date = date,
+        productId = productId,
+        productNameSnapshot = productNameSnapshot,
+        unit = unit,
+        mealName = mealName
+    )
+
     suspend fun getEntriesForDate(date: String): List<FoodLogEntry> = dao.getEntriesForDate(date)
     suspend fun getEntriesBetween(startDate: String, endDate: String): List<FoodLogEntry> =
         dao.getEntriesBetween(startDate, endDate)

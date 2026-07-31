@@ -123,6 +123,7 @@ fun FoodSection(
     onOpenSavedFoods: () -> Unit,
     onBuildMeal: () -> Unit,
     onOpenSavedMeals: () -> Unit,
+    onUpdateQuantity: (FoodLogEntry, Double) -> Unit,
     onDeleteEntry: (FoodLogEntry) -> Unit,
     onDeleteMealLog: (String) -> Unit
 ) {
@@ -132,6 +133,15 @@ fun FoodSection(
     val totalFat = entries.sumOf { it.fatGrams }
     val totalSodium = entries.sumOf { it.sodiumMilligrams }
     val displayItems = buildFuelDisplayItems(entries)
+
+    var quantityEditorEntryId by rememberSaveable {
+        mutableStateOf<Long?>(null)
+    }
+
+    val quantityEditorEntry =
+        entries.firstOrNull {
+            it.id == quantityEditorEntryId
+        }
 
     RebuildSectionCard(
         title = "Food and nutrition",
@@ -261,6 +271,9 @@ fun FoodSection(
                     when (item) {
                         is FuelDisplayItem.SingleFood -> FoodEntryRow(
                             entry = item.entry,
+                            onEditQuantity = {
+                                quantityEditorEntryId = item.entry.id
+                            },
                             onDelete = { onDeleteEntry(item.entry) }
                         )
                         is FuelDisplayItem.LoggedMeal -> LoggedMealCard(
@@ -271,6 +284,22 @@ fun FoodSection(
                 }
             }
         }
+    }
+
+    if (quantityEditorEntry != null) {
+        FoodQuantityEditDialog(
+            entry = quantityEditorEntry,
+            onDismiss = {
+                quantityEditorEntryId = null
+            },
+            onSave = { newQuantity ->
+                quantityEditorEntryId = null
+                onUpdateQuantity(
+                    quantityEditorEntry,
+                    newQuantity
+                )
+            }
+        )
     }
 }
 
@@ -416,6 +445,7 @@ private fun MealIngredientRow(
 @Composable
 private fun FoodEntryRow(
     entry: FoodLogEntry,
+    onEditQuantity: () -> Unit,
     onDelete: () -> Unit
 ) {
     Surface(
@@ -448,11 +478,103 @@ private fun FoodEntryRow(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            TextButton(onClick = onDelete) {
-                Text("Delete")
+            Column(
+                horizontalAlignment = Alignment.End
+            ) {
+                TextButton(onClick = onEditQuantity) {
+                    Text("Edit")
+                }
+                TextButton(onClick = onDelete) {
+                    Text("Delete")
+                }
             }
         }
     }
+}
+
+@Composable
+fun FoodQuantityEditDialog(
+    entry: FoodLogEntry,
+    isSaving: Boolean = false,
+    onDismiss: () -> Unit,
+    onSave: (Double) -> Unit
+) {
+    var quantityText by rememberSaveable(entry.id) {
+        mutableStateOf(
+            entry.quantity.toEditableFoodAmount()
+        )
+    }
+
+    val parsedQuantity =
+        parseFoodAmount(quantityText)
+
+    val isValid =
+        parsedQuantity != null &&
+            parsedQuantity > 0.0
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = {
+            if (!isSaving) {
+                onDismiss()
+            }
+        },
+        title = {
+            Text("Update quantity")
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = entry.productNameSnapshot,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                OutlinedTextField(
+                    value = quantityText,
+                    onValueChange = {
+                        quantityText = it
+                    },
+                    label = {
+                        Text("Quantity (${entry.unit})")
+                    },
+                    supportingText = {
+                        Text(
+                            "Calories and nutrition totals will update with the new quantity."
+                        )
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Text
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = isValid && !isSaving,
+                onClick = {
+                    parsedQuantity?.let(onSave)
+                }
+            ) {
+                Text(
+                    if (isSaving) {
+                        "Updating…"
+                    } else {
+                        "Update"
+                    }
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                enabled = !isSaving,
+                onClick = onDismiss
+            ) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable

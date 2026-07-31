@@ -90,6 +90,46 @@ interface FoodDao {
         entry: FoodLogEntry
     ): Long
 
+    @Update
+    suspend fun updateFoodEntry(
+        entry: FoodLogEntry
+    ): Int
+
+    /*
+     * Individual foods can be combined when the same food is logged
+     * more than once on the same day. Saved-meal ingredients are
+     * intentionally excluded because each meal log must remain intact.
+     *
+     * Product ID is the strongest match. The exact displayed product
+     * name is a fallback for manually entered foods that may have been
+     * saved as a new product record on a later entry.
+     */
+    @Query(
+        """
+        SELECT *
+        FROM food_log_entries
+        WHERE date = :date
+          AND (mealLogId IS NULL OR TRIM(mealLogId) = '')
+          AND (
+                productId = :productId
+                OR LOWER(TRIM(productNameSnapshot)) =
+                   LOWER(TRIM(:productNameSnapshot))
+              )
+          AND LOWER(TRIM(unit)) = LOWER(TRIM(:unit))
+          AND LOWER(TRIM(COALESCE(mealName, ''))) =
+              LOWER(TRIM(COALESCE(:mealName, '')))
+        ORDER BY createdAt ASC
+        LIMIT 1
+        """
+    )
+    suspend fun findMergeableIndividualEntry(
+        date: String,
+        productId: Long,
+        productNameSnapshot: String,
+        unit: String,
+        mealName: String?
+    ): FoodLogEntry?
+
     @Query(
         """
         SELECT *
