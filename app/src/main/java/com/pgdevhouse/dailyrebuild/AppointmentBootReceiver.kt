@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.pgdevhouse.dailyrebuild.data.local.DailyRebuildDatabase
+import com.pgdevhouse.dailyrebuild.data.preferences.AppPreferencesRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,21 +23,26 @@ class AppointmentBootReceiver : BroadcastReceiver() {
             SupervisorJob() + Dispatchers.IO
         ).launch {
             try {
-                val database =
-                    DailyRebuildDatabase.getDatabase(
-                        applicationContext
-                    )
+                val reminderPreferences =
+                    AppPreferencesRepository(applicationContext).load()
 
-                database.careAppointmentDao()
-                    .getUpcomingAppointments(
-                        System.currentTimeMillis()
-                    )
-                    .forEach { appointment ->
-                        AppointmentReminderScheduler.schedule(
-                            applicationContext,
-                            appointment
+                if (reminderPreferences.appointmentRemindersEnabled) {
+                    val database =
+                        DailyRebuildDatabase.getDatabase(
+                            applicationContext
                         )
-                    }
+
+                    database.careAppointmentDao()
+                        .getUpcomingAppointments(
+                            System.currentTimeMillis()
+                        )
+                        .forEach { appointment ->
+                            AppointmentReminderScheduler.schedule(
+                                applicationContext,
+                                appointment
+                            )
+                        }
+                }
             } finally {
                 pendingResult.finish()
             }

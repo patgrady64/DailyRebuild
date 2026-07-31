@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pgdevhouse.dailyrebuild.data.backup.DailyRebuildBackupManager
 import com.pgdevhouse.dailyrebuild.data.local.DailyRebuildDatabase
+import com.pgdevhouse.dailyrebuild.data.preferences.AppPreferencesRepository
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
@@ -50,6 +51,9 @@ fun BackupRestoreFeature(
             context = context.applicationContext,
             database = database
         )
+    }
+    val appPreferencesRepository = remember(context) {
+        AppPreferencesRepository(context.applicationContext)
     }
     val scope = rememberCoroutineScope()
 
@@ -159,15 +163,18 @@ fun BackupRestoreFeature(
             }
 
             // Whether the restore succeeds or rolls back, rebuild reminder
-            // alarms from whichever appointment rows are now in the database.
-            database.careAppointmentDao()
-                .getAllAppointments()
-                .forEach { appointment ->
-                    AppointmentReminderScheduler.schedule(
-                        context,
-                        appointment
-                    )
-                }
+            // alarms from whichever appointment rows are now in the database,
+            // but only when appointment reminders are enabled in Settings.
+            if (appPreferencesRepository.load().appointmentRemindersEnabled) {
+                database.careAppointmentDao()
+                    .getAllAppointments()
+                    .forEach { appointment ->
+                        AppointmentReminderScheduler.schedule(
+                            context,
+                            appointment
+                        )
+                    }
+            }
 
             restoreAttempt.onSuccess { result ->
                 pendingRestoreUri = null
@@ -205,14 +212,16 @@ fun BackupRestoreFeature(
                 manager.restoreEmergencyBackup(emergency.file)
             }
 
-            database.careAppointmentDao()
-                .getAllAppointments()
-                .forEach { appointment ->
-                    AppointmentReminderScheduler.schedule(
-                        context,
-                        appointment
-                    )
-                }
+            if (appPreferencesRepository.load().appointmentRemindersEnabled) {
+                database.careAppointmentDao()
+                    .getAllAppointments()
+                    .forEach { appointment ->
+                        AppointmentReminderScheduler.schedule(
+                            context,
+                            appointment
+                        )
+                    }
+            }
 
             restoreAttempt.onSuccess { result ->
                 statusMessage =

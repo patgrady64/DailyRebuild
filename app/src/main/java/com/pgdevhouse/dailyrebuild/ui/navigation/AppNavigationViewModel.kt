@@ -34,6 +34,11 @@ class AppNavigationViewModel(
     )
         private set
 
+    var selectedMeetingsSection by mutableIntStateOf(
+        savedStateHandle[KEY_MEETINGS_SECTION] ?: MEETINGS_ATTENDANCE_SECTION
+    )
+        private set
+
     fun selectMainTab(index: Int) {
         selectedMainTab = index.coerceIn(TODAY_TAB, STATS_TAB)
         savedStateHandle[KEY_MAIN_TAB] = selectedMainTab
@@ -54,6 +59,11 @@ class AppNavigationViewModel(
         savedStateHandle[KEY_MOBILITY_SECTION] = selectedMobilitySection
     }
 
+    fun selectMeetingsSection(index: Int) {
+        selectedMeetingsSection = index.coerceIn(MEETINGS_ATTENDANCE_SECTION, MEETINGS_IOP_SECTION)
+        savedStateHandle[KEY_MEETINGS_SECTION] = selectedMeetingsSection
+    }
+
     fun openLogSection(section: Int) {
         selectLogSection(section)
         selectMainTab(LOG_TAB)
@@ -62,6 +72,11 @@ class AppNavigationViewModel(
     fun openPlanSection(section: Int) {
         selectPlanSection(section)
         selectMainTab(PLAN_TAB)
+    }
+
+    fun openIopGroups() {
+        selectMeetingsSection(MEETINGS_IOP_SECTION)
+        openLogSection(LOG_MEETINGS_SECTION)
     }
 
     fun returnToToday(): Boolean {
@@ -92,9 +107,13 @@ class AppNavigationViewModel(
         const val MOBILITY_ROUTINES_SECTION = 1
         const val MOBILITY_HISTORY_SECTION = 2
 
+        const val MEETINGS_ATTENDANCE_SECTION = 0
+        const val MEETINGS_IOP_SECTION = 1
+
         private const val KEY_MAIN_TAB = "selected_main_tab"
         private const val KEY_LOG_SECTION = "selected_log_section"
         private const val KEY_PLAN_SECTION = "selected_plan_section"
         private const val KEY_MOBILITY_SECTION = "selected_mobility_section"
+        private const val KEY_MEETINGS_SECTION = "selected_meetings_section"
     }
 }

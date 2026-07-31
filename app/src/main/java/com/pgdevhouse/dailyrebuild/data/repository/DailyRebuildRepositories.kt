@@ -13,6 +13,7 @@ import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
 import com.pgdevhouse.dailyrebuild.data.local.HealthProfile
+import com.pgdevhouse.dailyrebuild.data.local.IopGroup
 import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
 import com.pgdevhouse.dailyrebuild.data.local.LifeMaintenanceLog
 import com.pgdevhouse.dailyrebuild.data.local.MedicationEntry
@@ -45,6 +46,7 @@ class DailyRebuildRepositories private constructor(
     val pantry: PantryRepository,
     val healthProfile: HealthProfileRepository,
     val lifeMaintenance: LifeMaintenanceRepository,
+    val iopGroups: IopGroupRepository,
     val history: HistoryRepository
 ) {
     companion object {
@@ -63,6 +65,7 @@ class DailyRebuildRepositories private constructor(
                 pantry = PantryRepository(database),
                 healthProfile = HealthProfileRepository(database),
                 lifeMaintenance = LifeMaintenanceRepository(database),
+                iopGroups = IopGroupRepository(database),
                 history = HistoryRepository(database)
             )
         }
@@ -296,6 +299,16 @@ class LifeMaintenanceRepository internal constructor(
         dao.delete(log.taskKey, log.date)
 
     suspend fun deleteByDate(date: String) = dao.deleteByDate(date)
+}
+
+class IopGroupRepository internal constructor(database: DailyRebuildDatabase) {
+    private val dao = database.iopGroupDao()
+    suspend fun insert(group: IopGroup): Long = dao.insert(group)
+    suspend fun insertAll(groups: List<IopGroup>): List<Long> = dao.insertAll(groups)
+    suspend fun update(group: IopGroup) = dao.update(group)
+    suspend fun delete(group: IopGroup) = dao.delete(group)
+    suspend fun getAll(): List<IopGroup> = dao.getAll()
+    suspend fun getActive(): List<IopGroup> = dao.getActive()
 }
 
 class HealthProfileRepository internal constructor(database: DailyRebuildDatabase) {

@@ -43,6 +43,9 @@ import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import com.pgdevhouse.dailyrebuild.data.local.PantryEssential
 import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
+import com.pgdevhouse.dailyrebuild.data.local.IopGroup
+import com.pgdevhouse.dailyrebuild.data.preferences.DailyRebuildPreferenceIds
+import com.pgdevhouse.dailyrebuild.data.preferences.DailyRebuildPreferences
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -80,6 +83,8 @@ data class TodayScreenState(
     val nightAcetaminophenTaken: Boolean,
     val journalText: String,
     val maintenanceCompletedToday: List<String>,
+    val iopOccurrence: IopOccurrence?,
+    val preferences: DailyRebuildPreferences,
     val isSaving: Boolean
 )
 
@@ -97,6 +102,7 @@ data class TodayScreenActions(
     val onLogShower: () -> Unit,
     val onRemoveShower: () -> Unit,
     val onOpenLifeMaintenance: () -> Unit,
+    val onOpenIopGroups: () -> Unit,
     val onFoodRecordedChange: (Boolean) -> Unit,
     val onWalkCompletedChange: (Boolean) -> Unit,
     val onPainRecordedChange: (Boolean) -> Unit,
@@ -119,6 +125,7 @@ fun TodayScreen(
 ) {
     var showMoreToday by rememberSaveable { mutableStateOf(false) }
     var expandedSection by rememberSaveable { mutableStateOf<String?>(null) }
+    val visibleSections = state.preferences.visibleTodaySections
 
     Column(
         modifier = modifier
@@ -133,284 +140,414 @@ fun TodayScreen(
             onOpenHistory = actions.onOpenHistory
         )
 
-        TodayPriorityCard(state, actions)
-
-        RebuildSectionCard(
-            title = "Today at a Glance",
-            accentColor = RebuildBlue
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                RebuildMetricPill(
-                    label = "calories",
-                    value = if (state.calorieGoal == null) {
-                        state.calories.toInt().toString()
-                    } else {
-                        "${state.calories.toInt()} / ${state.calorieGoal}"
-                    },
-                    modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.primaryContainer
-                )
-                RebuildMetricPill(
-                    label = "water",
-                    value = "${formatOunces(state.waterOunces)} oz",
-                    modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                RebuildMetricPill(
-                    label = "back pain",
-                    value = if (state.painRecorded) {
-                        "${state.backPain.toInt()} / 10"
-                    } else {
-                        "Not logged"
-                    },
-                    modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                )
-                RebuildMetricPill(
-                    label = "shin pain",
-                    value = if (state.painRecorded) {
-                        "${state.shinPain.toInt()} / 10"
-                    } else {
-                        "Not logged"
-                    },
-                    modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                )
-            }
-            RebuildMetricPill(
-                label = "anchors",
-                value = "${state.completedTasks} / 4",
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surfaceVariant
-            )
+        if (DailyRebuildPreferenceIds.TODAY_PRIORITY in visibleSections) {
+            TodayPriorityCard(state, actions)
         }
 
-        HomeAppointmentCard(
-            appointment = state.appointment,
-            onSchedule = actions.onScheduleAppointment,
-            onView = actions.onViewAppointment
-        )
-
-        HomeMeetingsCard(
-            meetingsThisWeek = state.meetingsThisWeek,
-            onOpenMeetings = actions.onOpenMeetings,
-            onLogMeeting = actions.onLogMeeting
-        )
-
-        RebuildSectionCard(
-            title = "Movement Today",
-            subtitle = state.activitySourceLabel ?: "No connected activity recorded yet",
-            accentColor = RebuildGreen
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+        if (DailyRebuildPreferenceIds.TODAY_GLANCE in visibleSections) {
+            RebuildSectionCard(
+                title = "Today at a Glance",
+                accentColor = RebuildBlue
             ) {
-                RebuildMetricPill(
-                    label = "steps",
-                    value = state.activity.steps.toString(),
-                    modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.primaryContainer
-                )
-                RebuildMetricPill(
-                    label = "miles",
-                    value = String.format(Locale.US, "%.2f", state.activity.distanceMiles),
-                    modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-                RebuildMetricPill(
-                    label = "time",
-                    value = formatActivityMinutes(state.activity.activityMinutes),
-                    modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                )
-            }
-            TextButton(onClick = actions.onOpenMobility) {
-                Text("Open Mobility")
-            }
-        }
-
-        RebuildSectionCard(
-            title = "Quick Log",
-            accentColor = RebuildAmber
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = actions.onOpenFood,
-                    modifier = Modifier.weight(1f)
-                ) { Text("Food") }
-                OutlinedButton(
-                    onClick = actions.onOpenWater,
-                    modifier = Modifier.weight(1f)
-                ) { Text("Water") }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = actions.onOpenMobility,
-                    modifier = Modifier.weight(1f)
-                ) { Text("Mobility") }
-                OutlinedButton(
-                    onClick = actions.onOpenPain,
-                    modifier = Modifier.weight(1f)
-                ) { Text("Pain") }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = actions.onLogShower,
-                    enabled = !state.showeredToday,
-                    modifier = Modifier.weight(1f)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        if (state.showeredToday) {
-                            "✓ Shower Logged"
+                    RebuildMetricPill(
+                        label = "calories",
+                        value = if (state.calorieGoal == null) {
+                            state.calories.toInt().toString()
                         } else {
-                            "Log Shower"
-                        }
+                            "${state.calories.toInt()} / ${state.calorieGoal}"
+                        },
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    )
+                    RebuildMetricPill(
+                        label = "water",
+                        value = formatPreferredWater(
+                            state.waterOunces,
+                            state.preferences.waterUnit
+                        ),
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                     )
                 }
-                OutlinedButton(
-                    onClick = actions.onOpenLifeMaintenance,
-                    modifier = Modifier.weight(1f)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("Life Maintenance")
+                    RebuildMetricPill(
+                        label = "back pain",
+                        value = if (state.painRecorded) {
+                            "${state.backPain.toInt()} / 10"
+                        } else {
+                            "Not logged"
+                        },
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    RebuildMetricPill(
+                        label = "shin pain",
+                        value = if (state.painRecorded) {
+                            "${state.shinPain.toInt()} / 10"
+                        } else {
+                            "Not logged"
+                        },
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
                 }
-            }
-            if (state.showeredToday) {
-                Text(
-                    text = "Today’s shower was saved immediately. Use More Today → Showering to remove it if it was logged by mistake.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            if (state.maintenanceCompletedToday.isNotEmpty()) {
-                Text(
-                    text = "Completed today: ${state.maintenanceCompletedToday.joinToString()}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                RebuildMetricPill(
+                    label = "anchors",
+                    value = "${state.completedTasks} / 4",
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceVariant
                 )
             }
         }
 
-        RebuildInsetPanel(
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+        if (DailyRebuildPreferenceIds.TODAY_APPOINTMENTS in visibleSections) {
+            HomeAppointmentCard(
+                appointment = state.appointment,
+                onSchedule = actions.onScheduleAppointment,
+                onView = actions.onViewAppointment
+            )
+        }
+
+        if (
+            DailyRebuildPreferenceIds.TODAY_IOP in visibleSections &&
+            DailyRebuildPreferenceIds.LOG_MEETINGS in state.preferences.enabledLogSections
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            HomeIopCard(
+                occurrence = state.iopOccurrence,
+                onManage = actions.onOpenIopGroups
+            )
+        }
+
+        if (
+            DailyRebuildPreferenceIds.TODAY_MEETINGS in visibleSections &&
+            DailyRebuildPreferenceIds.LOG_MEETINGS in state.preferences.enabledLogSections
+        ) {
+            HomeMeetingsCard(
+                meetingsThisWeek = state.meetingsThisWeek,
+                onOpenMeetings = actions.onOpenMeetings,
+                onLogMeeting = actions.onLogMeeting
+            )
+        }
+
+        if (
+            DailyRebuildPreferenceIds.TODAY_MOVEMENT in visibleSections &&
+            DailyRebuildPreferenceIds.LOG_MOVEMENT in state.preferences.enabledLogSections
+        ) {
+            RebuildSectionCard(
+                title = "Movement Today",
+                subtitle = state.activitySourceLabel ?: "No connected activity recorded yet",
+                accentColor = RebuildGreen
             ) {
-                if (state.isSaving) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    RebuildMetricPill(
+                        label = "steps",
+                        value = state.activity.steps.toString(),
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    )
+                    RebuildMetricPill(
+                        label = if (state.preferences.distanceUnit == "km") "km" else "miles",
+                        value = formatPreferredDistance(
+                            state.activity.distanceMiles,
+                            state.preferences.distanceUnit
+                        ),
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    RebuildMetricPill(
+                        label = "time",
+                        value = formatActivityMinutes(state.activity.activityMinutes),
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                     )
                 }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = if (state.isSaving) "Saving changes…" else "Saved automatically",
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "Food, water, meals, showers, life maintenance, check-ins, and notes are saved as you add or change them.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                TextButton(onClick = actions.onOpenMobility) {
+                    Text("Open Mobility")
                 }
             }
         }
 
-        OutlinedButton(
-            onClick = { showMoreToday = !showMoreToday },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(if (showMoreToday) "Hide More Today" else "More Today")
+        if (DailyRebuildPreferenceIds.TODAY_QUICK_LOG in visibleSections) {
+            TodayQuickLogSection(state, actions)
         }
 
-        if (showMoreToday) {
-            TodayExpandableRow(
-                title = "Daily anchors",
-                summary = "${state.completedTasks} of 4 complete",
-                expanded = expandedSection == "anchors",
-                onClick = {
-                    expandedSection = if (expandedSection == "anchors") null else "anchors"
+        if (DailyRebuildPreferenceIds.TODAY_SAVE_STATUS in visibleSections) {
+            RebuildInsetPanel(
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (state.isSaving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = if (state.isSaving) "Saving changes…" else "Saved automatically",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Food, water, meals, showers, life maintenance, check-ins, and notes are saved as you add or change them.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
-            )
-            if (expandedSection == "anchors") {
-                DailyAnchorPanel(state, actions)
+            }
+        }
+
+        if (DailyRebuildPreferenceIds.TODAY_MORE in visibleSections) {
+            OutlinedButton(
+                onClick = { showMoreToday = !showMoreToday },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (showMoreToday) "Hide More Today" else "More Today")
             }
 
-            TodayExpandableRow(
-                title = "Showering",
-                summary = "${state.showersThisWeek} this week · goal 2–3",
-                expanded = expandedSection == "shower",
-                onClick = {
-                    expandedSection = if (expandedSection == "shower") null else "shower"
-                }
-            )
-            if (expandedSection == "shower") {
-                WeeklyShowerControls(
-                    showerDates = state.showerDatesThisWeek,
-                    showeredToday = state.showeredToday,
-                    onLogToday = actions.onLogShower,
-                    onRemoveToday = actions.onRemoveShower
+            if (showMoreToday) {
+                TodayExpandableRow(
+                    title = "Daily anchors",
+                    summary = "${state.completedTasks} of 4 complete",
+                    expanded = expandedSection == "anchors",
+                    onClick = {
+                        expandedSection = if (expandedSection == "anchors") null else "anchors"
+                    }
                 )
-            }
-
-            TodayExpandableRow(
-                title = "Medication check-in",
-                summary = "Morning and night reference checks",
-                expanded = expandedSection == "medication",
-                onClick = {
-                    expandedSection = if (expandedSection == "medication") null else "medication"
+                if (expandedSection == "anchors") {
+                    DailyAnchorPanel(state, actions)
                 }
-            )
-            if (expandedSection == "medication") {
-                MedicationCheckPanel(state, actions)
-            }
 
-            TodayExpandableRow(
-                title = "Journal",
-                summary = if (state.journalText.isBlank()) "No note yet" else "Today has a note",
-                expanded = expandedSection == "journal",
-                onClick = {
-                    expandedSection = if (expandedSection == "journal") null else "journal"
-                }
-            )
-            if (expandedSection == "journal") {
-                OutlinedTextField(
-                    value = state.journalText,
-                    onValueChange = actions.onJournalTextChange,
-                    label = { Text("Today’s notes") },
-                    minLines = 4,
-                    modifier = Modifier.fillMaxWidth()
+                TodayExpandableRow(
+                    title = "Showering",
+                    summary = "${state.showersThisWeek} this week · goal 2–3",
+                    expanded = expandedSection == "shower",
+                    onClick = {
+                        expandedSection = if (expandedSection == "shower") null else "shower"
+                    }
                 )
+                if (expandedSection == "shower") {
+                    WeeklyShowerControls(
+                        showerDates = state.showerDatesThisWeek,
+                        showeredToday = state.showeredToday,
+                        onLogToday = actions.onLogShower,
+                        onRemoveToday = actions.onRemoveShower
+                    )
+                }
+
+                TodayExpandableRow(
+                    title = "Medication check-in",
+                    summary = "Morning and night reference checks",
+                    expanded = expandedSection == "medication",
+                    onClick = {
+                        expandedSection = if (expandedSection == "medication") null else "medication"
+                    }
+                )
+                if (expandedSection == "medication") {
+                    MedicationCheckPanel(state, actions)
+                }
+
+                TodayExpandableRow(
+                    title = "Journal",
+                    summary = if (state.journalText.isBlank()) "No note yet" else "Today has a note",
+                    expanded = expandedSection == "journal",
+                    onClick = {
+                        expandedSection = if (expandedSection == "journal") null else "journal"
+                    }
+                )
+                if (expandedSection == "journal") {
+                    OutlinedTextField(
+                        value = state.journalText,
+                        onValueChange = actions.onJournalTextChange,
+                        label = { Text("Today’s notes") },
+                        minLines = 4,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
 
         Spacer(Modifier.height(12.dp))
     }
+}
+
+@Composable
+private fun TodayQuickLogSection(
+    state: TodayScreenState,
+    actions: TodayScreenActions
+) {
+    val visibleActions = state.preferences.quickLogOrder
+        .filterNot { it in state.preferences.hiddenQuickLogActions }
+        .filter { actionId ->
+            quickLogSectionFor(actionId)?.let {
+                it in state.preferences.enabledLogSections
+            } ?: true
+        }
+
+    RebuildSectionCard(
+        title = "Quick Log",
+        accentColor = RebuildAmber
+    ) {
+        if (visibleActions.isEmpty()) {
+            Text(
+                "All Quick Log buttons are hidden. Change this under Health → Customize Daily Rebuild.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            visibleActions.chunked(2).forEach { rowActions ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    rowActions.forEach { actionId ->
+                        TodayQuickLogButton(
+                            actionId = actionId,
+                            state = state,
+                            actions = actions,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (rowActions.size == 1) {
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
+        if (state.showeredToday && DailyRebuildPreferenceIds.QUICK_SHOWER in visibleActions) {
+            Text(
+                text = "Today’s shower was saved immediately. Use More Today → Showering to remove it if it was logged by mistake.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (
+            state.maintenanceCompletedToday.isNotEmpty() &&
+            DailyRebuildPreferenceIds.QUICK_MAINTENANCE in visibleActions
+        ) {
+            Text(
+                text = "Completed today: ${state.maintenanceCompletedToday.joinToString()}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun TodayQuickLogButton(
+    actionId: String,
+    state: TodayScreenState,
+    actions: TodayScreenActions,
+    modifier: Modifier = Modifier
+) {
+    val label: String
+    val enabled: Boolean
+    val onClick: () -> Unit
+
+    when (actionId) {
+        DailyRebuildPreferenceIds.QUICK_FOOD -> {
+            label = "Food"
+            enabled = true
+            onClick = actions.onOpenFood
+        }
+        DailyRebuildPreferenceIds.QUICK_WATER -> {
+            label = "Water"
+            enabled = true
+            onClick = actions.onOpenWater
+        }
+        DailyRebuildPreferenceIds.QUICK_MOBILITY -> {
+            label = "Mobility"
+            enabled = true
+            onClick = actions.onOpenMobility
+        }
+        DailyRebuildPreferenceIds.QUICK_PAIN -> {
+            label = "Pain"
+            enabled = true
+            onClick = actions.onOpenPain
+        }
+        DailyRebuildPreferenceIds.QUICK_SHOWER -> {
+            label = if (state.showeredToday) "✓ Shower Logged" else "Log Shower"
+            enabled = !state.showeredToday
+            onClick = actions.onLogShower
+        }
+        DailyRebuildPreferenceIds.QUICK_MAINTENANCE -> {
+            label = "Life Maintenance"
+            enabled = true
+            onClick = actions.onOpenLifeMaintenance
+        }
+        DailyRebuildPreferenceIds.QUICK_MEETINGS -> {
+            label = "Meeting"
+            enabled = true
+            onClick = actions.onLogMeeting
+        }
+        else -> {
+            label = "Health"
+            enabled = true
+            onClick = actions.onOpenHealth
+        }
+    }
+
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier
+    ) {
+        Text(label)
+    }
+}
+
+private fun quickLogSectionFor(actionId: String): String? =
+    when (actionId) {
+        DailyRebuildPreferenceIds.QUICK_FOOD,
+        DailyRebuildPreferenceIds.QUICK_WATER -> DailyRebuildPreferenceIds.LOG_FOOD
+
+        DailyRebuildPreferenceIds.QUICK_MOBILITY -> DailyRebuildPreferenceIds.LOG_MOVEMENT
+        DailyRebuildPreferenceIds.QUICK_MEETINGS -> DailyRebuildPreferenceIds.LOG_MEETINGS
+        DailyRebuildPreferenceIds.QUICK_PAIN,
+        DailyRebuildPreferenceIds.QUICK_SHOWER,
+        DailyRebuildPreferenceIds.QUICK_HEALTH -> DailyRebuildPreferenceIds.LOG_HEALTH
+
+        DailyRebuildPreferenceIds.QUICK_MAINTENANCE -> DailyRebuildPreferenceIds.LOG_MAINTENANCE
+        else -> null
+    }
+
+private fun formatPreferredWater(
+    ounces: Double,
+    unit: String
+): String {
+    return if (unit == "ml") {
+        "${String.format(Locale.US, "%.0f", ounces * 29.5735)} mL"
+    } else {
+        "${formatOunces(ounces)} oz"
+    }
+}
+
+private fun formatPreferredDistance(
+    miles: Double,
+    unit: String
+): String {
+    val value = if (unit == "km") miles * 1.60934 else miles
+    return String.format(Locale.US, "%.2f", value)
 }
 
 @Composable
@@ -424,25 +561,29 @@ private fun TodayPriorityCard(
     val action: () -> Unit
 
     when {
-        !state.foodRecorded -> {
+        !state.foodRecorded &&
+            DailyRebuildPreferenceIds.LOG_FOOD in state.preferences.enabledLogSections -> {
             title = "Log today’s meal"
             message = "Food is the most important unfinished item for today."
             button = "Open Food"
             action = actions.onOpenFood
         }
-        state.waterOunces <= 0.0 -> {
+        state.waterOunces <= 0.0 &&
+            DailyRebuildPreferenceIds.LOG_FOOD in state.preferences.enabledLogSections -> {
             title = "Log your water"
             message = "No water has been recorded today."
             button = "Add Water"
             action = actions.onOpenWater
         }
-        !state.mobilityCompleted -> {
+        !state.mobilityCompleted &&
+            DailyRebuildPreferenceIds.LOG_MOVEMENT in state.preferences.enabledLogSections -> {
             title = "Do a mobility session"
             message = "A short seated or lying routine still counts."
             button = "Open Mobility"
             action = actions.onOpenMobility
         }
-        !state.painRecorded -> {
+        !state.painRecorded &&
+            DailyRebuildPreferenceIds.LOG_HEALTH in state.preferences.enabledLogSections -> {
             title = "Record today’s pain"
             message = "Log the highest back pain and shin-splint pain experienced so far today."
             button = "Log Pain"
@@ -845,13 +986,19 @@ private fun MobilityActivitySummary(
 @Composable
 fun MeetingsHubScreen(
     weeklyAttendance: List<MeetingAttendance>,
+    iopGroups: List<IopGroup>,
+    selectedSection: Int,
     isSaving: Boolean,
+    isSavingIop: Boolean,
+    onSectionChange: (Int) -> Unit,
     onOpenHistory: () -> Unit,
     onLogMeeting: () -> Unit,
     onAddMeeting: () -> Unit,
     onEditAttendance: (MeetingAttendance) -> Unit,
     onDeleteAttendance: (MeetingAttendance) -> Unit,
     onViewFullHistory: () -> Unit,
+    onSaveIopGroup: (IopGroup) -> Unit,
+    onDeleteIopGroup: (IopGroup) -> Unit,
     modifier: Modifier = Modifier,
     showHeader: Boolean = true
 ) {
@@ -864,20 +1011,36 @@ fun MeetingsHubScreen(
     ) {
         if (showHeader) {
             HubScreenHeader(
-                title = "Meetings",
-                subtitle = "A focused weekly goal with only this week’s attendance on the main screen.",
+                title = "Meetings & IOP",
+                subtitle = "Recovery meeting attendance and your recurring IOP schedule have separate homes.",
                 onOpenHistory = onOpenHistory
             )
         }
-        MeetingsTab(
-            weeklyAttendance = weeklyAttendance,
-            isSaving = isSaving,
-            onLogMeeting = onLogMeeting,
-            onAddMeeting = onAddMeeting,
-            onEditAttendance = onEditAttendance,
-            onDeleteAttendance = onDeleteAttendance,
-            onViewFullHistory = onViewFullHistory
+
+        HubSectionTabs(
+            labels = listOf("Meetings", "IOP Groups"),
+            selected = selectedSection.coerceIn(0, 1),
+            onSelected = onSectionChange
         )
+
+        if (selectedSection == 0) {
+            MeetingsTab(
+                weeklyAttendance = weeklyAttendance,
+                isSaving = isSaving,
+                onLogMeeting = onLogMeeting,
+                onAddMeeting = onAddMeeting,
+                onEditAttendance = onEditAttendance,
+                onDeleteAttendance = onDeleteAttendance,
+                onViewFullHistory = onViewFullHistory
+            )
+        } else {
+            IopGroupsScreen(
+                groups = iopGroups,
+                isSaving = isSavingIop,
+                onSave = onSaveIopGroup,
+                onDelete = onDeleteIopGroup
+            )
+        }
         Spacer(Modifier.height(12.dp))
     }
 }
@@ -915,6 +1078,7 @@ fun HealthHubScreen(
     state: HealthHubState,
     actions: HealthHubActions,
     profileContent: @Composable () -> Unit,
+    customizationContent: @Composable () -> Unit,
     backupContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     showHeader: Boolean = true
@@ -994,6 +1158,9 @@ fun HealthHubScreen(
             HealthRecordRow("Connected Activity", "Health Connect permissions and walking source") {
                 openFeature = if (openFeature == "activity") null else "activity"
             }
+            HealthRecordRow("Customize Daily Rebuild", "Sections, Quick Log order, Today cards, units, and reminder preferences") {
+                openFeature = if (openFeature == "customize") null else "customize"
+            }
             HealthRecordRow("Data & Backup", "Export or restore all local Daily Rebuild records") {
                 openFeature = if (openFeature == "backup") null else "backup"
             }
@@ -1017,6 +1184,7 @@ fun HealthHubScreen(
                 onDeleteLog = actions.onDeleteMigraine
             )
             "profile" -> profileContent()
+            "customize" -> customizationContent()
             "activity" -> ActivitySection(
                 availability = state.availability,
                 hasPermissions = state.hasPermissions,

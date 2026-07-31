@@ -83,6 +83,7 @@ import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurementType
 import com.pgdevhouse.dailyrebuild.data.local.LifeMaintenanceLog
 import com.pgdevhouse.dailyrebuild.data.local.LifeMaintenanceTasks
+import com.pgdevhouse.dailyrebuild.data.local.IopGroup
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -105,6 +106,8 @@ import com.pgdevhouse.dailyrebuild.data.local.SavedMeal
 import com.pgdevhouse.dailyrebuild.data.local.SavedMealIngredient
 import com.pgdevhouse.dailyrebuild.data.local.SavedMealWithIngredients
 import com.pgdevhouse.dailyrebuild.data.repository.DailyRebuildRepositories
+import com.pgdevhouse.dailyrebuild.data.preferences.AppPreferencesRepository
+import com.pgdevhouse.dailyrebuild.data.preferences.DailyRebuildPreferenceIds
 import com.pgdevhouse.dailyrebuild.domain.isSupportedFoodBarcode
 import com.pgdevhouse.dailyrebuild.domain.normalizeFoodBarcode
 import com.pgdevhouse.dailyrebuild.ui.food.BarcodeManualSelection
@@ -147,6 +150,15 @@ fun DailyRebuildApp(
     val careAppointmentDao = repositories.appointments
     val healthProfileDao = repositories.healthProfile
     val lifeMaintenanceDao = repositories.lifeMaintenance
+    val iopGroupDao = repositories.iopGroups
+
+    val appPreferencesRepository = remember(context) {
+        AppPreferencesRepository(context)
+    }
+
+    var appPreferences by remember {
+        mutableStateOf(appPreferencesRepository.load())
+    }
 
     val navigationViewModel: AppNavigationViewModel = viewModel()
     val barcodeViewModel: FoodBarcodeViewModel = viewModel()
@@ -508,6 +520,14 @@ fun DailyRebuildApp(
     }
 
     var isDeletingMeetingAttendance by remember {
+        mutableStateOf(false)
+    }
+
+    var iopGroups by remember {
+        mutableStateOf<List<IopGroup>>(emptyList())
+    }
+
+    var isSavingIopGroup by remember {
         mutableStateOf(false)
     }
 
@@ -1047,6 +1067,38 @@ fun DailyRebuildApp(
                 meetingDao.getAllAttendance()
             } ?: emptyList()
 
+            if (!appPreferencesRepository.areIopDefaultsInitialized()) {
+                val existingIopGroups = loadFeature(
+                    feature = "IOP groups",
+                    userMessage = "Could not initialize the IOP group schedule."
+                ) {
+                    iopGroupDao.getAll()
+                }
+
+                if (existingIopGroups != null) {
+                    if (existingIopGroups.isEmpty()) {
+                        val insertedDefaults = loadFeature(
+                            feature = "IOP groups",
+                            userMessage = "Could not create the default IOP group schedule."
+                        ) {
+                            iopGroupDao.insertAll(defaultIopGroupSchedule())
+                        }
+                        if (insertedDefaults != null) {
+                            appPreferencesRepository.markIopDefaultsInitialized()
+                        }
+                    } else {
+                        appPreferencesRepository.markIopDefaultsInitialized()
+                    }
+                }
+            }
+
+            iopGroups = loadFeature(
+                feature = "IOP groups",
+                userMessage = "Could not load the IOP group schedule."
+            ) {
+                iopGroupDao.getAll()
+            } ?: emptyList()
+
             carePlaces = loadFeature(
                 feature = "care places",
                 userMessage = "Could not load saved care places."
@@ -1074,10 +1126,6 @@ fun DailyRebuildApp(
             ) {
                 careAppointmentDao.getAllAppointments()
             } ?: emptyList()
-
-            careAppointments.forEach { appointment ->
-                AppointmentReminderScheduler.schedule(context, appointment)
-            }
 
             foodEntries = loadFeature(
                 feature = "today’s food",
@@ -1173,6 +1221,59 @@ fun DailyRebuildApp(
         }
     }
 
+    LaunchedEffect(
+        appPreferences.appointmentRemindersEnabled,
+        careAppointments
+    ) {
+        careAppointments.forEach { appointment ->
+            if (appPreferences.appointmentRemindersEnabled) {
+                AppointmentReminderScheduler.schedule(context, appointment)
+            } else {
+                AppointmentReminderScheduler.cancel(context, appointment.id)
+            }
+        }
+    }
+
+    val visibleLogSections = listOf(
+        Triple(
+            DailyRebuildPreferenceIds.LOG_FOOD,
+            "Food",
+            AppNavigationViewModel.LOG_FOOD_SECTION
+        ),
+        Triple(
+            DailyRebuildPreferenceIds.LOG_MOVEMENT,
+            "Movement",
+            AppNavigationViewModel.LOG_MOVEMENT_SECTION
+        ),
+        Triple(
+            DailyRebuildPreferenceIds.LOG_MEETINGS,
+            "Meetings & IOP",
+            AppNavigationViewModel.LOG_MEETINGS_SECTION
+        ),
+        Triple(
+            DailyRebuildPreferenceIds.LOG_HEALTH,
+            "Health",
+            AppNavigationViewModel.LOG_HEALTH_SECTION
+        ),
+        Triple(
+            DailyRebuildPreferenceIds.LOG_MAINTENANCE,
+            "Maintenance",
+            AppNavigationViewModel.LOG_MAINTENANCE_SECTION
+        )
+    ).filter { it.first in appPreferences.enabledLogSections }
+
+    LaunchedEffect(appPreferences.enabledLogSections) {
+        if (
+            visibleLogSections.none {
+                it.third == navigationViewModel.selectedLogSection
+            }
+        ) {
+            visibleLogSections.firstOrNull()?.let {
+                navigationViewModel.selectLogSection(it.third)
+            }
+        }
+    }
+
     val completedTasks = listOf(
         foodRecorded,
         walkCompleted,
@@ -1222,6 +1323,12 @@ fun DailyRebuildApp(
 
     val meetingCountThisWeek =
         weeklyMeetingAttendance.size
+
+    val nextIopOccurrence = findNextIopOccurrence(
+        groups = iopGroups,
+        nowDate = runCatching { LocalDate.parse(todayDate) }
+            .getOrDefault(LocalDate.now())
+    )
 
     val meetingGoalNeedsAttention =
         meetingCountThisWeek < DEFAULT_WEEKLY_MEETING_GOAL &&
@@ -1611,6 +1718,52 @@ fun DailyRebuildApp(
                 )
             } finally {
                 isDeletingMeetingAttendance = false
+            }
+        }
+    }
+
+    fun saveIopGroup(group: IopGroup) {
+        coroutineScope.launch {
+            isSavingIopGroup = true
+            try {
+                if (group.id == 0L) {
+                    iopGroupDao.insert(group)
+                } else {
+                    iopGroupDao.update(group)
+                }
+                iopGroups = iopGroupDao.getAll()
+                snackbarHostState.showSnackbar(
+                    message = if (group.id == 0L) {
+                        "IOP group added."
+                    } else {
+                        "IOP group updated."
+                    }
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not save the IOP group."
+                )
+            } finally {
+                isSavingIopGroup = false
+            }
+        }
+    }
+
+    fun deleteIopGroup(group: IopGroup) {
+        coroutineScope.launch {
+            isSavingIopGroup = true
+            try {
+                iopGroupDao.delete(group)
+                iopGroups = iopGroupDao.getAll()
+                snackbarHostState.showSnackbar(
+                    message = "IOP group removed."
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not remove the IOP group."
+                )
+            } finally {
+                isSavingIopGroup = false
             }
         }
     }
@@ -2171,17 +2324,25 @@ fun DailyRebuildApp(
                         savedId
                     ) ?: appointment.copy(id = savedId)
 
-                AppointmentReminderScheduler.schedule(
-                    context,
-                    savedAppointment
-                )
+                if (appPreferences.appointmentRemindersEnabled) {
+                    AppointmentReminderScheduler.schedule(
+                        context,
+                        savedAppointment
+                    )
+                } else {
+                    AppointmentReminderScheduler.cancel(
+                        context,
+                        savedAppointment.id
+                    )
+                }
 
                 careAppointments =
                     careAppointmentDao.getAllAppointments()
 
                 requestAppointmentNotificationPermissionIfNeeded(
                     remindersEnabled =
-                        savedAppointment.scheduledAt > now &&
+                        appPreferences.appointmentRemindersEnabled &&
+                            savedAppointment.scheduledAt > now &&
                             savedAppointment.status in
                                 setOf("Scheduled", "Confirmed") &&
                             (
@@ -3348,7 +3509,9 @@ fun DailyRebuildApp(
                             .filter { it.date == todayDate }
                             .map { LifeMaintenanceTasks.labelFor(it.taskKey) }
                             .sorted(),
-                        isSaving = isSaving || isSavingLifeMaintenance
+                        iopOccurrence = nextIopOccurrence,
+                        preferences = appPreferences,
+                        isSaving = isSaving || isSavingLifeMaintenance || isSavingIopGroup
                     ),
                     actions = TodayScreenActions(
                         onOpenHistory = { openDailyHistory() },
@@ -3389,6 +3552,9 @@ fun DailyRebuildApp(
                                 AppNavigationViewModel.LOG_MAINTENANCE_SECTION
                             )
                         },
+                        onOpenIopGroups = {
+                            navigationViewModel.openIopGroups()
+                        },
                         onFoodRecordedChange = { foodRecorded = it },
                         onWalkCompletedChange = { walkCompleted = it },
                         onPainRecordedChange = { painRecorded = it },
@@ -3408,9 +3574,15 @@ fun DailyRebuildApp(
                 AppNavigationViewModel.LOG_TAB -> TaskHubFrame(
                     title = "Log",
                     subtitle = "Record food, movement, meetings, health events, and occasional life maintenance.",
-                    labels = listOf("Food", "Movement", "Meetings", "Health", "Maintenance"),
-                    selectedSection = navigationViewModel.selectedLogSection,
-                    onSectionSelected = navigationViewModel::selectLogSection,
+                    labels = visibleLogSections.map { it.second },
+                    selectedSection = visibleLogSections.indexOfFirst {
+                        it.third == navigationViewModel.selectedLogSection
+                    }.coerceAtLeast(0),
+                    onSectionSelected = { visibleIndex ->
+                        visibleLogSections.getOrNull(visibleIndex)?.let {
+                            navigationViewModel.selectLogSection(it.third)
+                        }
+                    },
                     onOpenHistory = { openDailyHistory() },
                     modifier = Modifier.padding(innerPadding)
                 ) {
@@ -3430,7 +3602,11 @@ fun DailyRebuildApp(
 
                         AppNavigationViewModel.LOG_MEETINGS_SECTION -> MeetingsHubScreen(
                             weeklyAttendance = weeklyMeetingAttendance,
+                            iopGroups = iopGroups,
+                            selectedSection = navigationViewModel.selectedMeetingsSection,
                             isSaving = isSavingMeeting,
+                            isSavingIop = isSavingIopGroup,
+                            onSectionChange = navigationViewModel::selectMeetingsSection,
                             onOpenHistory = { openDailyHistory() },
                             onLogMeeting = { showMeetingPickerDialog = true },
                             onAddMeeting = {
@@ -3456,6 +3632,8 @@ fun DailyRebuildApp(
                             onViewFullHistory = {
                                 showMeetingHistoryDialog = true
                             },
+                            onSaveIopGroup = ::saveIopGroup,
+                            onDeleteIopGroup = ::deleteIopGroup,
                             showHeader = false
                         )
 
@@ -3548,6 +3726,15 @@ fun DailyRebuildApp(
                         key(healthFeatureRefreshKey) {
                             HealthProfileFeature(repositories)
                         }
+                    },
+                    customizationContent = {
+                        CustomizeDailyRebuildScreen(
+                            preferences = appPreferences,
+                            onPreferencesChange = { updated ->
+                                appPreferences = updated
+                                appPreferencesRepository.save(updated)
+                            }
+                        )
                     },
                     backupContent = {
                         BackupRestoreFeature(database = database)

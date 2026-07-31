@@ -285,7 +285,7 @@ class DailyRebuildBackupManager(
             ?: error("This ZIP does not contain $DATA_ENTRY.")
 
         val manifest = JSONObject(manifestBytes.toString(Charsets.UTF_8))
-        val data = JSONObject(dataBytes.toString(Charsets.UTF_8))
+        val sourceData = JSONObject(dataBytes.toString(Charsets.UTF_8))
 
         require(manifest.optString("formatName") == FORMAT_NAME) {
             "This is not a Daily Rebuild backup."
@@ -293,27 +293,49 @@ class DailyRebuildBackupManager(
         require(manifest.optInt("formatVersion", -1) == FORMAT_VERSION) {
             "This backup format is not supported by this app version."
         }
-        require(data.optInt("formatVersion", -1) == FORMAT_VERSION) {
+        require(sourceData.optInt("formatVersion", -1) == FORMAT_VERSION) {
             "The backup data format does not match its manifest."
         }
 
         val sourceDatabaseVersion = manifest.optInt("databaseVersion", -1)
-        require(sourceDatabaseVersion == DATABASE_VERSION) {
+        require(sourceDatabaseVersion in MIN_SUPPORTED_DATABASE_VERSION..DATABASE_VERSION) {
             when {
                 sourceDatabaseVersion > DATABASE_VERSION ->
                     "This backup was created by a newer Daily Rebuild database. Update the app before restoring it."
-                sourceDatabaseVersion in 1 until DATABASE_VERSION ->
-                    "This backup uses an older database format that this version cannot safely replace in full."
+                sourceDatabaseVersion in 1 until MIN_SUPPORTED_DATABASE_VERSION ->
+                    "This backup is too old for this version to restore safely."
                 else ->
                     "The backup does not contain a valid database version."
             }
         }
 
-        val tables = data.optJSONObject("tables")
+        val sourceTables = sourceData.optJSONObject("tables")
             ?: error("The backup does not contain its table data.")
 
-        // Version 1 backups are complete snapshots. Refusing partial backups
-        // prevents a malformed file from silently erasing an unrelated table.
+        // Verify the snapshot as it was originally written before adding any
+        // compatibility defaults required by newer database versions.
+        val sourceTableNames = sourceTables.keys().asSequence().toList()
+        sourceTableNames.forEach { table ->
+            require(table in INSERT_ORDER) {
+                "The backup contains an unsupported table: $table."
+            }
+            require(sourceTables.optJSONArray(table) != null) {
+                "The backup table $table is not a record list."
+            }
+        }
+        val sourceRecordCount = sourceTableNames.sumOf { table ->
+            sourceTables.getJSONArray(table).length()
+        }
+        require(manifest.optInt("totalRecords", -1) == sourceRecordCount) {
+            "The backup record count does not match its data."
+        }
+
+        val tables = normalizeTablesForCurrentSchema(
+            sourceTables = sourceTables,
+            sourceDatabaseVersion = sourceDatabaseVersion
+        )
+
+        // A restored snapshot must now be complete for the current schema.
         INSERT_ORDER.forEach { table ->
             require(tables.has(table) && tables.optJSONArray(table) != null) {
                 "The backup is incomplete: $table is missing."
@@ -326,10 +348,6 @@ class DailyRebuildBackupManager(
             counts[table] = tables.getJSONArray(table).length()
         }
         val countedTotal = counts.values.sum()
-        val manifestTotal = manifest.optInt("totalRecords", -1)
-        require(manifestTotal == countedTotal) {
-            "The backup record count does not match its data."
-        }
 
         val summary = BackupSummary(
             createdAtEpochMillis = manifest.optLong("createdAtEpochMillis", 0L),
@@ -342,12 +360,80 @@ class DailyRebuildBackupManager(
             "The backup is missing its creation date."
         }
 
+        val normalizedData = JSONObject().apply {
+            put("formatVersion", FORMAT_VERSION)
+            put("tables", tables)
+        }
+
         return BackupDocument(
             manifest = manifest,
-            data = data,
+            data = normalizedData,
             summary = summary,
             tables = tables
         )
+    }
+
+    private fun normalizeTablesForCurrentSchema(
+        sourceTables: JSONObject,
+        sourceDatabaseVersion: Int
+    ): JSONObject {
+        val normalized = JSONObject()
+
+        INSERT_ORDER.forEach { table ->
+            val rows = sourceTables.optJSONArray(table)
+            val compatibleRows = when {
+                rows != null -> rows
+                table == "life_maintenance_logs" &&
+                    sourceDatabaseVersion < LIFE_MAINTENANCE_DATABASE_VERSION -> JSONArray()
+                table == "iop_groups" &&
+                    sourceDatabaseVersion < IOP_GROUP_DATABASE_VERSION -> defaultIopGroupRows()
+                else -> error("The backup is incomplete: $table is missing.")
+            }
+
+            if (table == "food_log_entries") {
+                for (index in 0 until compatibleRows.length()) {
+                    val row = compatibleRows.optJSONObject(index)
+                        ?: error("$table contains a record that is not an object.")
+                    if (!row.has("savedMealId")) {
+                        row.put("savedMealId", JSONObject.NULL)
+                    }
+                    if (!row.has("mealQuantity")) {
+                        row.put("mealQuantity", 1.0)
+                    }
+                }
+            }
+
+            normalized.put(table, compatibleRows)
+        }
+
+        return normalized
+    }
+
+    private fun defaultIopGroupRows(): JSONArray {
+        val timestamp = System.currentTimeMillis()
+        return JSONArray().apply {
+            listOf(
+                1 to "Monday",
+                2 to "Tuesday",
+                3 to "Wednesday",
+                4 to "Thursday"
+            ).forEachIndexed { index, (dayOfWeek, dayLabel) ->
+                put(
+                    JSONObject().apply {
+                        put("id", index + 1L)
+                        put("name", "$dayLabel IOP Group")
+                        put("dayOfWeek", dayOfWeek)
+                        put("startMinutes", 18 * 60 + 30)
+                        put("endMinutes", 20 * 60 + 30)
+                        put("location", "")
+                        put("notes", "")
+                        put("active", 1)
+                        put("createdAt", timestamp)
+                        put("updatedAt", timestamp)
+                    }
+                )
+            }
+        }
     }
 
     private fun validateRowsForCurrentSchema(
@@ -534,7 +620,10 @@ class DailyRebuildBackupManager(
     )
 
     companion object {
-        const val DATABASE_VERSION = 14
+        const val DATABASE_VERSION = 17
+        private const val MIN_SUPPORTED_DATABASE_VERSION = 14
+        private const val LIFE_MAINTENANCE_DATABASE_VERSION = 15
+        private const val IOP_GROUP_DATABASE_VERSION = 17
         const val FORMAT_VERSION = 1
         const val FORMAT_NAME = "Daily Rebuild Backup"
 
@@ -566,7 +655,9 @@ class DailyRebuildBackupManager(
             "care_providers",
             "care_visits",
             "care_appointments",
-            "pantry_essentials"
+            "pantry_essentials",
+            "life_maintenance_logs",
+            "iop_groups"
         )
 
         val DELETE_ORDER = INSERT_ORDER.asReversed()
