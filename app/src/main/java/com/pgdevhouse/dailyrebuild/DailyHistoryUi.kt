@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -33,7 +34,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -98,6 +101,25 @@ enum class DailyHistoryFilter(
     SELF_CARE("Self-care")
 }
 
+enum class DailyHistoryViewMode(
+    val label: String
+) {
+    CALENDAR("Calendar"),
+    LIST("List")
+}
+
+private enum class DailyHistoryMarker(
+    val label: String
+) {
+    FOOD("Food"),
+    WATER("Water"),
+    PAIN("Pain"),
+    MOBILITY("Mobility"),
+    MEETINGS("Meetings / IOP"),
+    SELF_CARE("Self-care"),
+    HEALTH("Health")
+}
+
 @Composable
 fun DailyHistoryDialog(
     days: List<DailyHistoryDay>,
@@ -131,9 +153,18 @@ fun DailyHistoryDialog(
         )
     }
 
+    var viewModeName by rememberSaveable {
+        mutableStateOf(DailyHistoryViewMode.CALENDAR.name)
+    }
+
+    var previewDate by rememberSaveable(initialSelectedDate) {
+        mutableStateOf(initialSelectedDate ?: LocalDate.now().toString())
+    }
+
     LaunchedEffect(initialSelectedDate) {
         if (initialSelectedDate != null) {
             selectedDate = initialSelectedDate
+            previewDate = initialSelectedDate
             visibleMonthText = runCatching {
                 YearMonth.from(LocalDate.parse(initialSelectedDate)).toString()
             }.getOrDefault(visibleMonthText)
@@ -218,7 +249,7 @@ fun DailyHistoryDialog(
             color = MaterialTheme.colorScheme.background
         ) {
             if (selectedDay == null) {
-                DailyHistoryCalendarPage(
+                DailyHistoryOverviewPage(
                     days = filteredDays,
                     allDayCount = days.size,
                     selectedFilter = selectedFilter,
@@ -226,22 +257,21 @@ fun DailyHistoryDialog(
                         onFilterChange(filter)
                         selectedDate = null
                     },
+                    viewMode = runCatching {
+                        DailyHistoryViewMode.valueOf(viewModeName)
+                    }.getOrDefault(DailyHistoryViewMode.CALENDAR),
+                    onViewModeChange = { viewModeName = it.name },
                     isLoading = isLoading,
                     visibleMonth =
                         runCatching {
-                            YearMonth.parse(
-                                visibleMonthText
-                            )
-                        }.getOrDefault(
-                            YearMonth.now()
-                        ),
-                    onVisibleMonthChange = {
-                        visibleMonthText =
-                            it.toString()
+                            YearMonth.parse(visibleMonthText)
+                        }.getOrDefault(YearMonth.now()),
+                    onVisibleMonthChange = { month ->
+                        visibleMonthText = month.toString()
                     },
-                    onSelectDate = {
-                        selectedDate = it
-                    },
+                    previewDate = previewDate,
+                    onPreviewDateChange = { previewDate = it },
+                    onOpenDate = { selectedDate = it },
                     onDismiss = onDismiss
                 )
             } else {
@@ -250,6 +280,10 @@ fun DailyHistoryDialog(
                     isDeletingDay = isDeletingDay,
                     isUpdatingDay = isUpdatingDay,
                     onBack = {
+                        previewDate = selectedDay.date
+                        visibleMonthText = runCatching {
+                            YearMonth.from(LocalDate.parse(selectedDay.date)).toString()
+                        }.getOrDefault(visibleMonthText)
                         selectedDate = null
                     },
                     onAddSavedFood = { onAddSavedFood(selectedDay) },
@@ -475,19 +509,32 @@ fun DailyHistoryDialog(
 }
 
 @Composable
-private fun DailyHistoryCalendarPage(
+private fun DailyHistoryOverviewPage(
     days: List<DailyHistoryDay>,
     allDayCount: Int,
     selectedFilter: DailyHistoryFilter,
     onFilterChange: (DailyHistoryFilter) -> Unit,
+    viewMode: DailyHistoryViewMode,
+    onViewModeChange: (DailyHistoryViewMode) -> Unit,
     isLoading: Boolean,
     visibleMonth: YearMonth,
     onVisibleMonthChange: (YearMonth) -> Unit,
-    onSelectDate: (String) -> Unit,
+    previewDate: String,
+    onPreviewDateChange: (String) -> Unit,
+    onOpenDate: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val currentMonth = YearMonth.now()
-    val earliestMonth = YearMonth.from(LocalDate.now().minusDays(364))
+    val today = LocalDate.now()
+    val currentMonth = YearMonth.from(today)
+    val earliestSavedMonth = days.mapNotNull { day ->
+        runCatching { YearMonth.from(LocalDate.parse(day.date)) }.getOrNull()
+    }.minOrNull()
+    val earliestMonth = minOf(
+        earliestSavedMonth ?: currentMonth.minusMonths(12),
+        currentMonth.minusMonths(12)
+    )
+    val previewDay = days.firstOrNull { it.date == previewDate }
+    val previewLocalDate = runCatching { LocalDate.parse(previewDate) }.getOrNull()
 
     Column(
         modifier = Modifier
@@ -500,18 +547,14 @@ private fun DailyHistoryCalendarPage(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                RebuildStatusBadge(text = "${selectedFilter.label} · ${days.size} days")
+                RebuildStatusBadge(text = "${selectedFilter.label} · ${days.size} dates")
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Daily calendar",
+                    text = "History",
                     style = MaterialTheme.typography.headlineMedium
                 )
                 Text(
-                    text = if (selectedFilter == DailyHistoryFilter.ALL) {
-                        "Tap any past date to add forgotten food or water. Marked dates already contain saved information."
-                    } else {
-                        "Showing ${selectedFilter.label.lowercase(Locale.US)} dates only. $allDayCount total saved days remain available."
-                    },
+                    text = "Browse a month at a glance or use the list for a chronological view. Past dates remain editable.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -519,41 +562,14 @@ private fun DailyHistoryCalendarPage(
             TextButton(onClick = onDismiss) { Text("Close") }
         }
 
+        HistoryViewModeToggle(
+            selectedMode = viewMode,
+            onModeChange = onViewModeChange
+        )
+
         HistoryFilterChips(
             selectedFilter = selectedFilter,
             onFilterChange = onFilterChange
-        )
-
-        RebuildInsetPanel {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                RebuildStatusBadge(
-                    text = "Saved",
-                    modifier = Modifier.weight(1f),
-                    backgroundColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                RebuildStatusBadge(
-                    text = "Food",
-                    modifier = Modifier.weight(1f),
-                    backgroundColor = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                )
-                RebuildStatusBadge(
-                    text = "Saved + Food",
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-
-        CalendarMonthControls(
-            visibleMonth = visibleMonth,
-            canGoPrevious = visibleMonth > earliestMonth,
-            canGoNext = visibleMonth < currentMonth,
-            onPrevious = { onVisibleMonthChange(visibleMonth.minusMonths(1)) },
-            onNext = { onVisibleMonthChange(visibleMonth.plusMonths(1)) }
         )
 
         if (isLoading) {
@@ -563,29 +579,100 @@ private fun DailyHistoryCalendarPage(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     CircularProgressIndicator()
-                    Text("Loading saved dates…")
+                    Text("Loading history…")
                 }
             }
-        } else {
+        } else if (viewMode == DailyHistoryViewMode.CALENDAR) {
+            CalendarMonthControls(
+                visibleMonth = visibleMonth,
+                canGoPrevious = visibleMonth > earliestMonth,
+                canGoNext = visibleMonth < currentMonth,
+                onPrevious = {
+                    val previous = visibleMonth.minusMonths(1)
+                    onVisibleMonthChange(previous)
+                    onPreviewDateChange(previous.atDay(1).toString())
+                },
+                onNext = {
+                    val next = visibleMonth.plusMonths(1)
+                    onVisibleMonthChange(next)
+                    onPreviewDateChange(next.atDay(1).toString())
+                },
+                onToday = {
+                    onVisibleMonthChange(currentMonth)
+                    onPreviewDateChange(today.toString())
+                }
+            )
+
             DailyCalendarMonth(
                 visibleMonth = visibleMonth,
                 days = days,
+                selectedDate = previewDate,
                 allowEmptyDates = selectedFilter == DailyHistoryFilter.ALL,
-                onSelectDate = onSelectDate
+                onSelectDate = onPreviewDateChange
+            )
+
+            HistoryDatePreviewCard(
+                date = previewLocalDate,
+                day = previewDay,
+                selectedFilter = selectedFilter,
+                onOpen = {
+                    previewLocalDate?.let { onOpenDate(it.toString()) }
+                }
+            )
+
+            HistoryMarkerLegend()
+        } else {
+            DailyHistoryList(
+                days = days,
+                selectedFilter = selectedFilter,
+                onOpenDate = onOpenDate
             )
         }
 
         if (!isLoading && days.isEmpty()) {
             RebuildInsetPanel {
-                Text("No history yet", style = MaterialTheme.typography.titleMedium)
+                Text("No matching history", style = MaterialTheme.typography.titleMedium)
                 Text(
                     if (selectedFilter == DailyHistoryFilter.ALL) {
-                        "Tap any past date to add food or water. New information will be saved automatically."
+                        "No saved dates are available yet. In Calendar view, you can still open a past date to add forgotten food or water."
                     } else {
-                        "No ${selectedFilter.label.lowercase(Locale.US)} records match this filter."
+                        "No ${selectedFilter.label.lowercase(Locale.US)} records match this filter. Your other saved history has not been removed."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else if (!isLoading && selectedFilter != DailyHistoryFilter.ALL) {
+            Text(
+                text = "$allDayCount total saved dates remain available across all categories.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun HistoryViewModeToggle(
+    selectedMode: DailyHistoryViewMode,
+    onModeChange: (DailyHistoryViewMode) -> Unit
+) {
+    RebuildInsetPanel {
+        Text(
+            text = "View history as",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            DailyHistoryViewMode.values().forEach { mode ->
+                FilterChip(
+                    selected = selectedMode == mode,
+                    onClick = { onModeChange(mode) },
+                    label = { Text(mode.label) },
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
@@ -598,36 +685,48 @@ private fun CalendarMonthControls(
     canGoPrevious: Boolean,
     canGoNext: Boolean,
     onPrevious: () -> Unit,
-    onNext: () -> Unit
+    onNext: () -> Unit,
+    onToday: () -> Unit
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surface
     ) {
-        Row(
+        Column(
             modifier = Modifier.padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            OutlinedButton(
-                onClick = onPrevious,
-                enabled = canGoPrevious,
-                shape = RoundedCornerShape(14.dp)
-            ) { Text("‹") }
-            Text(
-                text = visibleMonth.format(
-                    DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)
-                ),
-                modifier = Modifier.weight(1f),
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.titleLarge
-            )
-            OutlinedButton(
-                onClick = onNext,
-                enabled = canGoNext,
-                shape = RoundedCornerShape(14.dp)
-            ) { Text("›") }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onPrevious,
+                    enabled = canGoPrevious,
+                    shape = RoundedCornerShape(14.dp)
+                ) { Text("‹") }
+                Text(
+                    text = visibleMonth.format(
+                        DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)
+                    ),
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.titleLarge
+                )
+                OutlinedButton(
+                    onClick = onNext,
+                    enabled = canGoNext,
+                    shape = RoundedCornerShape(14.dp)
+                ) { Text("›") }
+            }
+            TextButton(
+                onClick = onToday,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            ) {
+                Text("Return to Today")
+            }
         }
     }
 }
@@ -636,58 +735,24 @@ private fun CalendarMonthControls(
 private fun DailyCalendarMonth(
     visibleMonth: YearMonth,
     days: List<DailyHistoryDay>,
+    selectedDate: String,
     allowEmptyDates: Boolean,
     onSelectDate: (String) -> Unit
 ) {
-    val daysByDate =
-        days.associateBy {
-            it.date
+    val daysByDate = days.associateBy { it.date }
+    val firstDate = visibleMonth.atDay(1)
+    val leadingBlankCount = firstDate.dayOfWeek.value % 7
+    val cells = buildList<LocalDate?> {
+        repeat(leadingBlankCount) { add(null) }
+        for (dayNumber in 1..visibleMonth.lengthOfMonth()) {
+            add(visibleMonth.atDay(dayNumber))
         }
+        while (size % 7 != 0) add(null)
+    }
 
-    val firstDate =
-        visibleMonth.atDay(1)
-
-    val leadingBlankCount =
-        firstDate.dayOfWeek.value % 7
-
-    val cells =
-        buildList<LocalDate?> {
-            repeat(leadingBlankCount) {
-                add(null)
-            }
-
-            for (
-                dayNumber in
-                1..visibleMonth.lengthOfMonth()
-            ) {
-                add(
-                    visibleMonth.atDay(
-                        dayNumber
-                    )
-                )
-            }
-
-            while (size % 7 != 0) {
-                add(null)
-            }
-        }
-
-    Column(
-        verticalArrangement =
-            Arrangement.spacedBy(4.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            listOf(
-                "Sun",
-                "Mon",
-                "Tue",
-                "Wed",
-                "Thu",
-                "Fri",
-                "Sat"
-            ).forEach { dayName ->
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").forEach { dayName ->
                 Text(
                     text = dayName,
                     modifier = Modifier
@@ -701,35 +766,26 @@ private fun DailyCalendarMonth(
         }
 
         cells.chunked(7).forEach { week ->
-            Row(
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Row(modifier = Modifier.fillMaxWidth()) {
                 week.forEach { date ->
                     if (date == null) {
                         Spacer(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(68.dp)
+                                .height(76.dp)
                                 .padding(2.dp)
                         )
                     } else {
-                        val historyDay =
-                            daysByDate[
-                                date.toString()
-                            ]
-
-                        val isSelectable =
-                            !date.isAfter(LocalDate.now()) &&
-                                (historyDay != null || allowEmptyDates)
-
+                        val historyDay = daysByDate[date.toString()]
+                        val isSelectable = !date.isAfter(LocalDate.now()) &&
+                            (historyDay != null || allowEmptyDates)
                         CalendarDayCell(
                             date = date,
                             historyDay = historyDay,
+                            isSelected = selectedDate == date.toString(),
                             isSelectable = isSelectable,
                             onClick = {
-                                if (isSelectable) {
-                                    onSelectDate(date.toString())
-                                }
+                                if (isSelectable) onSelectDate(date.toString())
                             },
                             modifier = Modifier.weight(1f)
                         )
@@ -744,38 +800,28 @@ private fun DailyCalendarMonth(
 private fun CalendarDayCell(
     date: LocalDate,
     historyDay: DailyHistoryDay?,
+    isSelected: Boolean,
     isSelectable: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val hasSavedRecord =
-        historyDay?.record != null ||
-            historyDay?.activitySnapshot != null ||
-            historyDay?.mobilitySessions?.isNotEmpty() == true ||
-            historyDay?.showerLogged == true ||
-            historyDay?.migraineLogs?.isNotEmpty() == true ||
-            historyDay?.meetingAttendance?.isNotEmpty() == true ||
-            historyDay?.careVisits?.isNotEmpty() == true ||
-            historyDay?.careAppointments?.isNotEmpty() == true ||
-            historyDay?.lifeMaintenanceLogs?.isNotEmpty() == true
-    val hasFood = historyDay?.foodEntries?.isNotEmpty() == true
     val isToday = date == LocalDate.now()
+    val markers = historyDay?.let(::historyMarkersFor).orEmpty()
     val containerColor = when {
-        hasSavedRecord && hasFood -> MaterialTheme.colorScheme.secondaryContainer
-        hasSavedRecord -> MaterialTheme.colorScheme.primaryContainer
-        hasFood -> MaterialTheme.colorScheme.tertiaryContainer
+        isSelected -> MaterialTheme.colorScheme.primaryContainer
+        isToday -> MaterialTheme.colorScheme.tertiaryContainer
+        historyDay != null -> MaterialTheme.colorScheme.surfaceVariant
         else -> MaterialTheme.colorScheme.surface
     }
     val contentColor = when {
-        hasSavedRecord && hasFood -> MaterialTheme.colorScheme.onSecondaryContainer
-        hasSavedRecord -> MaterialTheme.colorScheme.onPrimaryContainer
-        hasFood -> MaterialTheme.colorScheme.onTertiaryContainer
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
+        isSelected -> MaterialTheme.colorScheme.onPrimaryContainer
+        isToday -> MaterialTheme.colorScheme.onTertiaryContainer
+        else -> MaterialTheme.colorScheme.onSurface
     }
 
     Card(
         modifier = modifier
-            .height(76.dp)
+            .height(78.dp)
             .padding(2.dp)
             .clickable(enabled = isSelectable, onClick = onClick),
         shape = RoundedCornerShape(15.dp),
@@ -784,40 +830,337 @@ private fun CalendarDayCell(
             contentColor = contentColor
         ),
         elevation = CardDefaults.cardElevation(
-            defaultElevation = if (historyDay != null || isSelectable) 2.dp else 0.dp
+            defaultElevation = if (isSelected || isToday || historyDay != null) 2.dp else 0.dp
         )
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(6.dp),
+                .padding(horizontal = 4.dp, vertical = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(3.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
                 text = date.dayOfMonth.toString(),
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = if (isToday || historyDay != null) FontWeight.Bold else FontWeight.Normal
+                fontWeight = if (isToday || isSelected || historyDay != null) FontWeight.Bold else FontWeight.Normal
             )
+            if (markers.isNotEmpty()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    markers.take(4).forEach { marker ->
+                        HistoryMarkerDot(marker)
+                    }
+                    if (markers.size > 4) {
+                        Text(
+                            text = "+${markers.size - 4}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            } else {
+                Spacer(Modifier.height(7.dp))
+            }
             Text(
                 text = when {
-                    hasSavedRecord && hasFood -> "Both"
-                    hasSavedRecord -> "Saved"
-                    hasFood -> "Food"
+                    isToday -> "Today"
+                    isSelected -> "Selected"
                     else -> ""
                 },
                 style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center
             )
-            if (isToday) {
-                Text(
-                    text = "Today",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold
-                )
+        }
+    }
+}
+
+@Composable
+private fun HistoryDatePreviewCard(
+    date: LocalDate?,
+    day: DailyHistoryDay?,
+    selectedFilter: DailyHistoryFilter,
+    onOpen: () -> Unit
+) {
+    if (date == null) return
+
+    RebuildSectionCard(
+        title = date.format(DateTimeFormatter.ofPattern("EEEE, MMMM d", Locale.US)),
+        subtitle = if (date == LocalDate.now()) "Today" else "Selected date",
+        accentColor = RebuildTeal
+    ) {
+        if (day == null) {
+            Text(
+                text = if (selectedFilter == DailyHistoryFilter.ALL) {
+                    "Nothing has been recorded for this date yet. You can still open it to add forgotten food or water."
+                } else {
+                    "This date does not contain records matching the current filter."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            val markers = historyMarkersFor(day)
+            HistoryMarkerRow(markers)
+            Text(
+                text = buildHistoryDaySummary(day),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        OutlinedButton(
+            onClick = onOpen,
+            enabled = !date.isAfter(LocalDate.now()) &&
+                (day != null || selectedFilter == DailyHistoryFilter.ALL),
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Text(if (day == null) "Open this date" else "Open full day")
+        }
+    }
+}
+
+@Composable
+private fun DailyHistoryList(
+    days: List<DailyHistoryDay>,
+    selectedFilter: DailyHistoryFilter,
+    onOpenDate: (String) -> Unit
+) {
+    if (days.isEmpty()) return
+
+    var previousMonth: YearMonth? = null
+    days.sortedByDescending { it.date }.forEach { day ->
+        val date = runCatching { LocalDate.parse(day.date) }.getOrNull() ?: return@forEach
+        val month = YearMonth.from(date)
+        if (month != previousMonth) {
+            Text(
+                text = month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            previousMonth = month
+        }
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpenDate(day.date) },
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = date.format(DateTimeFormatter.ofPattern("EEEE, MMMM d", Locale.US)),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = buildHistoryDaySummary(day),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text("View ›", color = MaterialTheme.colorScheme.primary)
+                }
+                HistoryMarkerRow(historyMarkersFor(day))
             }
         }
     }
+
+    Text(
+        text = "Showing ${days.size} ${selectedFilter.label.lowercase(Locale.US)} date${if (days.size == 1) "" else "s"}.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+@Composable
+private fun HistoryMarkerLegend() {
+    RebuildInsetPanel {
+        Text(
+            text = "Calendar markers",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        DailyHistoryMarker.values().toList().chunked(2).forEach { rowMarkers ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                rowMarkers.forEach { marker ->
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        HistoryMarkerDot(marker)
+                        Text(marker.label, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                if (rowMarkers.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryMarkerRow(markers: List<DailyHistoryMarker>) {
+    if (markers.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        markers.chunked(2).forEach { rowMarkers ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                rowMarkers.forEach { marker ->
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        HistoryMarkerDot(marker)
+                        Text(marker.label, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                if (rowMarkers.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryMarkerDot(marker: DailyHistoryMarker) {
+    Surface(
+        modifier = Modifier.size(8.dp),
+        shape = CircleShape,
+        color = historyMarkerColor(marker)
+    ) {}
+}
+
+@Composable
+private fun historyMarkerColor(marker: DailyHistoryMarker): Color {
+    return when (marker) {
+        DailyHistoryMarker.FOOD -> MaterialTheme.colorScheme.tertiary
+        DailyHistoryMarker.WATER -> MaterialTheme.colorScheme.primary
+        DailyHistoryMarker.PAIN -> MaterialTheme.colorScheme.error
+        DailyHistoryMarker.MOBILITY -> MaterialTheme.colorScheme.secondary
+        DailyHistoryMarker.MEETINGS -> MaterialTheme.colorScheme.inversePrimary
+        DailyHistoryMarker.SELF_CARE -> RebuildTeal
+        DailyHistoryMarker.HEALTH -> MaterialTheme.colorScheme.outline
+    }
+}
+
+private fun historyMarkersFor(day: DailyHistoryDay): List<DailyHistoryMarker> {
+    val record = day.record
+    return buildList {
+        if (day.foodEntries.isNotEmpty() || record?.foodRecorded == true) {
+            add(DailyHistoryMarker.FOOD)
+        }
+        if (record != null && calculateHistoryWaterOunces(record) > 0.0) {
+            add(DailyHistoryMarker.WATER)
+        }
+        if (record?.painRecorded == true) {
+            add(DailyHistoryMarker.PAIN)
+        }
+        if (
+            day.activitySnapshot?.let {
+                it.steps > 0L || it.distanceMiles > 0.0 || it.activityMinutes > 0L
+            } == true ||
+            day.mobilitySessions.isNotEmpty() ||
+            record?.walkCompleted == true ||
+            record?.mobilityCompleted == true
+        ) {
+            add(DailyHistoryMarker.MOBILITY)
+        }
+        if (day.meetingAttendance.isNotEmpty()) {
+            add(DailyHistoryMarker.MEETINGS)
+        }
+        if (
+            day.showerLogged ||
+            day.lifeMaintenanceLogs.isNotEmpty() ||
+            record?.journalText?.isNotBlank() == true
+        ) {
+            add(DailyHistoryMarker.SELF_CARE)
+        }
+        if (
+            day.migraineLogs.isNotEmpty() ||
+            day.careVisits.isNotEmpty() ||
+            day.careAppointments.isNotEmpty() ||
+            hasHistoryMedication(record)
+        ) {
+            add(DailyHistoryMarker.HEALTH)
+        }
+    }
+}
+
+private fun buildHistoryDaySummary(day: DailyHistoryDay): String {
+    val parts = mutableListOf<String>()
+    val record = day.record
+
+    if (day.foodEntries.isNotEmpty()) {
+        val mealCount = day.foodEntries.mapNotNull { it.mealLogId }.distinct().size
+        val individualCount = day.foodEntries.count { it.mealLogId.isNullOrBlank() }
+        val foodParts = buildList {
+            if (mealCount > 0) add("$mealCount meal${if (mealCount == 1) "" else "s"}")
+            if (individualCount > 0) add("$individualCount food entr${if (individualCount == 1) "y" else "ies"}")
+        }
+        if (foodParts.isNotEmpty()) parts += foodParts.joinToString(" + ")
+    }
+
+    record?.let {
+        val water = calculateHistoryWaterOunces(it)
+        if (water > 0.0) parts += "${formatHistoryOunces(water)} oz water"
+        if (it.painRecorded) parts += "pain recorded"
+    }
+
+    if (day.mobilitySessions.isNotEmpty()) {
+        parts += "${day.mobilitySessions.size} mobility session${if (day.mobilitySessions.size == 1) "" else "s"}"
+    } else if (day.activitySnapshot?.steps?.let { it > 0L } == true) {
+        parts += String.format(Locale.US, "%,d steps", day.activitySnapshot.steps)
+    }
+    if (day.meetingAttendance.isNotEmpty()) {
+        parts += "${day.meetingAttendance.size} meeting${if (day.meetingAttendance.size == 1) "" else "s"}"
+    }
+    if (day.showerLogged) parts += "shower"
+    if (day.lifeMaintenanceLogs.isNotEmpty()) {
+        parts += "${day.lifeMaintenanceLogs.size} maintenance item${if (day.lifeMaintenanceLogs.size == 1) "" else "s"}"
+    }
+    if (day.migraineLogs.isNotEmpty()) {
+        parts += "${day.migraineLogs.size} migraine / aura event${if (day.migraineLogs.size == 1) "" else "s"}"
+    }
+    if (day.careAppointments.isNotEmpty()) {
+        parts += "${day.careAppointments.size} appointment${if (day.careAppointments.size == 1) "" else "s"}"
+    }
+    if (day.careVisits.isNotEmpty()) {
+        parts += "${day.careVisits.size} care visit${if (day.careVisits.size == 1) "" else "s"}"
+    }
+
+    return parts.take(4).joinToString(" · ").ifBlank { "Saved daily details" }
+}
+
+private fun hasHistoryMedication(record: DailyRecord?): Boolean {
+    if (record == null) return false
+    return record.morningAspirinTaken ||
+        record.morningIbuprofenTaken ||
+        record.morningNaproxenTaken ||
+        record.morningAcetaminophenTaken ||
+        record.nightIbuprofenTaken ||
+        record.nightNaproxenTaken ||
+        record.nightAcetaminophenTaken
 }
 
 @Composable
@@ -861,7 +1204,7 @@ private fun DailyHistoryDetailPage(
                 onClick = onBack,
                 enabled = !isDeletingDay,
                 shape = RoundedCornerShape(16.dp)
-            ) { Text("‹ Calendar") }
+            ) { Text("‹ History") }
             Spacer(Modifier.weight(1f))
             RebuildStatusBadge(
                 text =
@@ -2207,7 +2550,9 @@ private fun dayMatchesHistoryFilter(
             day.foodEntries.isNotEmpty() ||
                 record?.foodRecorded == true
         DailyHistoryFilter.MOBILITY ->
-            day.activitySnapshot != null ||
+            day.activitySnapshot?.let {
+                it.steps > 0L || it.distanceMiles > 0.0 || it.activityMinutes > 0L
+            } == true ||
                 day.mobilitySessions.isNotEmpty() ||
                 record?.walkCompleted == true ||
                 record?.mobilityCompleted == true
@@ -2216,7 +2561,8 @@ private fun dayMatchesHistoryFilter(
         DailyHistoryFilter.HEALTH ->
             day.migraineLogs.isNotEmpty() ||
                 day.careVisits.isNotEmpty() ||
-                day.careAppointments.isNotEmpty()
+                day.careAppointments.isNotEmpty() ||
+                hasHistoryMedication(record)
         DailyHistoryFilter.SELF_CARE ->
             day.showerLogged ||
                 day.lifeMaintenanceLogs.isNotEmpty() ||
