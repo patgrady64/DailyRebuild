@@ -12,6 +12,7 @@ import com.pgdevhouse.dailyrebuild.data.local.CareVisit
 import com.pgdevhouse.dailyrebuild.data.local.DailyActivitySnapshot
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
+import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurementType
 import com.pgdevhouse.dailyrebuild.data.local.IopGroup
@@ -38,6 +39,7 @@ import kotlin.math.abs
 private data class RawStatsData(
     val records: List<DailyRecord>,
     val foodEntries: List<FoodLogEntry>,
+    val foodProducts: List<FoodProduct>,
     val activity: List<DailyActivitySnapshot>,
     val mobility: List<MobilitySession>,
     val showers: List<ShowerLog>,
@@ -193,6 +195,7 @@ class StatsViewModel(
     private suspend fun loadAllData(): RawStatsData = RawStatsData(
         records = repositories.dailyRecords.getAllRecords(),
         foodEntries = repositories.food.getAllEntries(),
+        foodProducts = repositories.food.getAllProducts(),
         activity = repositories.activity.getAllSnapshots(),
         mobility = repositories.mobility.getAllSessions(),
         showers = repositories.showers.getAllLogs(),
@@ -363,7 +366,11 @@ class StatsViewModel(
                 numericChart("Daily calories", "Only days with food records are plotted.", StatsChartType.LINE, current, currentCaloriesByDate, "cal", 0),
                 numericChart("Daily protein", "Protein totals from saved food snapshots.", StatsChartType.LINE, current, currentProteinByDate, "g", 1)
             ),
-            highlights = nutritionHighlights(currentFood, currentCaloriesByDate),
+            highlights = nutritionHighlights(
+                entries = currentFood,
+                products = raw.foodProducts,
+                caloriesByDate = currentCaloriesByDate
+            ),
             notes = listOf("Nutrition averages use food-logged days only. Missing days are not counted as zero.")
         )
 
@@ -673,14 +680,31 @@ class StatsViewModel(
 
     private fun nutritionHighlights(
         entries: List<FoodLogEntry>,
+        products: List<FoodProduct>,
         caloriesByDate: Map<String, Double>
     ): List<StatsListItem> {
-        val individualFoods = entries.filter { it.mealLogId == null }
+        val productsById = products.associateBy { it.id }
+        val individualEntries = entries.filter { it.mealLogId == null }
+
+        val individualFoods = individualEntries
+            .filter { entry ->
+                productsById[entry.productId]?.isCondiment != true
+            }
             .groupingBy { it.productNameSnapshot.trim() }
             .eachCount()
             .entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
             .take(3)
             .map { StatsListItem("Frequently logged food", it.key, "${it.value} log${plural(it.value)}") }
+
+        val condiments = individualEntries
+            .filter { entry ->
+                productsById[entry.productId]?.isCondiment == true
+            }
+            .groupingBy { it.productNameSnapshot.trim() }
+            .eachCount()
+            .entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .take(3)
+            .map { StatsListItem("Frequently logged condiment", it.key, "${it.value} log${plural(it.value)}") }
 
         val savedMeals = entries.filter { it.mealLogId != null }
             .groupBy { it.mealLogId }
@@ -691,7 +715,8 @@ class StatsViewModel(
             .take(3)
             .map { StatsListItem("Frequently logged meal", it.key, "${it.value} log${plural(it.value)}") }
 
-        return individualFoods + savedMeals + highLowHighlights(caloriesByDate, "cal", 0)
+        return individualFoods + condiments + savedMeals +
+            highLowHighlights(caloriesByDate, "cal", 0)
     }
 
     private fun frequentMobilityRoutines(sessions: List<MobilitySession>): List<StatsListItem> =

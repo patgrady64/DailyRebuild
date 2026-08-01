@@ -1290,8 +1290,9 @@ fun DailyRebuildApp(
                 pantryViewModel.refresh()
             }
 
-            if (foodEntries.isNotEmpty()) {
-                foodRecorded = true
+            val savedProductsById = savedProducts.associateBy { it.id }
+            foodRecorded = foodEntries.any { entry ->
+                savedProductsById[entry.productId]?.isCondiment != true
             }
 
             loadFailures.summaryMessage()?.let { message ->
@@ -3620,15 +3621,26 @@ fun DailyRebuildApp(
 
     val activeFoodLogDate = historicalFoodLogDate ?: todayDate
 
+    suspend fun hasNonCondimentFood(
+        entries: List<FoodLogEntry>
+    ): Boolean {
+        if (entries.isEmpty()) return false
+        val productsById = foodDao.getAllProducts().associateBy { it.id }
+        return entries.any { entry ->
+            productsById[entry.productId]?.isCondiment != true
+        }
+    }
+
     suspend fun synchronizeFoodRecordedForDate(
         date: String
     ): List<FoodLogEntry> {
         val entries = foodDao.getEntriesForDate(date)
+        val substantiveFoodRecorded = hasNonCondimentFood(entries)
         allFoodEntries = foodDao.getAllEntries()
 
         if (date == todayDate) {
             foodEntries = entries
-            foodRecorded = entries.isNotEmpty()
+            foodRecorded = substantiveFoodRecorded
         } else {
             val existingRecord =
                 dailyRecordDao.getRecordByDate(date)
@@ -3636,13 +3648,27 @@ fun DailyRebuildApp(
 
             dailyRecordDao.saveRecord(
                 existingRecord.copy(
-                    foodRecorded = entries.isNotEmpty(),
+                    foodRecorded = substantiveFoodRecorded,
                     updatedAt = System.currentTimeMillis()
                 )
             )
         }
 
         return entries
+    }
+
+    suspend fun synchronizeFoodRecordedForProduct(
+        productId: Long
+    ) {
+        foodDao.getAllEntries()
+            .asSequence()
+            .filter { it.productId == productId }
+            .map { it.date }
+            .distinct()
+            .toList()
+            .forEach { date ->
+                synchronizeFoodRecordedForDate(date)
+            }
     }
 
     fun scaleFoodEntryToQuantity(
@@ -6069,7 +6095,7 @@ fun DailyRebuildApp(
                     }.getOrDefault(date)
                 } ?: "today",
 
-            onAddToToday = { savedMeal, multiplier ->
+            onAddToToday = { savedMeal, multiplier, selectedOptionalIngredientIds ->
                 coroutineScope.launch {
                     isAddingSavedMeal = true
 
@@ -6080,9 +6106,14 @@ fun DailyRebuildApp(
                             }
 
                         val sortedIngredients =
-                            savedMeal.ingredients.sortedBy {
-                                it.sortOrder
-                            }
+                            savedMeal.ingredients
+                                .filter { ingredient ->
+                                    !ingredient.isOptional ||
+                                        ingredient.id in selectedOptionalIngredientIds
+                                }
+                                .sortedBy {
+                                    it.sortOrder
+                                }
 
                         if (sortedIngredients.isEmpty()) {
                             error(
@@ -6545,6 +6576,10 @@ fun DailyRebuildApp(
                                                 ingredient
                                                     .amount,
 
+                                            isOptional =
+                                                ingredient
+                                                    .isOptional,
+
                                             sortOrder =
                                                 index
                                         )
@@ -6618,6 +6653,34 @@ fun DailyRebuildApp(
 
                 showSavedFoodsDialog = false
                 showManualFoodDialog = true
+            },
+
+            onSetCondiment = { product, isCondiment ->
+                coroutineScope.launch {
+                    try {
+                        foodDao.updateProduct(
+                            product.copy(
+                                isCondiment = isCondiment,
+                                updatedAt = System.currentTimeMillis()
+                            )
+                        )
+                        savedProducts = foodDao.getAllProducts()
+                        synchronizeFoodRecordedForProduct(product.id)
+                        historyViewModel.refresh()
+                        statsViewModel.refresh()
+                        snackbarHostState.showSnackbar(
+                            if (isCondiment) {
+                                "${product.name} is now a condiment."
+                            } else {
+                                "${product.name} is now a regular food."
+                            }
+                        )
+                    } catch (_: Exception) {
+                        snackbarHostState.showSnackbar(
+                            "Could not update the condiment setting."
+                        )
+                    }
+                }
             },
 
             onDeleteProduct = { product ->
@@ -7122,6 +7185,10 @@ fun DailyRebuildApp(
                             barcodeViewModel.resetSavePolicy()
                             isEditingSavedFood = false
                             showSavedFoodsDialog = true
+
+                            synchronizeFoodRecordedForProduct(productId)
+                            historyViewModel.refresh()
+                            statsViewModel.refresh()
 
                             snackbarHostState
                                 .showSnackbar(

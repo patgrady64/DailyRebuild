@@ -51,7 +51,8 @@ import kotlin.math.abs
 data class MealIngredientDraft(
     val product: FoodProduct,
     val amountMode: String,
-    val amount: Double
+    val amount: Double,
+    val isOptional: Boolean = false
 )
 
 data class MealBuilderDraft(
@@ -131,6 +132,18 @@ fun MealBuilderDialog(
         mutableStateOf(-1)
     }
 
+    var ingredientIsOptional by rememberSaveable(
+        initialMealId
+    ) {
+        mutableStateOf(false)
+    }
+
+    var choosingCondimentsOnly by rememberSaveable(
+        initialMealId
+    ) {
+        mutableStateOf(false)
+    }
+
     /*
      * The key is only the meal ID. Updating the Saved Foods
      * list while this dialog is open must not erase the
@@ -157,7 +170,9 @@ fun MealBuilderDialog(
                                         amountMode =
                                             ingredient.amountMode,
                                         amount =
-                                            ingredient.amount
+                                            ingredient.amount,
+                                        isOptional =
+                                            ingredient.isOptional
                                     )
                                 }
                         }
@@ -195,7 +210,14 @@ fun MealBuilderDialog(
             when (currentPage) {
                 "choose_product" -> {
                     ChooseMealProductPage(
-                        products = products,
+                        products =
+                            if (choosingCondimentsOnly) {
+                                products.filter { it.isCondiment }
+                            } else {
+                                products
+                            },
+
+                        condimentsOnly = choosingCondimentsOnly,
 
                         onBack = {
                             currentPage = "summary"
@@ -235,6 +257,9 @@ fun MealBuilderDialog(
                             editingIngredientIndex =
                                 -1
 
+                            ingredientIsOptional =
+                                product.isCondiment && choosingCondimentsOnly
+
                             currentPage =
                                 "enter_amount"
                         }
@@ -267,6 +292,12 @@ fun MealBuilderDialog(
 
                             amountText = amountText,
 
+                            isOptional = ingredientIsOptional,
+
+                            onOptionalChange = {
+                                ingredientIsOptional = it
+                            },
+
                             onAmountTextChange = {
                                 amountText = it
                             },
@@ -277,6 +308,8 @@ fun MealBuilderDialog(
 
                                 editingIngredientIndex =
                                     -1
+
+                                ingredientIsOptional = false
 
                                 currentPage =
                                     "summary"
@@ -301,7 +334,11 @@ fun MealBuilderDialog(
                                                 amountMode,
 
                                             amount =
-                                                parsedAmount
+                                                parsedAmount,
+
+                                            isOptional =
+                                                selectedProduct.isCondiment &&
+                                                    ingredientIsOptional
                                         )
 
                                     if (
@@ -322,6 +359,8 @@ fun MealBuilderDialog(
 
                                     editingIngredientIndex =
                                         -1
+
+                                    ingredientIsOptional = false
 
                                     currentPage =
                                         "summary"
@@ -353,12 +392,22 @@ fun MealBuilderDialog(
                         productsAvailable =
                             products.isNotEmpty(),
 
+                        condimentsAvailable =
+                            products.any { it.isCondiment },
+
                         isEditing =
                             initialMeal != null,
 
                         isSaving = isSaving,
 
                         onAddIngredient = {
+                            choosingCondimentsOnly = false
+                            currentPage =
+                                "choose_product"
+                        },
+
+                        onAddCondiment = {
+                            choosingCondimentsOnly = true
                             currentPage =
                                 "choose_product"
                         },
@@ -379,6 +428,11 @@ fun MealBuilderDialog(
 
                             editingIngredientIndex =
                                 index
+
+                            ingredientIsOptional =
+                                ingredient.isOptional
+
+                            choosingCondimentsOnly = false
 
                             currentPage =
                                 "enter_amount"
@@ -427,9 +481,11 @@ private fun MealBuilderSummaryPage(
     ingredients: List<MealIngredientDraft>,
     totalCalories: Double,
     productsAvailable: Boolean,
+    condimentsAvailable: Boolean,
     isEditing: Boolean,
     isSaving: Boolean,
     onAddIngredient: () -> Unit,
+    onAddCondiment: () -> Unit,
     onEditIngredient: (Int) -> Unit,
     onRemoveIngredient: (Int) -> Unit,
     onCancel: () -> Unit,
@@ -541,12 +597,23 @@ private fun MealBuilderSummaryPage(
             }
         }
 
-        RebuildSecondaryAction(
-            text = "Add ingredient",
-            onClick = onAddIngredient,
-            enabled = productsAvailable && !isSaving,
-            modifier = Modifier.fillMaxWidth()
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            RebuildSecondaryAction(
+                text = "Add ingredient",
+                onClick = onAddIngredient,
+                enabled = productsAvailable && !isSaving,
+                modifier = Modifier.weight(1f)
+            )
+            RebuildSecondaryAction(
+                text = "Add condiment",
+                onClick = onAddCondiment,
+                enabled = condimentsAvailable && !isSaving,
+                modifier = Modifier.weight(1f)
+            )
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -591,10 +658,22 @@ private fun MealIngredientRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text(
-                    text = ingredient.product.name,
-                    style = MaterialTheme.typography.titleMedium
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = ingredient.product.name,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    if (ingredient.product.isCondiment) {
+                        RebuildStatusBadge(
+                            text = if (ingredient.isOptional) "Optional condiment" else "Condiment",
+                            backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
                 Text(
                     text = ingredientAmountDescription(ingredient),
                     style = MaterialTheme.typography.bodySmall,
@@ -614,6 +693,7 @@ private fun MealIngredientRow(
 @Composable
 private fun ChooseMealProductPage(
     products: List<FoodProduct>,
+    condimentsOnly: Boolean,
     onBack: () -> Unit,
     onCreateFood: () -> Unit,
     onChooseProduct: (FoodProduct) -> Unit
@@ -630,7 +710,7 @@ private fun ChooseMealProductPage(
                 modifier = Modifier.weight(1f)
             ) {
                 Text(
-                    text = "Choose Ingredient",
+                    text = if (condimentsOnly) "Choose Condiment" else "Choose Ingredient",
                     style =
                         MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
@@ -638,7 +718,11 @@ private fun ChooseMealProductPage(
 
                 Text(
                     text =
-                        "Select from Saved Foods."
+                        if (condimentsOnly) {
+                            "Select from saved foods marked as condiments."
+                        } else {
+                            "Select from Saved Foods."
+                        }
                 )
             }
 
@@ -667,7 +751,11 @@ private fun ChooseMealProductPage(
         if (products.isEmpty()) {
             Text(
                 text =
-                    "No Saved Foods are available."
+                    if (condimentsOnly) {
+                        "No foods are marked as condiments yet."
+                    } else {
+                        "No Saved Foods are available."
+                    }
             )
         } else {
             LazyColumn(
@@ -699,13 +787,22 @@ private fun ChooseMealProductPage(
                                 modifier =
                                     Modifier.weight(1f)
                             ) {
-                                Text(
-                                    text =
-                                        product.name,
-
-                                    fontWeight =
-                                        FontWeight.SemiBold
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = product.name,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    if (product.isCondiment) {
+                                        RebuildStatusBadge(
+                                            text = "Condiment",
+                                            backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
+                                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
+                                }
 
                                 Text(
                                     text =
@@ -760,6 +857,8 @@ private fun MealIngredientAmountPage(
     amountMode: String,
     onAmountModeChange: (String) -> Unit,
     amountText: String,
+    isOptional: Boolean,
+    onOptionalChange: (Boolean) -> Unit,
     onAmountTextChange: (String) -> Unit,
     onCancel: () -> Unit,
     onAddIngredient: () -> Unit
@@ -823,6 +922,35 @@ private fun MealIngredientAmountPage(
         )
 
         HorizontalDivider()
+
+        if (product.isCondiment) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = isOptional,
+                        onCheckedChange = onOptionalChange
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Optional condiment",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            "Ask whether to include it each time this saved meal is logged.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+            }
+        }
 
         Text(
             text = "How are you entering it?",
@@ -1030,7 +1158,7 @@ fun SavedMealsDialog(
     products: List<FoodProduct>,
     isAddingMeal: Boolean,
     destinationLabel: String = "today",
-    onAddToToday: (SavedMealWithIngredients, Double) -> Unit,
+    onAddToToday: (SavedMealWithIngredients, Double, Set<Long>) -> Unit,
     onEdit: (SavedMealWithIngredients) -> Unit,
     onDelete: (SavedMealWithIngredients) -> Unit,
     onDismiss: () -> Unit
@@ -1039,6 +1167,7 @@ fun SavedMealsDialog(
     var mealPendingDelete by remember { mutableStateOf<SavedMealWithIngredients?>(null) }
     var mealPendingAdd by remember { mutableStateOf<SavedMealWithIngredients?>(null) }
     var mealMultiplierText by rememberSaveable { mutableStateOf("1") }
+    var selectedOptionalIngredientIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var searchText by rememberSaveable { mutableStateOf("") }
     val visibleMeals = meals.filter { meal ->
         searchText.isBlank() || meal.meal.name.contains(searchText, ignoreCase = true)
@@ -1116,7 +1245,13 @@ fun SavedMealsDialog(
                                         else ->
                                             "${formatMealNumber(ingredient.amount)} ${product?.servingUnit ?: "units"}"
                                     }
-                                    "${product?.name ?: "Unknown food"} · $amountDescription"
+                                    buildString {
+                                        append(product?.name ?: "Unknown food")
+                                        append(" · ")
+                                        append(amountDescription)
+                                        if (ingredient.isOptional) append(" · Optional")
+                                        if (product?.isCondiment == true) append(" · Condiment")
+                                    }
                                 }
 
                             Card(
@@ -1172,6 +1307,7 @@ fun SavedMealsDialog(
                                             text = "Add to $destinationLabel",
                                             onClick = {
                                                 mealMultiplierText = "1"
+                                                selectedOptionalIngredientIds = emptySet()
                                                 mealPendingAdd = savedMeal
                                             },
                                             enabled = !isAddingMeal,
@@ -1207,6 +1343,38 @@ fun SavedMealsDialog(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("How many of this meal should be added to $destinationLabel?")
+
+                    val optionalIngredients = pendingAddMeal.ingredients
+                        .filter { it.isOptional }
+                        .sortedBy { it.sortOrder }
+                    if (optionalIngredients.isNotEmpty()) {
+                        Text(
+                            "Optional condiments",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        optionalIngredients.forEach { ingredient ->
+                            val product = productsById[ingredient.productId]
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = ingredient.id in selectedOptionalIngredientIds,
+                                    onCheckedChange = { checked ->
+                                        selectedOptionalIngredientIds =
+                                            if (checked) {
+                                                selectedOptionalIngredientIds + ingredient.id
+                                            } else {
+                                                selectedOptionalIngredientIds - ingredient.id
+                                            }
+                                    },
+                                    enabled = !isAddingMeal
+                                )
+                                Text(product?.name ?: "Optional condiment")
+                            }
+                        }
+                    }
+
                     OutlinedTextField(
                         value = mealMultiplierText,
                         onValueChange = { mealMultiplierText = it },
@@ -1231,7 +1399,11 @@ fun SavedMealsDialog(
                 TextButton(
                     onClick = {
                         mealPendingAdd = null
-                        onAddToToday(pendingAddMeal, multiplier)
+                        onAddToToday(
+                            pendingAddMeal,
+                            multiplier,
+                            selectedOptionalIngredientIds
+                        )
                     },
                     enabled = !isAddingMeal && multiplier > 0.0
                 ) { Text(if (isAddingMeal) "Adding…" else "Add to $destinationLabel") }

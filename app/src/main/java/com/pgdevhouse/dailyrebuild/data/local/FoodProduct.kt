@@ -68,6 +68,13 @@ data class FoodProduct(
 
     val isFavorite: Boolean = false,
 
+    /*
+     * Condiments still contribute to nutrition totals, but they are
+     * separated from regular foods for browsing, statistics, and the
+     * daily Food anchor.
+     */
+    val isCondiment: Boolean = false,
+
     val createdAt: Long =
         System.currentTimeMillis(),
 

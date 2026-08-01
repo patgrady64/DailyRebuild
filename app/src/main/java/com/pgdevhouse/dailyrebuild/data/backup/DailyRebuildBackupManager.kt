@@ -501,6 +501,30 @@ class DailyRebuildBackupManager(
                 else -> error("The backup is incomplete: $table is missing.")
             }
 
+            if (table == "food_products" &&
+                sourceDatabaseVersion < CONDIMENT_DATABASE_VERSION
+            ) {
+                for (index in 0 until compatibleRows.length()) {
+                    val row = compatibleRows.optJSONObject(index)
+                        ?: error("$table contains a record that is not an object.")
+                    if (!row.has("isCondiment")) {
+                        row.put("isCondiment", 0)
+                    }
+                }
+            }
+
+            if (table == "saved_meal_ingredients" &&
+                sourceDatabaseVersion < CONDIMENT_DATABASE_VERSION
+            ) {
+                for (index in 0 until compatibleRows.length()) {
+                    val row = compatibleRows.optJSONObject(index)
+                        ?: error("$table contains a record that is not an object.")
+                    if (!row.has("isOptional")) {
+                        row.put("isOptional", 0)
+                    }
+                }
+            }
+
             if (table == "food_log_entries") {
                 for (index in 0 until compatibleRows.length()) {
                     val row = compatibleRows.optJSONObject(index)
@@ -1109,11 +1133,12 @@ class DailyRebuildBackupManager(
     )
 
     companion object {
-        const val DATABASE_VERSION = 18
+        const val DATABASE_VERSION = 19
         private const val MIN_SUPPORTED_DATABASE_VERSION = 14
         private const val LIFE_MAINTENANCE_DATABASE_VERSION = 15
         private const val IOP_GROUP_DATABASE_VERSION = 17
         private const val IOP_ATTENDANCE_DATABASE_VERSION = 18
+        private const val CONDIMENT_DATABASE_VERSION = 19
         const val FORMAT_VERSION = 2
         private const val MIN_SUPPORTED_FORMAT_VERSION = 1
         private const val PORTABLE_PREFERENCES_FORMAT_VERSION = 2

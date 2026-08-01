@@ -53,6 +53,12 @@ data class SavedMealIngredient(
     val amount: Double,
 
     /*
+     * Optional ingredients are intended for condiments that may not be
+     * used every time the saved meal is logged.
+     */
+    val isOptional: Boolean = false,
+
+    /*
      * Preserves ingredient display order.
      */
     val sortOrder: Int = 0

@@ -114,11 +114,21 @@ fun buildGlobalSearchResults(
     snapshot.products.forEach { product ->
         results += GlobalSearchResult(
             key = "saved-food:${product.id}",
-            group = "Saved foods",
+            group = if (product.isCondiment) "Condiments" else "Saved foods",
             filter = GlobalSearchFilter.FOOD,
             title = product.name,
-            subtitle = listOf(product.brand, formatServing(product)).filter(String::isNotBlank).joinToString(" · "),
-            searchableText = listOf(product.name, product.brand, product.barcode.orEmpty(), product.servingUnit).joinToString(" "),
+            subtitle = listOf(
+                product.brand,
+                if (product.isCondiment) "Condiment" else "",
+                formatServing(product)
+            ).filter(String::isNotBlank).joinToString(" · "),
+            searchableText = listOf(
+                product.name,
+                product.brand,
+                product.barcode.orEmpty(),
+                product.servingUnit,
+                if (product.isCondiment) "condiment sauce dressing topping" else "food"
+            ).joinToString(" "),
             target = GlobalSearchTarget.SavedFood(product.id),
             newestFirst = product.updatedAt
         )
@@ -126,7 +136,13 @@ fun buildGlobalSearchResults(
 
     snapshot.meals.forEach { savedMeal ->
         val ingredientNames = savedMeal.ingredients.mapNotNull { ingredient ->
-            productById[ingredient.productId]?.name
+            productById[ingredient.productId]?.let { product ->
+                buildString {
+                    append(product.name)
+                    if (ingredient.isOptional) append(" (optional)")
+                    if (product.isCondiment) append(" condiment")
+                }
+            }
         }
         results += GlobalSearchResult(
             key = "saved-meal:${savedMeal.meal.id}",
@@ -160,13 +176,25 @@ fun buildGlobalSearchResults(
     snapshot.foodEntries
         .filter { it.mealLogId.isNullOrBlank() }
         .forEach { entry ->
+            val isCondiment = productById[entry.productId]?.isCondiment == true
             results += GlobalSearchResult(
                 key = "food-history:${entry.id}",
-                group = "Food history",
+                group = if (isCondiment) "Condiment history" else "Food history",
                 filter = GlobalSearchFilter.FOOD,
                 title = entry.productNameSnapshot,
-                subtitle = "${formatSearchDate(entry.date)} · ${formatSearchNumber(entry.quantity)} ${entry.unit}",
-                searchableText = listOf(entry.productNameSnapshot, entry.mealName.orEmpty(), entry.date, formatSearchDate(entry.date), entry.unit).joinToString(" "),
+                subtitle = listOf(
+                    formatSearchDate(entry.date),
+                    "${formatSearchNumber(entry.quantity)} ${entry.unit}",
+                    if (isCondiment) "Condiment" else ""
+                ).filter(String::isNotBlank).joinToString(" · "),
+                searchableText = listOf(
+                    entry.productNameSnapshot,
+                    entry.mealName.orEmpty(),
+                    entry.date,
+                    formatSearchDate(entry.date),
+                    entry.unit,
+                    if (isCondiment) "condiment" else "food"
+                ).joinToString(" "),
                 target = GlobalSearchTarget.HistoryDate(entry.date),
                 newestFirst = dateSortValue(entry.date, entry.createdAt)
             )
@@ -370,23 +398,25 @@ fun buildGlobalSearchResults(
 
 private fun groupPriority(group: String): Int = when (group) {
     "Saved foods" -> 0
-    "Saved meals" -> 1
-    "Food history" -> 2
-    "Dates" -> 3
-    "Appointments" -> 4
-    "Care visits" -> 5
-    "Care places" -> 6
-    "Care providers" -> 7
-    "Medications" -> 8
-    "Health measurements" -> 9
-    "Migraine & aura" -> 10
-    "IOP groups" -> 11
-    "Saved meetings" -> 12
-    "Meeting history" -> 13
-    "Mobility movements" -> 14
-    "Mobility history" -> 15
-    "Life Maintenance" -> 16
-    "Pantry" -> 17
+    "Condiments" -> 1
+    "Saved meals" -> 2
+    "Food history" -> 3
+    "Condiment history" -> 4
+    "Dates" -> 5
+    "Appointments" -> 6
+    "Care visits" -> 7
+    "Care places" -> 8
+    "Care providers" -> 9
+    "Medications" -> 10
+    "Health measurements" -> 11
+    "Migraine & aura" -> 12
+    "IOP groups" -> 13
+    "Saved meetings" -> 14
+    "Meeting history" -> 15
+    "Mobility movements" -> 16
+    "Mobility history" -> 17
+    "Life Maintenance" -> 18
+    "Pantry" -> 19
     else -> 99
 }
 

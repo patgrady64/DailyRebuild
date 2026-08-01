@@ -216,7 +216,7 @@ fun FoodSection(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             RebuildSecondaryAction(
-                text = "Saved foods · $savedFoodCount",
+                text = "Foods & condiments · $savedFoodCount",
                 onClick = onOpenSavedFoods,
                 modifier = Modifier.weight(1f)
             )
@@ -815,10 +815,18 @@ fun ManualFoodDialog(
     }
 
     var saveAsFavorite by rememberSaveable(
-        initialFood?.barcode
+        initialFoodKey
     ) {
         mutableStateOf(
             initialFood?.isFavorite ?: false
+        )
+    }
+
+    var treatAsCondiment by rememberSaveable(
+        initialFoodKey
+    ) {
+        mutableStateOf(
+            initialFood?.isCondiment ?: false
         )
     }
 
@@ -913,6 +921,9 @@ fun ManualFoodDialog(
 
         saveAsFavorite =
             initialFood?.isFavorite ?: false
+
+        treatAsCondiment =
+            initialFood?.isCondiment ?: false
 
         enterAsLabelServings =
             initialFood != null &&
@@ -1064,7 +1075,8 @@ fun ManualFoodDialog(
                     .ifBlank {
                         null
                     },
-            isFavorite = saveAsFavorite
+            isFavorite = saveAsFavorite,
+            isCondiment = treatAsCondiment
         )
 
         val draft = ManualFoodDraft(
@@ -1348,6 +1360,45 @@ fun ManualFoodDialog(
                                     )
                                     Text(
                                         text = "Keep it easy to find next time.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (treatAsCondiment) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(
+                                    horizontal = 10.dp,
+                                    vertical = 4.dp
+                                ),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = treatAsCondiment,
+                                    onCheckedChange = {
+                                        treatAsCondiment = it
+                                    }
+                                )
+
+                                Column(
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = "Treat as a condiment",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        text = "Counts in nutrition totals, but stays separate from regular foods and does not complete the Food anchor by itself.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -1651,15 +1702,19 @@ fun ManualFoodDialog(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                listOf("0.5", "1", "2").forEach { quickAmount ->
+                                foodQuickAmounts(
+                                    isCondiment = treatAsCondiment,
+                                    enterAsLabelServings = enterAsLabelServings,
+                                    servingUnit = servingUnit
+                                ).forEach { quickAmount ->
                                     OutlinedButton(
                                         onClick = {
-                                            quantityEatenText = quickAmount
+                                            quantityEatenText = quickAmount.value
                                         },
                                         modifier = Modifier.weight(1f),
                                         shape = RoundedCornerShape(14.dp)
                                     ) {
-                                        Text(quickAmount)
+                                        Text(quickAmount.label)
                                     }
                                 }
                             }
@@ -2085,6 +2140,38 @@ private fun parseFoodAmount(
     }
 
     return cleaned.toDoubleOrNull()
+}
+
+private data class FoodQuickAmount(
+    val label: String,
+    val value: String
+)
+
+private fun foodQuickAmounts(
+    isCondiment: Boolean,
+    enterAsLabelServings: Boolean,
+    servingUnit: String
+): List<FoodQuickAmount> {
+    if (!isCondiment || enterAsLabelServings) {
+        return listOf(
+            FoodQuickAmount("½", "0.5"),
+            FoodQuickAmount("1", "1"),
+            FoodQuickAmount("2", "2")
+        )
+    }
+
+    val unit = servingUnit.trim().ifBlank { "unit" }
+    val shortUnit = when (unit.lowercase(Locale.US)) {
+        "teaspoon", "teaspoons" -> "tsp"
+        "tablespoon", "tablespoons" -> "tbsp"
+        "packet", "packets" -> "packet"
+        else -> unit
+    }
+    return listOf(
+        FoodQuickAmount("½ $shortUnit", "0.5"),
+        FoodQuickAmount("1 $shortUnit", "1"),
+        FoodQuickAmount("2 $shortUnit", "2")
+    )
 }
 
 private fun formatFoodNumber(

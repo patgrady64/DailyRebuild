@@ -14,6 +14,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -40,14 +43,24 @@ fun SavedFoodsDialog(
     onDismiss: () -> Unit,
     onUseProduct: (FoodProduct) -> Unit,
     onEditProduct: (FoodProduct) -> Unit,
-    onDeleteProduct: (FoodProduct) -> Unit
+    onDeleteProduct: (FoodProduct) -> Unit,
+    onSetCondiment: (FoodProduct, Boolean) -> Unit
 ) {
     var searchText by rememberSaveable { mutableStateOf("") }
+    var libraryFilter by rememberSaveable { mutableStateOf("ALL") }
+    var managingCondiments by rememberSaveable { mutableStateOf(false) }
     val visibleProducts = products.filter { product ->
-        searchText.isBlank() ||
-            product.name.contains(searchText, ignoreCase = true) ||
-            product.brand.contains(searchText, ignoreCase = true) ||
-            product.barcode.orEmpty().contains(searchText)
+        val matchesFilter = when (libraryFilter) {
+            "FOODS" -> !product.isCondiment
+            "CONDIMENTS" -> product.isCondiment
+            else -> true
+        }
+        matchesFilter && (
+            searchText.isBlank() ||
+                product.name.contains(searchText, ignoreCase = true) ||
+                product.brand.contains(searchText, ignoreCase = true) ||
+                product.barcode.orEmpty().contains(searchText)
+            )
     }
 
     Dialog(
@@ -82,6 +95,59 @@ fun SavedFoodsDialog(
                         )
                     }
                     TextButton(onClick = onDismiss) { Text("Close") }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "ALL" to "All",
+                        "FOODS" to "Foods",
+                        "CONDIMENTS" to "Condiments"
+                    ).forEach { (value, label) ->
+                        if (libraryFilter == value) {
+                            Button(
+                                onClick = { libraryFilter = value },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp)
+                            ) { Text(label) }
+                        } else {
+                            OutlinedButton(
+                                onClick = { libraryFilter = value },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp)
+                            ) { Text(label) }
+                        }
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = { managingCondiments = !managingCondiments },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(
+                        if (managingCondiments) {
+                            "Done managing condiments"
+                        } else {
+                            "Manage condiments"
+                        }
+                    )
+                }
+
+                if (managingCondiments) {
+                    RebuildInsetPanel {
+                        Text(
+                            "Check every saved food that should be treated as a condiment.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            "Changes apply immediately and do not alter past nutrition totals.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
 
                 OutlinedTextField(
@@ -131,7 +197,11 @@ fun SavedFoodsDialog(
                                 product = product,
                                 onUse = { onUseProduct(product) },
                                 onEdit = { onEditProduct(product) },
-                                onDelete = { onDeleteProduct(product) }
+                                onDelete = { onDeleteProduct(product) },
+                                managingCondiments = managingCondiments,
+                                onSetCondiment = { checked ->
+                                    onSetCondiment(product, checked)
+                                }
                             )
                         }
                     }
@@ -146,7 +216,9 @@ private fun SavedFoodRow(
     product: FoodProduct,
     onUse: () -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    managingCondiments: Boolean,
+    onSetCondiment: (Boolean) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -177,12 +249,24 @@ private fun SavedFoodRow(
                         )
                     }
                 }
-                if (product.isFavorite) {
-                    RebuildStatusBadge(
-                        text = "Favorite",
-                        backgroundColor = MaterialTheme.colorScheme.tertiaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (product.isCondiment) {
+                        RebuildStatusBadge(
+                            text = "Condiment",
+                            backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                    if (product.isFavorite) {
+                        RebuildStatusBadge(
+                            text = "Favorite",
+                            backgroundColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
                 }
             }
 
@@ -217,6 +301,28 @@ private fun SavedFoodRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+
+            if (managingCondiments) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = product.isCondiment,
+                            onCheckedChange = onSetCondiment
+                        )
+                        Text(
+                            text = "Treat as condiment",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                    }
+                }
             }
 
             Row(
@@ -270,6 +376,8 @@ fun FoodProduct.toFoodPrefill():
             packageUnit.orEmpty(),
         isFavorite =
             isFavorite,
+        isCondiment =
+            isCondiment,
         originalServingSize =
             "${formatSavedNumber(servingQuantity)} " +
                 servingUnit

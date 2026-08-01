@@ -71,7 +71,11 @@ class FoodBarcodeViewModel : ViewModel() {
         val local = localMatch ?: return null
         savePolicy = BarcodeSavePolicy.USE_ONLINE_ONCE
         return BarcodeManualSelection(
-            prefill = online.copy(productId = local.id),
+            prefill = online.copy(
+                productId = local.id,
+                isFavorite = local.isFavorite,
+                isCondiment = local.isCondiment
+            ),
             policy = savePolicy,
             existingProductId = local.id,
             forMealBuilder = forMealBuilder
@@ -83,7 +87,11 @@ class FoodBarcodeViewModel : ViewModel() {
         val local = localMatch ?: return null
         savePolicy = BarcodeSavePolicy.UPDATE_LOCAL
         return BarcodeManualSelection(
-            prefill = online.copy(productId = local.id),
+            prefill = online.copy(
+                productId = local.id,
+                isFavorite = local.isFavorite,
+                isCondiment = local.isCondiment
+            ),
             policy = savePolicy,
             existingProductId = local.id,
             forMealBuilder = forMealBuilder
@@ -144,6 +152,7 @@ fun FoodProduct.toScannedFoodPrefill(
         packageQuantity = packageQuantity,
         packageUnit = packageUnit.orEmpty(),
         isFavorite = isFavorite,
+        isCondiment = isCondiment,
         originalServingSize = "$servingQuantity $servingUnit"
     )
 }

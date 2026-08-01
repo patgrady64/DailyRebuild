@@ -35,6 +35,7 @@ data class ScannedFoodPrefill(
     val packageUnit: String = "",
 
     val isFavorite: Boolean = false,
+    val isCondiment: Boolean = false,
 
     val originalServingSize: String = ""
 )
