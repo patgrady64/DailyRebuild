@@ -29,9 +29,9 @@ private data class DailyRebuildNavigationItem(
 private val dailyRebuildNavigationItems = listOf(
     DailyRebuildNavigationItem("Today", "⌂"),
     DailyRebuildNavigationItem("Log", "+"),
-    DailyRebuildNavigationItem("Plan", "P"),
-    DailyRebuildNavigationItem("Health", "H"),
-    DailyRebuildNavigationItem("Stats", "S")
+    DailyRebuildNavigationItem("History", "◫"),
+    DailyRebuildNavigationItem("Insights", "↗"),
+    DailyRebuildNavigationItem("More", "•••")
 )
 
 @Composable
@@ -65,7 +65,9 @@ fun DailyRebuildBottomNavigation(
 fun HubScreenHeader(
     title: String,
     subtitle: String,
-    onOpenHistory: () -> Unit
+    onOpenHistory: (() -> Unit)? = null,
+    onOpenSearch: (() -> Unit)? = null,
+    historyLabel: String = "History"
 ) {
     Row(
         modifier = Modifier
@@ -89,8 +91,20 @@ fun HubScreenHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        TextButton(onClick = onOpenHistory) {
-            Text("History")
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            onOpenSearch?.let { action ->
+                TextButton(onClick = action) {
+                    Text("Search")
+                }
+            }
+            onOpenHistory?.let { action ->
+                TextButton(onClick = action) {
+                    Text(historyLabel)
+                }
+            }
         }
     }
 }

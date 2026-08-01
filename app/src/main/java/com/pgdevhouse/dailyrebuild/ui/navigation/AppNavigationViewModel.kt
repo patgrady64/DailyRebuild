@@ -7,8 +7,11 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 
 /**
- * Owns the task-based five-tab navigation and each hub's remembered subsection.
- * Main tabs are Today, Log, Plan, Health, and Stats.
+ * Owns Daily Rebuild's simplified five-destination navigation.
+ *
+ * Main destinations are Today, Log, History, Insights, and More. Feature
+ * screens can still remember their own subsection, but the primary navigation
+ * no longer exposes planning, health, and settings as competing top-level hubs.
  */
 class AppNavigationViewModel(
     private val savedStateHandle: SavedStateHandle
@@ -20,7 +23,7 @@ class AppNavigationViewModel(
         private set
 
     var selectedLogSection by mutableIntStateOf(
-        savedStateHandle[KEY_LOG_SECTION] ?: LOG_FOOD_SECTION
+        savedStateHandle[KEY_LOG_SECTION] ?: LOG_HOME_SECTION
     )
         private set
 
@@ -40,13 +43,18 @@ class AppNavigationViewModel(
         private set
 
     fun selectMainTab(index: Int) {
-        selectedMainTab = index.coerceIn(TODAY_TAB, STATS_TAB)
+        selectedMainTab = index.coerceIn(TODAY_TAB, MORE_TAB)
         savedStateHandle[KEY_MAIN_TAB] = selectedMainTab
     }
 
     fun selectLogSection(index: Int) {
-        selectedLogSection = index.coerceIn(LOG_FOOD_SECTION, LOG_MAINTENANCE_SECTION)
+        selectedLogSection = index.coerceIn(LOG_FOOD_SECTION, LOG_HOME_SECTION)
         savedStateHandle[KEY_LOG_SECTION] = selectedLogSection
+    }
+
+    fun openLogHome() {
+        selectLogSection(LOG_HOME_SECTION)
+        selectMainTab(LOG_TAB)
     }
 
     fun selectPlanSection(index: Int) {
@@ -69,9 +77,18 @@ class AppNavigationViewModel(
         selectMainTab(LOG_TAB)
     }
 
+    /**
+     * Compatibility routing for older feature callbacks. Planning destinations
+     * now live under Log or More rather than occupying a main navigation tab.
+     */
     fun openPlanSection(section: Int) {
         selectPlanSection(section)
-        selectMainTab(PLAN_TAB)
+        when (section) {
+            PLAN_MEALS_SECTION -> openLogSection(LOG_FOOD_SECTION)
+            PLAN_PANTRY_SECTION,
+            PLAN_SHOP_SECTION -> selectMainTab(MORE_TAB)
+            PLAN_APPOINTMENTS_SECTION -> selectMainTab(MORE_TAB)
+        }
     }
 
     fun openIopGroups() {
@@ -88,15 +105,22 @@ class AppNavigationViewModel(
     companion object {
         const val TODAY_TAB = 0
         const val LOG_TAB = 1
-        const val PLAN_TAB = 2
-        const val HEALTH_TAB = 3
-        const val STATS_TAB = 4
+        const val HISTORY_TAB = 2
+        const val INSIGHTS_TAB = 3
+        const val MORE_TAB = 4
+
+        // Compatibility aliases retained for feature code that still refers to
+        // the previous destination names.
+        const val PLAN_TAB = HISTORY_TAB
+        const val STATS_TAB = INSIGHTS_TAB
+        const val HEALTH_TAB = MORE_TAB
 
         const val LOG_FOOD_SECTION = 0
         const val LOG_MOVEMENT_SECTION = 1
         const val LOG_MEETINGS_SECTION = 2
         const val LOG_HEALTH_SECTION = 3
         const val LOG_MAINTENANCE_SECTION = 4
+        const val LOG_HOME_SECTION = 5
 
         const val PLAN_MEALS_SECTION = 0
         const val PLAN_PANTRY_SECTION = 1

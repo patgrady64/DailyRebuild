@@ -445,7 +445,7 @@ private fun BackupCoverageCard(lastBackupTime: Long) {
             "Daily records, foods, saved meals, water, activity snapshots, mobility, pain, measurements, medications, showers, migraines, meetings, IOP schedules and missed-attendance reasons, appointments, care visits, pantry essentials, and Life Maintenance."
         )
         Text(
-            "Today and Quick Log layout, hidden sections, Stats order and range, preferred units, notification master/type switches, reminder timing and snooze choices, recent searches, and exact-value warning exceptions."
+            "Today and Quick Log layout, hidden sections, Insights order and range, preferred units, notification master/type switches, reminder timing and snooze choices, recent searches, and exact-value warning exceptions."
         )
         Text("Not included", fontWeight = FontWeight.SemiBold)
         Text(

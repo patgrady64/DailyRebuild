@@ -54,12 +54,12 @@ private val quickLogOptions = listOf(
 )
 
 private val todaySectionOptions = listOf(
-    PreferenceOption(DailyRebuildPreferenceIds.TODAY_PRIORITY, "Priority card"),
+    PreferenceOption(DailyRebuildPreferenceIds.TODAY_PRIORITY, "Daily Anchors"),
     PreferenceOption(DailyRebuildPreferenceIds.TODAY_GLANCE, "Today at a Glance"),
-    PreferenceOption(DailyRebuildPreferenceIds.TODAY_APPOINTMENTS, "Upcoming appointment"),
-    PreferenceOption(DailyRebuildPreferenceIds.TODAY_IOP, "Next IOP group"),
-    PreferenceOption(DailyRebuildPreferenceIds.TODAY_MEETINGS, "Recovery meetings"),
-    PreferenceOption(DailyRebuildPreferenceIds.TODAY_MOVEMENT, "Movement Today"),
+    PreferenceOption(DailyRebuildPreferenceIds.TODAY_APPOINTMENTS, "Upcoming: appointments"),
+    PreferenceOption(DailyRebuildPreferenceIds.TODAY_IOP, "Upcoming: IOP group"),
+    PreferenceOption(DailyRebuildPreferenceIds.TODAY_MEETINGS, "Upcoming: recovery meetings"),
+    PreferenceOption(DailyRebuildPreferenceIds.TODAY_MOVEMENT, "Movement details under More Today"),
     PreferenceOption(DailyRebuildPreferenceIds.TODAY_QUICK_LOG, "Quick Log"),
     PreferenceOption(DailyRebuildPreferenceIds.TODAY_RECENT, "Recent & Frequently Used"),
     PreferenceOption(DailyRebuildPreferenceIds.TODAY_ACTIVITY, "Today’s Activity"),
@@ -90,6 +90,7 @@ fun CustomizeDailyRebuildScreen(
     notificationPermissionGranted: Boolean = true,
     onRequestNotificationPermission: () -> Unit = {},
     onOpenAndroidNotificationSettings: () -> Unit = {},
+    notificationsOnly: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     var showReminderCenter by rememberSaveable { mutableStateOf(false) }
@@ -98,7 +99,8 @@ fun CustomizeDailyRebuildScreen(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        RebuildSectionCard(
+        if (!notificationsOnly) {
+            RebuildSectionCard(
             title = "Customize Daily Rebuild",
             subtitle = "Hide what you do not use and put the most useful controls first.",
             accentColor = RebuildBlue
@@ -194,8 +196,8 @@ fun CustomizeDailyRebuildScreen(
         }
 
         RebuildSectionCard(
-            title = "Statistics Order",
-            subtitle = "Show, hide, and reorder the categories on Stats.",
+            title = "Insights Order",
+            subtitle = "Show, hide, and reorder the categories in Insights.",
             accentColor = RebuildBlue
         ) {
             preferences.statsOrder.forEachIndexed { index, id ->
@@ -229,7 +231,7 @@ fun CustomizeDailyRebuildScreen(
                 )
             }
             Text(
-                "This order controls the category buttons on the expanded Stats screen.",
+                "This order controls the category buttons on the Insights screen.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -262,6 +264,8 @@ fun CustomizeDailyRebuildScreen(
                     }
                 }
             }
+        }
+
         }
 
         RebuildSectionCard(
@@ -403,7 +407,8 @@ fun CustomizeDailyRebuildScreen(
             }
         }
 
-        RebuildSectionCard(
+        if (!notificationsOnly) {
+            RebuildSectionCard(
             title = "Data-quality Warnings",
             subtitle = "Manage exact values you previously chose not to see again.",
             accentColor = RebuildAmber
@@ -474,14 +479,15 @@ fun CustomizeDailyRebuildScreen(
             )
         }
 
-        OutlinedButton(
-            onClick = {
-                onPreferencesChange(DailyRebuildPreferences())
-            },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Text("Restore Customization Defaults")
+            OutlinedButton(
+                onClick = {
+                    onPreferencesChange(DailyRebuildPreferences())
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text("Restore Customization Defaults")
+            }
         }
     }
 

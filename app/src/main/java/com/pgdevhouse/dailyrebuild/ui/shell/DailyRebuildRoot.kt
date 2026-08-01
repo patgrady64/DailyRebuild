@@ -197,6 +197,10 @@ fun DailyRebuildApp(
         mutableIntStateOf(0)
     }
 
+    var selectedMoreFeature by rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+
     val navigationViewModel: AppNavigationViewModel = viewModel()
     val barcodeViewModel: FoodBarcodeViewModel = viewModel()
     val pantryViewModel: PantryViewModel = viewModel(
@@ -356,9 +360,34 @@ fun DailyRebuildApp(
     }
 
     BackHandler(
-        enabled = !showGlobalSearch && selectedMainTab != 0
+        enabled = !showGlobalSearch &&
+            selectedMainTab == AppNavigationViewModel.MORE_TAB &&
+            selectedMoreFeature != null
     ) {
-        navigationViewModel.selectMainTab(0)
+        selectedMoreFeature = null
+    }
+
+    BackHandler(
+        enabled = !showGlobalSearch &&
+            selectedMainTab == AppNavigationViewModel.LOG_TAB &&
+            navigationViewModel.selectedLogSection != AppNavigationViewModel.LOG_HOME_SECTION
+    ) {
+        navigationViewModel.selectLogSection(AppNavigationViewModel.LOG_HOME_SECTION)
+    }
+
+    BackHandler(
+        enabled = !showGlobalSearch &&
+            selectedMainTab != AppNavigationViewModel.TODAY_TAB &&
+            !(
+                selectedMainTab == AppNavigationViewModel.MORE_TAB &&
+                    selectedMoreFeature != null
+                ) &&
+            !(
+                selectedMainTab == AppNavigationViewModel.LOG_TAB &&
+                    navigationViewModel.selectedLogSection != AppNavigationViewModel.LOG_HOME_SECTION
+                )
+    ) {
+        navigationViewModel.selectMainTab(AppNavigationViewModel.TODAY_TAB)
     }
 
     var isAddingFood by remember {
@@ -1402,6 +1431,7 @@ fun DailyRebuildApp(
 
     LaunchedEffect(appPreferences.enabledLogSections) {
         if (
+            navigationViewModel.selectedLogSection != AppNavigationViewModel.LOG_HOME_SECTION &&
             visibleLogSections.none {
                 it.third == navigationViewModel.selectedLogSection
             }
@@ -2865,14 +2895,16 @@ fun DailyRebuildApp(
             }
 
             DataQualityWarningTarget.APPOINTMENTS -> {
-                navigationViewModel.openPlanSection(
-                    AppNavigationViewModel.PLAN_APPOINTMENTS_SECTION
+                selectedMoreFeature = "appointments"
+                navigationViewModel.selectMainTab(
+                    AppNavigationViewModel.MORE_TAB
                 )
             }
 
             DataQualityWarningTarget.HEALTH -> {
+                selectedMoreFeature = "profile"
                 navigationViewModel.selectMainTab(
-                    AppNavigationViewModel.HEALTH_TAB
+                    AppNavigationViewModel.MORE_TAB
                 )
             }
 
@@ -4288,25 +4320,24 @@ fun DailyRebuildApp(
 
             is GlobalSearchTarget.CarePlaceTarget,
             is GlobalSearchTarget.CareProviderTarget -> {
-                requestedHealthFeature = "visits"
-                requestedHealthFeatureToken++
+                selectedMoreFeature = "visits"
                 navigationViewModel.selectMainTab(
-                    AppNavigationViewModel.HEALTH_TAB
+                    AppNavigationViewModel.MORE_TAB
                 )
             }
 
             is GlobalSearchTarget.MedicationTarget,
             is GlobalSearchTarget.MeasurementTarget -> {
-                requestedHealthFeature = "profile"
-                requestedHealthFeatureToken++
+                selectedMoreFeature = "profile"
                 navigationViewModel.selectMainTab(
-                    AppNavigationViewModel.HEALTH_TAB
+                    AppNavigationViewModel.MORE_TAB
                 )
             }
 
             is GlobalSearchTarget.CareVisitTarget -> {
+                selectedMoreFeature = "visits"
                 navigationViewModel.selectMainTab(
-                    AppNavigationViewModel.HEALTH_TAB
+                    AppNavigationViewModel.MORE_TAB
                 )
                 globalSearchSnapshot.careVisits
                     .firstOrNull { it.id == target.id }
@@ -4327,8 +4358,9 @@ fun DailyRebuildApp(
             }
 
             is GlobalSearchTarget.AppointmentTarget -> {
-                navigationViewModel.openPlanSection(
-                    AppNavigationViewModel.PLAN_APPOINTMENTS_SECTION
+                selectedMoreFeature = "appointments"
+                navigationViewModel.selectMainTab(
+                    AppNavigationViewModel.MORE_TAB
                 )
                 globalSearchSnapshot.careAppointments
                     .firstOrNull { it.id == target.id }
@@ -4341,8 +4373,8 @@ fun DailyRebuildApp(
             }
 
             is GlobalSearchTarget.MigraineTarget -> {
-                navigationViewModel.selectMainTab(
-                    AppNavigationViewModel.HEALTH_TAB
+                navigationViewModel.openLogSection(
+                    AppNavigationViewModel.LOG_HEALTH_SECTION
                 )
                 globalSearchSnapshot.migraineLogs
                     .firstOrNull { it.id == target.id }
@@ -4416,8 +4448,9 @@ fun DailyRebuildApp(
             }
 
             is GlobalSearchTarget.PantryTarget -> {
-                navigationViewModel.openPlanSection(
-                    AppNavigationViewModel.PLAN_PANTRY_SECTION
+                selectedMoreFeature = "pantry"
+                navigationViewModel.selectMainTab(
+                    AppNavigationViewModel.MORE_TAB
                 )
             }
         }
@@ -4490,7 +4523,8 @@ fun DailyRebuildApp(
             refreshHealthActivity(showFeedback = true)
         },
         onManageHealth = {
-            navigationViewModel.selectMainTab(AppNavigationViewModel.HEALTH_TAB)
+            selectedMoreFeature = "activity"
+            navigationViewModel.selectMainTab(AppNavigationViewModel.MORE_TAB)
         },
         onSaveSession = { saveMobilitySession(it) },
         onUpdateSession = { updateMobilitySession(it) },
@@ -4557,8 +4591,21 @@ fun DailyRebuildApp(
             if (!isLoading && !showGlobalSearch) {
                 DailyRebuildBottomNavigation(
                     selectedTab = selectedMainTab,
-                    onTabSelected = {
-                        navigationViewModel.selectMainTab(it)
+                    onTabSelected = { destination ->
+                        when (destination) {
+                            AppNavigationViewModel.LOG_TAB -> {
+                                navigationViewModel.openLogHome()
+                            }
+                            AppNavigationViewModel.HISTORY_TAB -> {
+                                navigationViewModel.selectMainTab(destination)
+                                openDailyHistory()
+                            }
+                            AppNavigationViewModel.MORE_TAB -> {
+                                selectedMoreFeature = null
+                                navigationViewModel.selectMainTab(destination)
+                            }
+                            else -> navigationViewModel.selectMainTab(destination)
+                        }
                     }
                 )
             }
@@ -4566,11 +4613,11 @@ fun DailyRebuildApp(
         floatingActionButton = {
             if (!isLoading && !showGlobalSearch) {
                 ExtendedFloatingActionButton(
-                    onClick = ::openGlobalSearch,
-                    text = { Text("Search") },
+                    onClick = { navigationViewModel.openLogHome() },
+                    text = { Text("Add") },
                     icon = {
                         Text(
-                            text = "⌕",
+                            text = "+",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
@@ -4657,6 +4704,7 @@ fun DailyRebuildApp(
                     ),
                     actions = TodayScreenActions(
                         onOpenHistory = { openDailyHistory() },
+                        onOpenSearch = ::openGlobalSearch,
                         onOpenFood = {
                             navigationViewModel.openLogSection(
                                 AppNavigationViewModel.LOG_FOOD_SECTION
@@ -4675,8 +4723,9 @@ fun DailyRebuildApp(
                             )
                         },
                         onOpenHealth = {
+                            selectedMoreFeature = "profile"
                             navigationViewModel.selectMainTab(
-                                AppNavigationViewModel.HEALTH_TAB
+                                AppNavigationViewModel.MORE_TAB
                             )
                         },
                         onScheduleAppointment = { openAppointmentStart() },
@@ -4824,19 +4873,37 @@ fun DailyRebuildApp(
                     modifier = Modifier.padding(innerPadding)
                 )
 
-                AppNavigationViewModel.LOG_TAB -> TaskHubFrame(
-                    title = "Log",
-                    subtitle = "Record food, movement, meetings, health events, and occasional life maintenance.",
-                    labels = visibleLogSections.map { it.second },
-                    selectedSection = visibleLogSections.indexOfFirst {
-                        it.third == navigationViewModel.selectedLogSection
-                    }.coerceAtLeast(0),
-                    onSectionSelected = { visibleIndex ->
-                        visibleLogSections.getOrNull(visibleIndex)?.let {
-                            navigationViewModel.selectLogSection(it.third)
-                        }
-                    },
+                AppNavigationViewModel.LOG_TAB -> DailyRebuildLogScreen(
+                    selectedSection = navigationViewModel.selectedLogSection,
+                    enabledSections = appPreferences.enabledLogSections,
+                    onSelectSection = navigationViewModel::selectLogSection,
+                    onOpenSearch = ::openGlobalSearch,
                     onOpenHistory = { openDailyHistory() },
+                    onLogWater = { showQuickWaterDialog = true },
+                    onLogPain = { showQuickPainDialog = true },
+                    onLogShower = { logShowerToday() },
+                    onLogMeeting = { showMeetingPickerDialog = true },
+                    onOpenIopAttendance = {
+                        navigationViewModel.selectMeetingsSection(
+                            AppNavigationViewModel.MEETINGS_IOP_SECTION
+                        )
+                        navigationViewModel.selectLogSection(
+                            AppNavigationViewModel.LOG_MEETINGS_SECTION
+                        )
+                    },
+                    onLogMigraine = {
+                        migraineBeingEdited = null
+                        showMigraineLogDialog = true
+                    },
+                    onLogCareVisit = { showCareVisitStartDialog = true },
+                    onOpenMeasurements = {
+                        selectedMoreFeature = "profile"
+                        navigationViewModel.selectMainTab(AppNavigationViewModel.MORE_TAB)
+                    },
+                    onOpenPantry = {
+                        selectedMoreFeature = "pantry"
+                        navigationViewModel.selectMainTab(AppNavigationViewModel.MORE_TAB)
+                    },
                     modifier = Modifier.padding(innerPadding)
                 ) {
                     when (navigationViewModel.selectedLogSection) {
@@ -4844,13 +4911,15 @@ fun DailyRebuildApp(
                             state = foodHubState.copy(selectedSection = 0),
                             actions = foodHubActions,
                             showHeader = false,
-                            showSectionTabs = false
+                            showSectionTabs = false,
+                            modifier = Modifier.fillMaxSize()
                         )
 
                         AppNavigationViewModel.LOG_MOVEMENT_SECTION -> MobilityHubScreen(
                             state = mobilityHubState,
                             actions = mobilityHubActions,
-                            showHeader = false
+                            showHeader = false,
+                            modifier = Modifier.fillMaxSize()
                         )
 
                         AppNavigationViewModel.LOG_MEETINGS_SECTION -> MeetingsHubScreen(
@@ -4877,8 +4946,7 @@ fun DailyRebuildApp(
                                             meeting.id == id
                                         }
                                     }
-                                isOneTimeMeetingAttendance =
-                                    it.savedMeetingId == null
+                                isOneTimeMeetingAttendance = it.savedMeetingId == null
                                 showMeetingAttendanceDialog = true
                             },
                             onDeleteAttendance = {
@@ -4891,7 +4959,8 @@ fun DailyRebuildApp(
                             onDeleteIopGroup = ::deleteIopGroup,
                             onMarkIopMissed = ::markIopMissed,
                             onMarkIopAttended = ::markIopAttended,
-                            showHeader = false
+                            showHeader = false,
+                            modifier = Modifier.fillMaxSize()
                         )
 
                         AppNavigationViewModel.LOG_HEALTH_SECTION -> HealthQuickLogScreen(
@@ -4903,15 +4972,18 @@ fun DailyRebuildApp(
                             onLogCareVisit = { showCareVisitStartDialog = true },
                             onLogShower = { logShowerToday() },
                             onOpenMeasurements = {
+                                selectedMoreFeature = "profile"
                                 navigationViewModel.selectMainTab(
-                                    AppNavigationViewModel.HEALTH_TAB
+                                    AppNavigationViewModel.MORE_TAB
                                 )
                             },
                             onOpenHealth = {
+                                selectedMoreFeature = "profile"
                                 navigationViewModel.selectMainTab(
-                                    AppNavigationViewModel.HEALTH_TAB
+                                    AppNavigationViewModel.MORE_TAB
                                 )
-                            }
+                            },
+                            modifier = Modifier.fillMaxSize()
                         )
 
                         else -> LifeMaintenanceScreen(
@@ -4924,75 +4996,201 @@ fun DailyRebuildApp(
                     }
                 }
 
-                AppNavigationViewModel.PLAN_TAB -> TaskHubFrame(
-                    title = "Plan",
-                    subtitle = "Prepare meals, pantry needs, shopping, and appointments before they happen.",
-                    labels = listOf("Meals", "Pantry", "Shop", "Appointments"),
-                    selectedSection = navigationViewModel.selectedPlanSection,
-                    onSectionSelected = navigationViewModel::selectPlanSection,
+                AppNavigationViewModel.HISTORY_TAB -> DailyRebuildHistoryHomeScreen(
                     onOpenHistory = { openDailyHistory() },
+                    onOpenSearch = ::openGlobalSearch,
                     modifier = Modifier.padding(innerPadding)
-                ) {
-                    when (navigationViewModel.selectedPlanSection) {
-                        AppNavigationViewModel.PLAN_MEALS_SECTION -> FoodHubScreen(
-                            state = foodHubState.copy(selectedSection = 1),
-                            actions = foodHubActions,
-                            showHeader = false,
-                            showSectionTabs = false
-                        )
+                )
 
-                        AppNavigationViewModel.PLAN_PANTRY_SECTION -> FoodHubScreen(
+                AppNavigationViewModel.INSIGHTS_TAB -> StatsScreen(
+                    state = statsViewModel.state,
+                    preferences = appPreferences,
+                    onRangeSelected = { range ->
+                        statsViewModel.selectRange(range)
+                        val updated = appPreferences.copy(statsDefaultRange = range.name)
+                        appPreferences = updated
+                        appPreferencesRepository.save(updated)
+                    },
+                    onCustomRangeSelected = statsViewModel::selectCustomRange,
+                    onFilterSelected = statsViewModel::selectFilter,
+                    onPreviousPeriod = statsViewModel::movePrevious,
+                    onNextPeriod = statsViewModel::moveNext,
+                    onRefresh = statsViewModel::refresh,
+                    onOpenHistory = { openDailyHistory() },
+                    onOpenHistoryDate = { date -> openDailyHistory(date) },
+                    onOpenSearch = ::openGlobalSearch,
+                    dataQualityWarnings = dataQualityWarnings,
+                    onReviewDataQualityWarning = ::reviewDataQualityWarning,
+                    onKeepDataQualityWarning = ::keepDataQualityWarning,
+                    onIgnoreDataQualityWarning = ::ignoreExactDataQualityWarning,
+                    modifier = Modifier.padding(innerPadding)
+                )
+
+                else -> when (selectedMoreFeature) {
+                    null -> DailyRebuildMoreScreen(
+                        onOpenSearch = ::openGlobalSearch,
+                        onOpenHistory = { openDailyHistory() },
+                        onOpenFoodLibrary = { openSavedFoodsScreen() },
+                        onOpenSavedMeals = { openSavedMealsScreen() },
+                        onOpenMobilityRoutines = {
+                            navigationViewModel.selectMobilitySection(
+                                AppNavigationViewModel.MOBILITY_ROUTINES_SECTION
+                            )
+                            navigationViewModel.openLogSection(
+                                AppNavigationViewModel.LOG_MOVEMENT_SECTION
+                            )
+                        },
+                        onOpenMedications = { selectedMoreFeature = "profile" },
+                        onOpenPantry = { selectedMoreFeature = "pantry" },
+                        onOpenIopGroups = {
+                            navigationViewModel.openIopGroups()
+                        },
+                        onOpenMeetings = {
+                            navigationViewModel.selectMeetingsSection(
+                                AppNavigationViewModel.MEETINGS_ATTENDANCE_SECTION
+                            )
+                            navigationViewModel.openLogSection(
+                                AppNavigationViewModel.LOG_MEETINGS_SECTION
+                            )
+                        },
+                        onOpenCareDirectory = { selectedMoreFeature = "visits" },
+                        onOpenAppointments = { selectedMoreFeature = "appointments" },
+                        onOpenCustomization = { selectedMoreFeature = "customize" },
+                        onOpenNotifications = { selectedMoreFeature = "notifications" },
+                        onOpenConnectedActivity = { selectedMoreFeature = "activity" },
+                        onOpenBackup = { selectedMoreFeature = "backup" },
+                        onOpenHelp = { selectedMoreFeature = "help" },
+                        modifier = Modifier.padding(innerPadding)
+                    )
+
+                    "pantry" -> RebuildFeaturePage(
+                        title = "Pantry Essentials",
+                        subtitle = "Manage essentials and shopping status without mixing them into everyday logging.",
+                        onBack = { selectedMoreFeature = null },
+                        onSearch = ::openGlobalSearch,
+                        onHistory = { openDailyHistory() },
+                        modifier = Modifier.padding(innerPadding)
+                    ) {
+                        FoodHubScreen(
                             state = foodHubState.copy(selectedSection = 2),
                             actions = foodHubActions,
                             showHeader = false,
-                            showSectionTabs = false
-                        )
-
-                        AppNavigationViewModel.PLAN_SHOP_SECTION -> FoodHubScreen(
-                            state = foodHubState.copy(selectedSection = 3),
-                            actions = foodHubActions.copy(
-                                onSectionChange = { section ->
-                                    if (section == 2) {
-                                        navigationViewModel.selectPlanSection(
-                                            AppNavigationViewModel.PLAN_PANTRY_SECTION
-                                        )
-                                    }
-                                }
-                            ),
-                            showHeader = false,
-                            showSectionTabs = false
-                        )
-
-                        else -> AppointmentPlanningScreen(
-                            appointments = careAppointments,
-                            onSchedule = { openAppointmentStart() },
-                            onOpenHistory = {
-                                appointmentWorkflow.showHistory = true
-                            },
-                            onViewAppointment = { appointment ->
-                                openAppointmentEditor(
-                                    appointment,
-                                    returnToHistory = false
-                                )
-                            }
+                            showSectionTabs = false,
+                            modifier = Modifier.fillMaxSize()
                         )
                     }
-                }
 
-                AppNavigationViewModel.HEALTH_TAB -> HealthHubScreen(
-                    state = healthHubState,
-                    actions = healthHubActions,
-                    requestedFeature = requestedHealthFeature,
-                    requestToken = requestedHealthFeatureToken,
-                    onRequestedFeatureConsumed = {
-                        requestedHealthFeature = null
-                    },
-                    profileContent = {
+                    "profile" -> RebuildFeaturePage(
+                        title = "Medications & Measurements",
+                        subtitle = "Health profile, goals, measurement history, and medication reference.",
+                        onBack = { selectedMoreFeature = null },
+                        onSearch = ::openGlobalSearch,
+                        onHistory = { openDailyHistory() },
+                        modifier = Modifier.padding(innerPadding)
+                    ) {
                         key(healthFeatureRefreshKey) {
                             HealthProfileFeature(repositories)
                         }
-                    },
-                    customizationContent = {
+                    }
+
+                    "appointments" -> RebuildFeaturePage(
+                        title = "Appointments",
+                        subtitle = "Schedule, prepare, manage reminders, and review appointment history.",
+                        onBack = { selectedMoreFeature = null },
+                        onSearch = ::openGlobalSearch,
+                        onHistory = { appointmentWorkflow.showHistory = true },
+                        modifier = Modifier.padding(innerPadding)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            CareAppointmentTrackerCard(
+                                appointments = careAppointments,
+                                onSchedule = { openAppointmentStart() },
+                                onOpenHistory = { appointmentWorkflow.showHistory = true },
+                                onViewAppointment = { appointment ->
+                                    openAppointmentEditor(appointment, returnToHistory = false)
+                                }
+                            )
+                        }
+                    }
+
+                    "visits" -> RebuildFeaturePage(
+                        title = "Providers & Care Places",
+                        subtitle = "Reusable care directory and completed visit history.",
+                        onBack = { selectedMoreFeature = null },
+                        onSearch = ::openGlobalSearch,
+                        onHistory = { showCareVisitHistoryDialog = true },
+                        modifier = Modifier.padding(innerPadding)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            CareVisitTrackerCard(
+                                visits = careVisits,
+                                onLogVisit = { showCareVisitStartDialog = true },
+                                onOpenHistory = { showCareVisitHistoryDialog = true }
+                            )
+                        }
+                    }
+
+                    "activity" -> RebuildFeaturePage(
+                        title = "Connected Activity",
+                        subtitle = "Health Connect permissions, walking source, and the latest stored totals.",
+                        onBack = { selectedMoreFeature = null },
+                        onSearch = ::openGlobalSearch,
+                        onHistory = { openDailyHistory() },
+                        modifier = Modifier.padding(innerPadding)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            ActivitySection(
+                                availability = healthAvailability,
+                                hasPermissions = hasHealthPermissions,
+                                isLoading = isLoadingHealthActivity,
+                                activity = displayedActivity,
+                                sourceLabel = activitySourceLabel,
+                                onConnect = {
+                                    healthPermissionsLauncher.launch(
+                                        HealthConnectManager.permissions
+                                    )
+                                },
+                                onRefresh = { refreshHealthActivity(showFeedback = true) },
+                                onManageAccess = {
+                                    healthConnectManager.openHealthConnectSettings()
+                                },
+                                onInstallOrUpdate = {
+                                    healthConnectManager.openInstallOrUpdate()
+                                }
+                            )
+                        }
+                    }
+
+                    "customize", "notifications" -> RebuildFeaturePage(
+                        title = if (selectedMoreFeature == "notifications") {
+                            "Notifications & Reminders"
+                        } else {
+                            "Customize Daily Rebuild"
+                        },
+                        subtitle = if (selectedMoreFeature == "notifications") {
+                            "Control every notification, reminder type, timing choice, and Android permission."
+                        } else {
+                            "Choose what appears, how it is ordered, units, and interface preferences."
+                        },
+                        onBack = { selectedMoreFeature = null },
+                        onSearch = ::openGlobalSearch,
+                        modifier = Modifier.padding(innerPadding)
+                    ) {
                         CustomizeDailyRebuildScreen(
                             preferences = appPreferences,
                             onPreferencesChange = { updated ->
@@ -5039,33 +5237,29 @@ fun DailyRebuildApp(
                                         putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
                                     }
                                 )
-                            }
+                            },
+                            notificationsOnly = selectedMoreFeature == "notifications",
+                            modifier = Modifier.verticalScroll(rememberScrollState())
                         )
-                    },
-                    backupContent = {
-                        BackupRestoreFeature(database = database)
-                    },
-                    modifier = Modifier.padding(innerPadding)
-                )
+                    }
 
-                else -> StatsScreen(
-                    state = statsViewModel.state,
-                    preferences = appPreferences,
-                    onRangeSelected = { range ->
-                        statsViewModel.selectRange(range)
-                        val updated = appPreferences.copy(statsDefaultRange = range.name)
-                        appPreferences = updated
-                        appPreferencesRepository.save(updated)
-                    },
-                    onCustomRangeSelected = statsViewModel::selectCustomRange,
-                    onFilterSelected = statsViewModel::selectFilter,
-                    onPreviousPeriod = statsViewModel::movePrevious,
-                    onNextPeriod = statsViewModel::moveNext,
-                    onRefresh = statsViewModel::refresh,
-                    onOpenHistory = { openDailyHistory() },
-                    onOpenHistoryDate = { date -> openDailyHistory(date) },
-                    modifier = Modifier.padding(innerPadding)
-                )
+                    "backup" -> RebuildFeaturePage(
+                        title = "Data & Backup",
+                        subtitle = "Create, inspect, restore, and verify portable Daily Rebuild backups.",
+                        onBack = { selectedMoreFeature = null },
+                        modifier = Modifier.padding(innerPadding)
+                    ) {
+                        BackupRestoreFeature(database = database)
+                    }
+
+                    else -> DailyRebuildHelpScreen(
+                        onBack = { selectedMoreFeature = null },
+                        onOpenCustomization = { selectedMoreFeature = "customize" },
+                        onOpenConnectedActivity = { selectedMoreFeature = "activity" },
+                        onOpenBackup = { selectedMoreFeature = "backup" },
+                        modifier = Modifier.padding(innerPadding)
+                    )
+                }
             }
         }
     }

@@ -62,11 +62,11 @@ private val DailyRebuildLightColors = lightColorScheme(
     onTertiary = Color.White,
     tertiaryContainer = Color(0xFFE0F4DC),
     onTertiaryContainer = Color(0xFF173C16),
-    background = Color(0xFFF5F8FB),
+    background = Color(0xFFF7F9FB),
     onBackground = Color(0xFF16212B),
     surface = Color.White,
     onSurface = Color(0xFF16212B),
-    surfaceVariant = Color(0xFFE8EEF3),
+    surfaceVariant = Color(0xFFEDF1F4),
     onSurfaceVariant = Color(0xFF4B5B68),
     outline = Color(0xFF83939F),
     outlineVariant = Color(0xFFD5DEE5),
@@ -103,9 +103,9 @@ private val DailyRebuildDarkColors = darkColorScheme(
 private val DailyRebuildShapes = Shapes(
     extraSmall = RoundedCornerShape(10.dp),
     small = RoundedCornerShape(14.dp),
-    medium = RoundedCornerShape(20.dp),
-    large = RoundedCornerShape(28.dp),
-    extraLarge = RoundedCornerShape(32.dp)
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(26.dp)
 )
 
 private val DailyRebuildTypography = Typography(
@@ -171,16 +171,16 @@ fun RebuildSectionCard(
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
         elevation = CardDefaults.cardElevation(
-            defaultElevation = 2.dp
+            defaultElevation = 1.dp
         )
     ) {
         Column(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(
@@ -189,13 +189,13 @@ fun RebuildSectionCard(
             ) {
                 Box(
                     modifier = Modifier
-                        .width(5.dp)
+                        .width(4.dp)
                         .height(if (subtitle == null) 28.dp else 44.dp)
                         .clip(RoundedCornerShape(50))
                         .background(accentColor)
                 )
 
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(10.dp))
 
                 Column(
                     modifier = Modifier.weight(1f),
@@ -233,7 +233,7 @@ fun RebuildMetricPill(
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
         color = color,
         contentColor = contentColor
     ) {
@@ -399,13 +399,8 @@ fun RebuildInsetPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(color)
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant,
-                shape = RoundedCornerShape(18.dp)
-            )
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {

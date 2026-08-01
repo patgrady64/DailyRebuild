@@ -64,6 +64,11 @@ fun StatsScreen(
     onRefresh: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenHistoryDate: (String) -> Unit,
+    onOpenSearch: (() -> Unit)? = null,
+    dataQualityWarnings: List<DataQualityWarning> = emptyList(),
+    onReviewDataQualityWarning: (DataQualityWarning) -> Unit = {},
+    onKeepDataQualityWarning: (DataQualityWarning) -> Unit = {},
+    onIgnoreDataQualityWarning: (DataQualityWarning) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showCustomRange by rememberSaveable { mutableStateOf(false) }
@@ -88,9 +93,17 @@ fun StatsScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         HubScreenHeader(
-            title = "Stats",
-            subtitle = "Trends, comparisons, and data coverage. Missing days remain different from zero.",
-            onOpenHistory = onOpenHistory
+            title = "Insights",
+            subtitle = "Steps, trends, comparisons, and records that may need review.",
+            onOpenHistory = onOpenHistory,
+            onOpenSearch = onOpenSearch
+        )
+
+        DataQualitySummaryCard(
+            warnings = dataQualityWarnings,
+            onReview = onReviewDataQualityWarning,
+            onKeep = onKeepDataQualityWarning,
+            onIgnoreExactValue = onIgnoreDataQualityWarning
         )
 
         StatsChipGrid(
@@ -148,7 +161,7 @@ fun StatsScreen(
             section.isEmpty -> RebuildInsetPanel {
                 Text("No records are available for this category in the selected period.")
                 Text(
-                    "Try another date range or show a different Stats category in Customize Daily Rebuild.",
+                    "Try another date range or show a different Insights category in Customize Daily Rebuild.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -739,7 +752,7 @@ private fun StatsErrorPanel(
     onRetry: () -> Unit
 ) {
     RebuildSectionCard(
-        title = "Stats could not load",
+        title = "Insights could not load",
         accentColor = MaterialTheme.colorScheme.error
     ) {
         Text(message)

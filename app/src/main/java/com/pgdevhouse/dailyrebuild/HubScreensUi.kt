@@ -101,6 +101,7 @@ data class TodayScreenState(
 
 data class TodayScreenActions(
     val onOpenHistory: () -> Unit,
+    val onOpenSearch: () -> Unit,
     val onOpenFood: () -> Unit,
     val onOpenWater: () -> Unit,
     val onOpenMobility: () -> Unit,
@@ -153,17 +154,41 @@ fun TodayScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         HubScreenHeader(
-            title = "Daily Rebuild",
+            title = "Today",
             subtitle = formatTodayDate(state.date),
-            onOpenHistory = actions.onOpenHistory
+            onOpenHistory = actions.onOpenHistory,
+            onOpenSearch = actions.onOpenSearch
         )
+
+        if (DailyRebuildPreferenceIds.TODAY_GLANCE in visibleSections) {
+            TodayAtAGlanceCard(state)
+        }
 
         if (DailyRebuildPreferenceIds.TODAY_PRIORITY in visibleSections) {
             TodayPriorityCard(state, actions)
         }
 
-        if (DailyRebuildPreferenceIds.TODAY_GLANCE in visibleSections) {
-            TodayAtAGlanceCard(state)
+        if (DailyRebuildPreferenceIds.TODAY_QUICK_LOG in visibleSections) {
+            TodayQuickLogSection(state, actions)
+        }
+
+        TodayUpcomingSection(
+            state = state,
+            actions = actions,
+            showAppointments = DailyRebuildPreferenceIds.TODAY_APPOINTMENTS in visibleSections,
+            showIop = DailyRebuildPreferenceIds.TODAY_IOP in visibleSections,
+            showMeetings = DailyRebuildPreferenceIds.TODAY_MEETINGS in visibleSections
+        )
+
+        if (DailyRebuildPreferenceIds.TODAY_ACTIVITY in visibleSections) {
+            TodayActivityTimeline(
+                items = state.activityItems,
+                onOpenFood = actions.onOpenFood,
+                onOpenMobility = actions.onOpenMobility,
+                onOpenMeetings = actions.onOpenMeetings,
+                onOpenMaintenance = actions.onOpenLifeMaintenance,
+                onItemClick = { selectedActivityItem = it }
+            )
         }
 
         DataQualitySummaryCard(
@@ -172,10 +197,6 @@ fun TodayScreen(
             onKeep = actions.onKeepDataQualityWarning,
             onIgnoreExactValue = actions.onIgnoreDataQualityWarning
         )
-
-        if (DailyRebuildPreferenceIds.TODAY_QUICK_LOG in visibleSections) {
-            TodayQuickLogSection(state, actions)
-        }
 
         if (
             DailyRebuildPreferenceIds.TODAY_RECENT in visibleSections &&
@@ -191,93 +212,6 @@ fun TodayScreen(
             )
         }
 
-        if (DailyRebuildPreferenceIds.TODAY_APPOINTMENTS in visibleSections) {
-            HomeAppointmentCard(
-                appointment = state.appointment,
-                onSchedule = actions.onScheduleAppointment,
-                onView = actions.onViewAppointment
-            )
-        }
-
-        if (
-            DailyRebuildPreferenceIds.TODAY_IOP in visibleSections &&
-            DailyRebuildPreferenceIds.LOG_MEETINGS in state.preferences.enabledLogSections
-        ) {
-            HomeIopCard(
-                occurrence = state.iopOccurrence,
-                onManage = actions.onOpenIopGroups
-            )
-        }
-
-        if (
-            DailyRebuildPreferenceIds.TODAY_MEETINGS in visibleSections &&
-            DailyRebuildPreferenceIds.LOG_MEETINGS in state.preferences.enabledLogSections
-        ) {
-            HomeMeetingsCard(
-                meetingsThisWeek = state.meetingsThisWeek,
-                onOpenMeetings = actions.onOpenMeetings,
-                onLogMeeting = actions.onLogMeeting
-            )
-        }
-
-        if (DailyRebuildPreferenceIds.TODAY_ACTIVITY in visibleSections) {
-            TodayActivityTimeline(
-                items = state.activityItems,
-                onOpenFood = actions.onOpenFood,
-                onOpenMobility = actions.onOpenMobility,
-                onOpenMeetings = actions.onOpenMeetings,
-                onOpenMaintenance = actions.onOpenLifeMaintenance,
-                onItemClick = { selectedActivityItem = it }
-            )
-        }
-
-        if (
-            DailyRebuildPreferenceIds.TODAY_MOVEMENT in visibleSections &&
-            DailyRebuildPreferenceIds.LOG_MOVEMENT in state.preferences.enabledLogSections
-        ) {
-            RebuildSectionCard(
-                title = "Movement Today",
-                subtitle = state.activitySourceLabel ?: "No connected activity recorded yet",
-                accentColor = RebuildGreen
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    RebuildMetricPill(
-                        label = "steps",
-                        value = state.activity.steps.toString(),
-                        modifier = Modifier.weight(1f),
-                        color = MaterialTheme.colorScheme.primaryContainer
-                    )
-                    RebuildMetricPill(
-                        label = if (state.preferences.distanceUnit == "km") "km" else "miles",
-                        value = formatPreferredDistance(
-                            state.activity.distanceMiles,
-                            state.preferences.distanceUnit
-                        ),
-                        modifier = Modifier.weight(1f),
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                    RebuildMetricPill(
-                        label = "time",
-                        value = formatActivityMinutes(state.activity.activityMinutes),
-                        modifier = Modifier.weight(1f),
-                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
-                }
-                TextButton(onClick = actions.onOpenMobility) {
-                    Text("Open Mobility")
-                }
-            }
-        }
-
-        if (DailyRebuildPreferenceIds.TODAY_SAVE_STATUS in visibleSections) {
-            TodaySaveStatus(isSaving = state.isSaving)
-        }
-
         if (DailyRebuildPreferenceIds.TODAY_MORE in visibleSections) {
             OutlinedButton(
                 onClick = { showMoreToday = !showMoreToday },
@@ -288,16 +222,48 @@ fun TodayScreen(
             }
 
             if (showMoreToday) {
-                TodayExpandableRow(
-                    title = "Daily anchors",
-                    summary = "${state.completedTasks} of 4 complete",
-                    expanded = expandedSection == "anchors",
-                    onClick = {
-                        expandedSection = if (expandedSection == "anchors") null else "anchors"
+                if (
+                    DailyRebuildPreferenceIds.TODAY_MOVEMENT in visibleSections &&
+                    DailyRebuildPreferenceIds.LOG_MOVEMENT in state.preferences.enabledLogSections
+                ) {
+                    TodayExpandableRow(
+                        title = "Movement details",
+                        summary = "${state.activity.steps} steps · ${formatActivityMinutes(state.activity.activityMinutes)}",
+                        expanded = expandedSection == "movement",
+                        onClick = {
+                            expandedSection = if (expandedSection == "movement") null else "movement"
+                        }
+                    )
+                    if (expandedSection == "movement") {
+                        RebuildInsetPanel {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                RebuildMetricPill(
+                                    label = "steps",
+                                    value = state.activity.steps.toString(),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                RebuildMetricPill(
+                                    label = if (state.preferences.distanceUnit == "km") "km" else "miles",
+                                    value = formatPreferredDistance(
+                                        state.activity.distanceMiles,
+                                        state.preferences.distanceUnit
+                                    ),
+                                    modifier = Modifier.weight(1f),
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = actions.onOpenMobility,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Open Movement")
+                            }
+                        }
                     }
-                )
-                if (expandedSection == "anchors") {
-                    DailyAnchorPanel(state, actions)
                 }
 
                 TodayExpandableRow(
@@ -349,6 +315,10 @@ fun TodayScreen(
             }
         }
 
+        if (DailyRebuildPreferenceIds.TODAY_SAVE_STATUS in visibleSections) {
+            TodaySaveStatus(isSaving = state.isSaving)
+        }
+
         Spacer(Modifier.height(12.dp))
     }
 
@@ -376,7 +346,7 @@ private fun TodayAtAGlanceCard(
 
     RebuildSectionCard(
         title = "Today at a Glance",
-        subtitle = "The details you are most likely to check during the day.",
+        subtitle = "Steps, water, food, and pain in one compact view.",
         accentColor = RebuildBlue
     ) {
         Row(
@@ -384,16 +354,19 @@ private fun TodayAtAGlanceCard(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             TodayMetricTile(
-                label = "Calories",
-                value = state.calories.toInt().toString(),
-                supporting = state.calorieGoal?.let { "Goal $it" } ?: "Logged today",
+                label = "Steps",
+                value = state.activity.steps.toString(),
+                supporting = state.activitySourceLabel ?: "Connected activity",
                 modifier = Modifier.weight(1f),
                 color = MaterialTheme.colorScheme.primaryContainer
             )
             TodayMetricTile(
-                label = "Protein",
-                value = "${formatCompactNumber(state.proteinGrams)} g",
-                supporting = "Logged today",
+                label = "Water",
+                value = formatPreferredWater(
+                    state.waterOunces,
+                    state.preferences.waterUnit
+                ),
+                supporting = if (state.waterOunces > 0.0) "Recorded" else "Not logged",
                 modifier = Modifier.weight(1f),
                 color = MaterialTheme.colorScheme.secondaryContainer
             )
@@ -403,12 +376,9 @@ private fun TodayAtAGlanceCard(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             TodayMetricTile(
-                label = "Water",
-                value = formatPreferredWater(
-                    state.waterOunces,
-                    state.preferences.waterUnit
-                ),
-                supporting = if (state.waterOunces > 0.0) "Recorded" else "Not logged",
+                label = "Food",
+                value = "${state.calories.toInt()} cal",
+                supporting = "${formatCompactNumber(state.proteinGrams)} g protein",
                 modifier = Modifier.weight(1f),
                 color = MaterialTheme.colorScheme.tertiaryContainer
             )
@@ -483,7 +453,7 @@ private fun TodayQuickLogSection(
     ) {
         if (visibleActions.isEmpty()) {
             Text(
-                "All Quick Log buttons are hidden. Change this under Health → Customize Daily Rebuild.",
+                "All Quick Log buttons are hidden. Change this under More → Customize Daily Rebuild.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
