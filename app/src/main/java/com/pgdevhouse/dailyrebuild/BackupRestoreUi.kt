@@ -149,32 +149,20 @@ fun BackupRestoreFeature(
             errorMessage = null
             statusMessage = null
             val restoreAttempt = runCatching {
-                val oldAppointments = database
-                    .careAppointmentDao()
-                    .getAllAppointments()
-                oldAppointments.forEach { appointment ->
-                    AppointmentReminderScheduler.cancel(
-                        context,
-                        appointment.id
-                    )
-                }
-
+                DailyRebuildReminderScheduler.cancelAllScheduled(context)
                 manager.restoreFromUri(uri)
             }
 
-            // Whether the restore succeeds or rolls back, rebuild reminder
-            // alarms from whichever appointment rows are now in the database,
-            // but only when appointment reminders are enabled in Settings.
-            if (appPreferencesRepository.load().appointmentRemindersEnabled) {
-                database.careAppointmentDao()
-                    .getAllAppointments()
-                    .forEach { appointment ->
-                        AppointmentReminderScheduler.schedule(
-                            context,
-                            appointment
-                        )
-                    }
-            }
+            // Whether the restore succeeds or rolls back, rebuild every
+            // enabled reminder type from whichever records and preferences are
+            // now active.
+            DailyRebuildReminderCoordinator.sync(
+                context = context,
+                preferences = appPreferencesRepository.load(),
+                appointments = database.careAppointmentDao().getAllAppointments(),
+                meetings = database.meetingDao().getActiveMeetings(),
+                iopGroups = database.iopGroupDao().getActive()
+            )
 
             restoreAttempt.onSuccess { result ->
                 pendingRestoreUri = null
@@ -202,29 +190,17 @@ fun BackupRestoreFeature(
             errorMessage = null
             statusMessage = null
             val restoreAttempt = runCatching {
-                val oldAppointments = database
-                    .careAppointmentDao()
-                    .getAllAppointments()
-                oldAppointments.forEach { appointment ->
-                    AppointmentReminderScheduler.cancel(
-                        context,
-                        appointment.id
-                    )
-                }
-
+                DailyRebuildReminderScheduler.cancelAllScheduled(context)
                 manager.restoreEmergencyBackup(emergency.file)
             }
 
-            if (appPreferencesRepository.load().appointmentRemindersEnabled) {
-                database.careAppointmentDao()
-                    .getAllAppointments()
-                    .forEach { appointment ->
-                        AppointmentReminderScheduler.schedule(
-                            context,
-                            appointment
-                        )
-                    }
-            }
+            DailyRebuildReminderCoordinator.sync(
+                context = context,
+                preferences = appPreferencesRepository.load(),
+                appointments = database.careAppointmentDao().getAllAppointments(),
+                meetings = database.meetingDao().getActiveMeetings(),
+                iopGroups = database.iopGroupDao().getActive()
+            )
 
             restoreAttempt.onSuccess { result ->
                 statusMessage = if (result.summary.preferencesIncluded) {
@@ -469,7 +445,7 @@ private fun BackupCoverageCard(lastBackupTime: Long) {
             "Daily records, foods, saved meals, water, activity snapshots, mobility, pain, measurements, medications, showers, migraines, meetings, IOP schedules and missed-attendance reasons, appointments, care visits, pantry essentials, and Life Maintenance."
         )
         Text(
-            "Today and Quick Log layout, hidden sections, Stats order and range, preferred units, reminder switches, recent searches, and exact-value warning exceptions."
+            "Today and Quick Log layout, hidden sections, Stats order and range, preferred units, notification master/type switches, reminder timing and snooze choices, recent searches, and exact-value warning exceptions."
         )
         Text("Not included", fontWeight = FontWeight.SemiBold)
         Text(

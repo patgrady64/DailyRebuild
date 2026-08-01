@@ -1,7 +1,9 @@
 package com.pgdevhouse.dailyrebuild
 
 import android.Manifest
+import android.content.Intent
 import android.os.Build
+import android.provider.Settings
 import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -293,17 +295,26 @@ fun DailyRebuildApp(
         mutableIntStateOf(0)
     }
 
+    var notificationPermissionGranted by remember {
+        mutableStateOf(
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
+
     val notificationPermissionLauncher =
         rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
         ) { granted ->
+            notificationPermissionGranted = granted
             coroutineScope.launch {
                 snackbarHostState.showSnackbar(
                     message =
                         if (granted) {
-                            "Appointment notifications enabled."
+                            "Daily Rebuild notifications are allowed."
                         } else {
-                            "Appointment saved, but notification permission was not allowed."
+                            "Android did not allow notifications. You can change this later in Settings."
                         }
                 )
             }
@@ -1346,16 +1357,18 @@ fun DailyRebuildApp(
     }
 
     LaunchedEffect(
-        appPreferences.appointmentRemindersEnabled,
-        careAppointments
+        appPreferences,
+        careAppointments,
+        savedMeetings,
+        iopGroups
     ) {
-        careAppointments.forEach { appointment ->
-            if (appPreferences.appointmentRemindersEnabled) {
-                AppointmentReminderScheduler.schedule(context, appointment)
-            } else {
-                AppointmentReminderScheduler.cancel(context, appointment.id)
-            }
-        }
+        DailyRebuildReminderCoordinator.sync(
+            context = context,
+            preferences = appPreferences,
+            appointments = careAppointments,
+            meetings = savedMeetings,
+            iopGroups = iopGroups
+        )
     }
 
     val visibleLogSections = listOf(
@@ -2559,7 +2572,7 @@ fun DailyRebuildApp(
         }
     }
 
-    fun requestAppointmentNotificationPermissionIfNeeded(
+    fun requestNotificationPermissionIfNeeded(
         remindersEnabled: Boolean
     ) {
         if (
@@ -2702,9 +2715,10 @@ fun DailyRebuildApp(
                 careAppointments =
                     careAppointmentDao.getAllAppointments()
 
-                requestAppointmentNotificationPermissionIfNeeded(
+                requestNotificationPermissionIfNeeded(
                     remindersEnabled =
-                        appPreferences.appointmentRemindersEnabled &&
+                        appPreferences.notificationsEnabled &&
+                            appPreferences.appointmentRemindersEnabled &&
                             savedAppointment.scheduledAt > now &&
                             savedAppointment.status in
                                 setOf("Scheduled", "Confirmed") &&
@@ -4956,12 +4970,50 @@ fun DailyRebuildApp(
                         CustomizeDailyRebuildScreen(
                             preferences = appPreferences,
                             onPreferencesChange = { updated ->
+                                val notificationSettingsChanged =
+                                    updated.notificationsEnabled != appPreferences.notificationsEnabled ||
+                                        updated.appointmentRemindersEnabled != appPreferences.appointmentRemindersEnabled ||
+                                        updated.meetingRemindersEnabled != appPreferences.meetingRemindersEnabled ||
+                                        updated.iopRemindersEnabled != appPreferences.iopRemindersEnabled ||
+                                        updated.iopAttendanceFollowUpEnabled != appPreferences.iopAttendanceFollowUpEnabled ||
+                                        updated.meetingReminderLeadMinutes != appPreferences.meetingReminderLeadMinutes ||
+                                        updated.iopReminderLeadMinutes != appPreferences.iopReminderLeadMinutes ||
+                                        updated.notificationSnoozeMinutes != appPreferences.notificationSnoozeMinutes
+
                                 appPreferences = updated
                                 appPreferencesRepository.save(updated)
                                 statsViewModel.updatePreferences(updated)
+
+                                if (notificationSettingsChanged) {
+                                    if (!updated.notificationsEnabled) {
+                                        DailyRebuildReminderScheduler.cancelAllScheduled(context)
+                                        DailyRebuildReminderScheduler.cancelAllDisplayed(context)
+                                    } else {
+                                        requestNotificationPermissionIfNeeded(
+                                            updated.appointmentRemindersEnabled ||
+                                                updated.meetingRemindersEnabled ||
+                                                updated.iopRemindersEnabled ||
+                                                updated.iopAttendanceFollowUpEnabled
+                                        )
+                                    }
+                                }
                             },
                             ignoredDataQualityValueCount = ignoredDataQualityValueCount,
-                            onResetIgnoredDataQualityValues = ::resetIgnoredDataQualityWarnings
+                            onResetIgnoredDataQualityValues = ::resetIgnoredDataQualityWarnings,
+                            appointments = careAppointments,
+                            savedMeetings = savedMeetings,
+                            iopGroups = iopGroups,
+                            notificationPermissionGranted = notificationPermissionGranted,
+                            onRequestNotificationPermission = {
+                                requestNotificationPermissionIfNeeded(true)
+                            },
+                            onOpenAndroidNotificationSettings = {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                    }
+                                )
+                            }
                         )
                     },
                     backupContent = {

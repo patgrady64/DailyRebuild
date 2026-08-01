@@ -639,6 +639,7 @@ class DailyRebuildBackupManager(
                         )
                     )
                     put("statsDefaultRange", settings.statsDefaultRange)
+                    put("notificationsEnabled", settings.notificationsEnabled)
                     put(
                         "appointmentRemindersEnabled",
                         settings.appointmentRemindersEnabled
@@ -648,6 +649,22 @@ class DailyRebuildBackupManager(
                         settings.meetingRemindersEnabled
                     )
                     put("iopRemindersEnabled", settings.iopRemindersEnabled)
+                    put(
+                        "iopAttendanceFollowUpEnabled",
+                        settings.iopAttendanceFollowUpEnabled
+                    )
+                    put(
+                        "meetingReminderLeadMinutes",
+                        settings.meetingReminderLeadMinutes
+                    )
+                    put(
+                        "iopReminderLeadMinutes",
+                        settings.iopReminderLeadMinutes
+                    )
+                    put(
+                        "notificationSnoozeMinutes",
+                        settings.notificationSnoozeMinutes
+                    )
                     put("weightUnit", settings.weightUnit)
                     put("distanceUnit", settings.distanceUnit)
                     put("waterUnit", settings.waterUnit)
@@ -769,6 +786,10 @@ class DailyRebuildBackupManager(
                 "statsDefaultRange",
                 VALID_STATS_RANGES
             ),
+            notificationsEnabled = settingsJson.optBoolean(
+                "notificationsEnabled",
+                true
+            ),
             appointmentRemindersEnabled = requiredBoolean(
                 settingsJson,
                 "appointmentRemindersEnabled"
@@ -780,6 +801,22 @@ class DailyRebuildBackupManager(
             iopRemindersEnabled = requiredBoolean(
                 settingsJson,
                 "iopRemindersEnabled"
+            ),
+            iopAttendanceFollowUpEnabled = settingsJson.optBoolean(
+                "iopAttendanceFollowUpEnabled",
+                false
+            ),
+            meetingReminderLeadMinutes = settingsJson.optInt(
+                "meetingReminderLeadMinutes",
+                60
+            ),
+            iopReminderLeadMinutes = settingsJson.optInt(
+                "iopReminderLeadMinutes",
+                60
+            ),
+            notificationSnoozeMinutes = settingsJson.optInt(
+                "notificationSnoozeMinutes",
+                15
             ),
             weightUnit = requiredAllowedString(
                 settingsJson,

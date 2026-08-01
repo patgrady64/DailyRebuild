@@ -13,10 +13,17 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.pgdevhouse.dailyrebuild.data.local.CareAppointment
+import com.pgdevhouse.dailyrebuild.data.local.IopGroup
+import com.pgdevhouse.dailyrebuild.data.local.SavedMeeting
 import com.pgdevhouse.dailyrebuild.data.preferences.DailyRebuildPreferenceIds
 import com.pgdevhouse.dailyrebuild.data.preferences.DailyRebuildPreferences
 import com.pgdevhouse.dailyrebuild.ui.stats.StatsRange
@@ -77,8 +84,16 @@ fun CustomizeDailyRebuildScreen(
     onPreferencesChange: (DailyRebuildPreferences) -> Unit,
     ignoredDataQualityValueCount: Int = 0,
     onResetIgnoredDataQualityValues: () -> Unit = {},
+    appointments: List<CareAppointment> = emptyList(),
+    savedMeetings: List<SavedMeeting> = emptyList(),
+    iopGroups: List<IopGroup> = emptyList(),
+    notificationPermissionGranted: Boolean = true,
+    onRequestNotificationPermission: () -> Unit = {},
+    onOpenAndroidNotificationSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    var showReminderCenter by rememberSaveable { mutableStateOf(false) }
+
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -250,40 +265,142 @@ fun CustomizeDailyRebuildScreen(
         }
 
         RebuildSectionCard(
-            title = "Reminders",
-            subtitle = "Keep reminder preferences in one place.",
+            title = "Notifications & Reminders",
+            subtitle = "Every notification is optional. The master switch stops all of them at once.",
             accentColor = RebuildAmber
         ) {
             PreferenceCheckboxRow(
+                label = "All Daily Rebuild notifications",
+                description = "Turn this off to cancel every scheduled Daily Rebuild alarm and notification. Your individual choices are kept for later.",
+                checked = preferences.notificationsEnabled,
+                onCheckedChange = { enabled ->
+                    onPreferencesChange(
+                        preferences.copy(notificationsEnabled = enabled)
+                    )
+                }
+            )
+
+            PreferenceCheckboxRow(
                 label = "Appointment reminders",
-                description = "Controls the appointment alarms Daily Rebuild schedules.",
+                description = "Uses the one-day and two-hour choices saved on each appointment.",
                 checked = preferences.appointmentRemindersEnabled,
+                enabled = preferences.notificationsEnabled,
                 onCheckedChange = {
                     onPreferencesChange(
                         preferences.copy(appointmentRemindersEnabled = it)
                     )
                 }
             )
+
             PreferenceCheckboxRow(
                 label = "Recovery meeting reminders",
-                description = "Saved for the upcoming reminder phase.",
+                description = "Reminds you before active saved meetings that have a usual day and start time.",
                 checked = preferences.meetingRemindersEnabled,
+                enabled = preferences.notificationsEnabled,
                 onCheckedChange = {
                     onPreferencesChange(
                         preferences.copy(meetingRemindersEnabled = it)
                     )
                 }
             )
+            ReminderTimingChoiceRow(
+                label = "Recovery meeting notice",
+                value = preferences.meetingReminderLeadMinutes,
+                enabled = preferences.notificationsEnabled && preferences.meetingRemindersEnabled,
+                onSelected = {
+                    onPreferencesChange(
+                        preferences.copy(meetingReminderLeadMinutes = it)
+                    )
+                }
+            )
+
             PreferenceCheckboxRow(
                 label = "IOP group reminders",
-                description = "Saved for the upcoming reminder phase.",
+                description = "Reminds you before each active recurring IOP group.",
                 checked = preferences.iopRemindersEnabled,
+                enabled = preferences.notificationsEnabled,
                 onCheckedChange = {
                     onPreferencesChange(
                         preferences.copy(iopRemindersEnabled = it)
                     )
                 }
             )
+            ReminderTimingChoiceRow(
+                label = "IOP group notice",
+                value = preferences.iopReminderLeadMinutes,
+                enabled = preferences.notificationsEnabled && preferences.iopRemindersEnabled,
+                onSelected = {
+                    onPreferencesChange(
+                        preferences.copy(iopReminderLeadMinutes = it)
+                    )
+                }
+            )
+
+            PreferenceCheckboxRow(
+                label = "IOP attendance follow-up",
+                description = "After a group ends, reminds you that it was counted as attended and only needs action if you missed it.",
+                checked = preferences.iopAttendanceFollowUpEnabled,
+                enabled = preferences.notificationsEnabled,
+                onCheckedChange = {
+                    onPreferencesChange(
+                        preferences.copy(iopAttendanceFollowUpEnabled = it)
+                    )
+                }
+            )
+
+            ReminderTimingChoiceRow(
+                label = "Notification snooze time",
+                value = preferences.notificationSnoozeMinutes,
+                enabled = preferences.notificationsEnabled,
+                choices = listOf(15 to "15 min", 30 to "30 min", 60 to "1 hour"),
+                onSelected = {
+                    onPreferencesChange(
+                        preferences.copy(notificationSnoozeMinutes = it)
+                    )
+                }
+            )
+
+            Text(
+                text = if (!preferences.notificationsEnabled) {
+                    "All notifications are currently off."
+                } else if (notificationPermissionGranted) {
+                    "Android notification permission is allowed."
+                } else {
+                    "Android notification permission is not allowed yet."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (preferences.notificationsEnabled && !notificationPermissionGranted) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onRequestNotificationPermission,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text("Allow Notifications")
+                    }
+                    OutlinedButton(
+                        onClick = onOpenAndroidNotificationSettings,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text("Android Settings")
+                    }
+                }
+            }
+
+            OutlinedButton(
+                onClick = { showReminderCenter = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text("Open Reminder Center")
+            }
         }
 
         RebuildSectionCard(
@@ -367,6 +484,19 @@ fun CustomizeDailyRebuildScreen(
             Text("Restore Customization Defaults")
         }
     }
+
+    if (showReminderCenter) {
+        ReminderCenterDialog(
+            preferences = preferences,
+            appointments = appointments,
+            meetings = savedMeetings,
+            iopGroups = iopGroups,
+            notificationPermissionGranted = notificationPermissionGranted,
+            onRequestPermission = onRequestNotificationPermission,
+            onOpenAndroidNotificationSettings = onOpenAndroidNotificationSettings,
+            onDismiss = { showReminderCenter = false }
+        )
+    }
 }
 
 @Composable
@@ -374,6 +504,7 @@ private fun PreferenceCheckboxRow(
     label: String,
     description: String = "",
     checked: Boolean,
+    enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Row(
@@ -383,7 +514,8 @@ private fun PreferenceCheckboxRow(
     ) {
         Checkbox(
             checked = checked,
-            onCheckedChange = onCheckedChange
+            onCheckedChange = onCheckedChange,
+            enabled = enabled
         )
         Column(Modifier.weight(1f)) {
             Text(label, fontWeight = FontWeight.Medium)
@@ -427,6 +559,49 @@ private fun ReorderPreferenceRow(
         }
         TextButton(onClick = onMoveDown, enabled = canMoveDown) {
             Text("↓")
+        }
+    }
+}
+
+@Composable
+private fun ReminderTimingChoiceRow(
+    label: String,
+    value: Int,
+    enabled: Boolean,
+    choices: List<Pair<Int, String>> = listOf(
+        15 to "15 min",
+        30 to "30 min",
+        60 to "1 hour",
+        1_440 to "1 day"
+    ),
+    onSelected: (Int) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 40.dp, bottom = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        choices.chunked(2).forEach { rowChoices ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                rowChoices.forEach { (minutes, text) ->
+                    FilterChip(
+                        selected = value == minutes,
+                        onClick = { onSelected(minutes) },
+                        enabled = enabled,
+                        label = { Text(text) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
         }
     }
 }

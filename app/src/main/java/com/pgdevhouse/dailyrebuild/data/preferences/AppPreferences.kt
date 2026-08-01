@@ -49,9 +49,14 @@ data class DailyRebuildPreferences(
     val statsOrder: List<String> = defaultStatsOrder,
     val hiddenStatsSections: Set<String> = emptySet(),
     val statsDefaultRange: String = "LAST_30_DAYS",
+    val notificationsEnabled: Boolean = true,
     val appointmentRemindersEnabled: Boolean = true,
     val meetingRemindersEnabled: Boolean = false,
     val iopRemindersEnabled: Boolean = false,
+    val iopAttendanceFollowUpEnabled: Boolean = false,
+    val meetingReminderLeadMinutes: Int = 60,
+    val iopReminderLeadMinutes: Int = 60,
+    val notificationSnoozeMinutes: Int = 15,
     val weightUnit: String = "lb",
     val distanceUnit: String = "mi",
     val waterUnit: String = "oz",
@@ -176,6 +181,10 @@ class AppPreferencesRepository(
                 KEY_STATS_DEFAULT_RANGE,
                 "LAST_30_DAYS"
             )?.takeIf { it in VALID_STATS_RANGES } ?: "LAST_30_DAYS",
+            notificationsEnabled = preferences.getBoolean(
+                KEY_NOTIFICATIONS_ENABLED,
+                true
+            ),
             appointmentRemindersEnabled = preferences.getBoolean(
                 KEY_APPOINTMENT_REMINDERS,
                 true
@@ -188,6 +197,22 @@ class AppPreferencesRepository(
                 KEY_IOP_REMINDERS,
                 false
             ),
+            iopAttendanceFollowUpEnabled = preferences.getBoolean(
+                KEY_IOP_ATTENDANCE_FOLLOW_UP,
+                false
+            ),
+            meetingReminderLeadMinutes = preferences.getInt(
+                KEY_MEETING_REMINDER_LEAD_MINUTES,
+                60
+            ).takeIf { it in VALID_REMINDER_LEAD_MINUTES } ?: 60,
+            iopReminderLeadMinutes = preferences.getInt(
+                KEY_IOP_REMINDER_LEAD_MINUTES,
+                60
+            ).takeIf { it in VALID_REMINDER_LEAD_MINUTES } ?: 60,
+            notificationSnoozeMinutes = preferences.getInt(
+                KEY_NOTIFICATION_SNOOZE_MINUTES,
+                15
+            ).takeIf { it in VALID_SNOOZE_MINUTES } ?: 15,
             weightUnit = preferences.getString(KEY_WEIGHT_UNIT, "lb")
                 ?.takeIf { it in VALID_WEIGHT_UNITS } ?: "lb",
             distanceUnit = preferences.getString(KEY_DISTANCE_UNIT, "mi")
@@ -334,9 +359,14 @@ class AppPreferencesRepository(
         .putString(KEY_STATS_ORDER, value.statsOrder.joinToString(SEPARATOR))
         .putStringSet(KEY_HIDDEN_STATS_SECTIONS, value.hiddenStatsSections)
         .putString(KEY_STATS_DEFAULT_RANGE, value.statsDefaultRange)
+        .putBoolean(KEY_NOTIFICATIONS_ENABLED, value.notificationsEnabled)
         .putBoolean(KEY_APPOINTMENT_REMINDERS, value.appointmentRemindersEnabled)
         .putBoolean(KEY_MEETING_REMINDERS, value.meetingRemindersEnabled)
         .putBoolean(KEY_IOP_REMINDERS, value.iopRemindersEnabled)
+        .putBoolean(KEY_IOP_ATTENDANCE_FOLLOW_UP, value.iopAttendanceFollowUpEnabled)
+        .putInt(KEY_MEETING_REMINDER_LEAD_MINUTES, value.meetingReminderLeadMinutes)
+        .putInt(KEY_IOP_REMINDER_LEAD_MINUTES, value.iopReminderLeadMinutes)
+        .putInt(KEY_NOTIFICATION_SNOOZE_MINUTES, value.notificationSnoozeMinutes)
         .putString(KEY_WEIGHT_UNIT, value.weightUnit)
         .putString(KEY_DISTANCE_UNIT, value.distanceUnit)
         .putString(KEY_WATER_UNIT, value.waterUnit)
@@ -367,6 +397,12 @@ class AppPreferencesRepository(
                 .intersect(DailyRebuildPreferences.defaultStatsOrder.toSet()),
             statsDefaultRange = value.statsDefaultRange
                 .takeIf { it in VALID_STATS_RANGES } ?: "LAST_30_DAYS",
+            meetingReminderLeadMinutes = value.meetingReminderLeadMinutes
+                .takeIf { it in VALID_REMINDER_LEAD_MINUTES } ?: 60,
+            iopReminderLeadMinutes = value.iopReminderLeadMinutes
+                .takeIf { it in VALID_REMINDER_LEAD_MINUTES } ?: 60,
+            notificationSnoozeMinutes = value.notificationSnoozeMinutes
+                .takeIf { it in VALID_SNOOZE_MINUTES } ?: 15,
             weightUnit = value.weightUnit.takeIf { it in VALID_WEIGHT_UNITS } ?: "lb",
             distanceUnit = value.distanceUnit.takeIf { it in VALID_DISTANCE_UNITS } ?: "mi",
             waterUnit = value.waterUnit.takeIf { it in VALID_WATER_UNITS } ?: "oz",
@@ -437,9 +473,18 @@ class AppPreferencesRepository(
         private const val KEY_STATS_ORDER = "stats_order"
         private const val KEY_HIDDEN_STATS_SECTIONS = "hidden_stats_sections"
         private const val KEY_STATS_DEFAULT_RANGE = "stats_default_range"
+        private const val KEY_NOTIFICATIONS_ENABLED = "notifications_enabled"
         private const val KEY_APPOINTMENT_REMINDERS = "appointment_reminders_enabled"
         private const val KEY_MEETING_REMINDERS = "meeting_reminders_enabled"
         private const val KEY_IOP_REMINDERS = "iop_reminders_enabled"
+        private const val KEY_IOP_ATTENDANCE_FOLLOW_UP =
+            "iop_attendance_follow_up_enabled"
+        private const val KEY_MEETING_REMINDER_LEAD_MINUTES =
+            "meeting_reminder_lead_minutes"
+        private const val KEY_IOP_REMINDER_LEAD_MINUTES =
+            "iop_reminder_lead_minutes"
+        private const val KEY_NOTIFICATION_SNOOZE_MINUTES =
+            "notification_snooze_minutes"
         private const val KEY_WEIGHT_UNIT = "weight_unit"
         private const val KEY_DISTANCE_UNIT = "distance_unit"
         private const val KEY_WATER_UNIT = "water_unit"
@@ -465,6 +510,8 @@ class AppPreferencesRepository(
             "CUSTOM",
             "ALL_TIME"
         )
+        private val VALID_REMINDER_LEAD_MINUTES = setOf(15, 30, 60, 1_440)
+        private val VALID_SNOOZE_MINUTES = setOf(15, 30, 60)
         private val VALID_WEIGHT_UNITS = setOf("lb", "kg")
         private val VALID_DISTANCE_UNITS = setOf("mi", "km")
         private val VALID_WATER_UNITS = setOf("oz", "ml")
