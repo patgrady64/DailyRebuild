@@ -112,6 +112,8 @@ data class TodayScreenActions(
     val onOpenLifeMaintenance: () -> Unit,
     val onOpenIopGroups: () -> Unit,
     val onRepeatShortcut: (TodayRepeatShortcut, Double) -> Unit,
+    val onEditActivityItem: (TodayActivityItem) -> Unit,
+    val onDeleteActivityItem: (TodayActivityItem) -> Unit,
     val onFoodRecordedChange: (Boolean) -> Unit,
     val onWalkCompletedChange: (Boolean) -> Unit,
     val onPainRecordedChange: (Boolean) -> Unit,
@@ -134,6 +136,7 @@ fun TodayScreen(
 ) {
     var showMoreToday by rememberSaveable { mutableStateOf(false) }
     var expandedSection by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedActivityItem by remember { mutableStateOf<TodayActivityItem?>(null) }
     val visibleSections = state.preferences.visibleTodaySections
 
     Column(
@@ -210,7 +213,8 @@ fun TodayScreen(
                 onOpenFood = actions.onOpenFood,
                 onOpenMobility = actions.onOpenMobility,
                 onOpenMeetings = actions.onOpenMeetings,
-                onOpenMaintenance = actions.onOpenLifeMaintenance
+                onOpenMaintenance = actions.onOpenLifeMaintenance,
+                onItemClick = { selectedActivityItem = it }
             )
         }
 
@@ -333,6 +337,21 @@ fun TodayScreen(
         }
 
         Spacer(Modifier.height(12.dp))
+    }
+
+    selectedActivityItem?.let { item ->
+        TodayActivityDetailsDialog(
+            item = item,
+            onDismiss = { selectedActivityItem = null },
+            onEdit = {
+                selectedActivityItem = null
+                actions.onEditActivityItem(item)
+            },
+            onDelete = {
+                selectedActivityItem = null
+                actions.onDeleteActivityItem(item)
+            }
+        )
     }
 }
 
@@ -866,7 +885,8 @@ private fun TodayActivityTimeline(
     onOpenFood: () -> Unit,
     onOpenMobility: () -> Unit,
     onOpenMeetings: () -> Unit,
-    onOpenMaintenance: () -> Unit
+    onOpenMaintenance: () -> Unit,
+    onItemClick: (TodayActivityItem) -> Unit
 ) {
     RebuildSectionCard(
         title = "Today’s Activity",
@@ -887,7 +907,10 @@ private fun TodayActivityTimeline(
             }
         } else {
             items.forEachIndexed { index, item ->
-                TodayActivityRow(item)
+                TodayActivityRow(
+                    item = item,
+                    onClick = { onItemClick(item) }
+                )
                 if (index < items.lastIndex) {
                     HorizontalDivider(
                         modifier = Modifier.padding(start = 12.dp),
@@ -911,11 +934,13 @@ private fun TodayActivityTimeline(
 
 @Composable
 private fun TodayActivityRow(
-    item: TodayActivityItem
+    item: TodayActivityItem,
+    onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .padding(vertical = 9.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top
@@ -950,6 +975,92 @@ private fun TodayActivityRow(
             )
         }
     }
+}
+
+@Composable
+private fun TodayActivityDetailsDialog(
+    item: TodayActivityItem,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val canEdit = item.category in setOf(
+        "Food",
+        "Meal",
+        "Mobility",
+        "Meeting",
+        "Maintenance"
+    )
+    var confirmDelete by remember(item.key) {
+        mutableStateOf(false)
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete ${item.title}?") },
+            text = {
+                Text(
+                    "This removes the logged entry. You can immediately restore it with Undo."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = onDelete) {
+                    Text(
+                        text = "Delete",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+        return
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(item.title) },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                RebuildStatusBadge(text = item.category)
+                Text(
+                    text = item.detail,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    text = formatActivityClockTime(item.occurredAt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            if (canEdit) {
+                TextButton(onClick = onEdit) {
+                    Text("Edit")
+                }
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { confirmDelete = true }) {
+                    Text(
+                        text = "Delete",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Close")
+                }
+            }
+        }
+    )
 }
 
 @Composable
@@ -1392,6 +1503,7 @@ data class FoodHubActions(
     val onBuildMeal: () -> Unit,
     val onOpenSavedMeals: () -> Unit,
     val onUpdateEntryQuantity: (FoodLogEntry, Double) -> Unit,
+    val onUpdateMealQuantity: (String, Double) -> Unit,
     val onDeleteEntry: (FoodLogEntry) -> Unit,
     val onDeleteMealLog: (String) -> Unit,
     val onSavePantryItem: (PantryEssential) -> Unit,
@@ -1450,6 +1562,7 @@ fun FoodHubScreen(
                     onBuildMeal = actions.onBuildMeal,
                     onOpenSavedMeals = actions.onOpenSavedMeals,
                     onUpdateQuantity = actions.onUpdateEntryQuantity,
+                    onUpdateMealQuantity = actions.onUpdateMealQuantity,
                     onDeleteEntry = actions.onDeleteEntry,
                     onDeleteMealLog = actions.onDeleteMealLog
                 )
@@ -1531,6 +1644,7 @@ data class MobilityHubActions(
     val onRefresh: () -> Unit,
     val onManageHealth: () -> Unit,
     val onSaveSession: (MobilitySessionDraft) -> Unit,
+    val onUpdateSession: (MobilitySession) -> Unit,
     val onDeleteSession: (MobilitySession) -> Unit
 )
 
@@ -1585,6 +1699,7 @@ fun MobilityHubScreen(
                 sessions = state.sessions,
                 isSaving = state.isSaving,
                 onSaveSession = actions.onSaveSession,
+                onUpdateSession = actions.onUpdateSession,
                 onDeleteSession = actions.onDeleteSession
             )
             else -> {
@@ -1739,6 +1854,7 @@ data class HealthHubActions(
     val onLogVisit: () -> Unit,
     val onOpenVisitHistory: () -> Unit,
     val onLogMigraine: () -> Unit,
+    val onEditMigraine: (MigraineLog) -> Unit,
     val onDeleteMigraine: (MigraineLog) -> Unit,
     val onLogPain: () -> Unit,
     val onConnectHealth: () -> Unit,
@@ -1855,6 +1971,7 @@ fun HealthHubScreen(
             "migraine" -> MigraineTrackerCard(
                 logs = state.migraineLogs,
                 onLogMigraine = actions.onLogMigraine,
+                onEditLog = actions.onEditMigraine,
                 onDeleteLog = actions.onDeleteMigraine
             )
             "profile" -> profileContent()

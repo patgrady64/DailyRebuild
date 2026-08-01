@@ -319,6 +319,9 @@ private fun HealthProfileDialog(
     var showMeasurementType by remember {
         mutableStateOf<String?>(null)
     }
+    var measurementBeingEdited by remember {
+        mutableStateOf<HealthMeasurement?>(null)
+    }
     var medicationBeingEdited by remember {
         mutableStateOf<MedicationEntry?>(null)
     }
@@ -330,6 +333,12 @@ private fun HealthProfileDialog(
     }
     var measurementPendingDelete by remember {
         mutableStateOf<HealthMeasurement?>(null)
+    }
+    var deletedMeasurementForUndo by remember {
+        mutableStateOf<HealthMeasurement?>(null)
+    }
+    var deletedMedicationForUndo by remember {
+        mutableStateOf<MedicationEntry?>(null)
     }
 
     var birthDate by rememberSaveable {
@@ -438,9 +447,39 @@ private fun HealthProfileDialog(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    statusMessage?.let {
+                    statusMessage?.let { message ->
                         RebuildInsetPanel {
-                            Text(it)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = message,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (
+                                    deletedMeasurementForUndo != null ||
+                                    deletedMedicationForUndo != null
+                                ) {
+                                    TextButton(
+                                        onClick = {
+                                            scope.launch {
+                                                deletedMeasurementForUndo?.let {
+                                                    healthRepository.addMeasurement(it)
+                                                }
+                                                deletedMedicationForUndo?.let {
+                                                    healthRepository.saveMedication(it)
+                                                }
+                                                deletedMeasurementForUndo = null
+                                                deletedMedicationForUndo = null
+                                                reload("Deleted item restored.")
+                                            }
+                                        }
+                                    ) {
+                                        Text("Undo")
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -545,7 +584,12 @@ private fun HealthProfileDialog(
                         latestWeight = data.latestWeight,
                         weeklyWeightChange = data.weeklyWeightChange,
                         onAddMeasurement = {
+                            measurementBeingEdited = null
                             showMeasurementType = it
+                        },
+                        onEditMeasurement = { measurement ->
+                            measurementBeingEdited = measurement
+                            showMeasurementType = measurement.type
                         },
                         onDeleteMeasurement = {
                             measurementPendingDelete = it
@@ -587,14 +631,23 @@ private fun HealthProfileDialog(
     showMeasurementType?.let { type ->
         MeasurementEditorDialog(
             type = type,
+            initial = measurementBeingEdited,
             onDismiss = {
                 showMeasurementType = null
+                measurementBeingEdited = null
             },
             onSave = { measurement ->
                 scope.launch {
                     healthRepository.addMeasurement(measurement)
                     showMeasurementType = null
-                    reload("Measurement saved.")
+                    measurementBeingEdited = null
+                    reload(
+                        if (measurement.id == 0L) {
+                            "Measurement saved."
+                        } else {
+                            "Measurement updated."
+                        }
+                    )
                 }
             }
         )
@@ -636,6 +689,8 @@ private fun HealthProfileDialog(
                     onClick = {
                         scope.launch {
                             healthRepository.deleteMedication(medication)
+                            deletedMedicationForUndo = medication
+                            deletedMeasurementForUndo = null
                             medicationPendingDelete = null
                             reload("Medication reference deleted.")
                         }
@@ -672,6 +727,8 @@ private fun HealthProfileDialog(
                     onClick = {
                         scope.launch {
                             healthRepository.deleteMeasurement(measurement)
+                            deletedMeasurementForUndo = measurement
+                            deletedMedicationForUndo = null
                             measurementPendingDelete = null
                             reload("Measurement deleted.")
                         }
@@ -986,6 +1043,7 @@ private fun MeasurementSection(
     latestWeight: Double?,
     weeklyWeightChange: Double?,
     onAddMeasurement: (String) -> Unit,
+    onEditMeasurement: (HealthMeasurement) -> Unit,
     onDeleteMeasurement: (HealthMeasurement) -> Unit
 ) {
     RebuildSectionCard(
@@ -1099,12 +1157,23 @@ private fun MeasurementSection(
                                 )
                             }
                         }
-                        TextButton(
-                            onClick = {
-                                onDeleteMeasurement(measurement)
-                            }
+                        Column(
+                            horizontalAlignment = Alignment.End
                         ) {
-                            Text("Delete")
+                            TextButton(
+                                onClick = {
+                                    onEditMeasurement(measurement)
+                                }
+                            ) {
+                                Text("Edit")
+                            }
+                            TextButton(
+                                onClick = {
+                                    onDeleteMeasurement(measurement)
+                                }
+                            ) {
+                                Text("Delete")
+                            }
                         }
                     }
                 }
@@ -1204,15 +1273,28 @@ private fun MedicationReferenceSection(
 @Composable
 private fun MeasurementEditorDialog(
     type: String,
+    initial: HealthMeasurement? = null,
     onDismiss: () -> Unit,
     onSave: (HealthMeasurement) -> Unit
 ) {
-    var date by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
-    var primary by rememberSaveable { mutableStateOf("") }
-    var secondary by rememberSaveable { mutableStateOf("") }
-    var tertiary by rememberSaveable { mutableStateOf("") }
-    var quaternary by rememberSaveable { mutableStateOf("") }
-    var notes by rememberSaveable { mutableStateOf("") }
+    var date by rememberSaveable(initial?.id) {
+        mutableStateOf(initial?.recordedDate ?: LocalDate.now().toString())
+    }
+    var primary by rememberSaveable(initial?.id) {
+        mutableStateOf(initial?.primaryValue?.let(::formatHealthNumber).orEmpty())
+    }
+    var secondary by rememberSaveable(initial?.id) {
+        mutableStateOf(initial?.secondaryValue?.let(::formatHealthNumber).orEmpty())
+    }
+    var tertiary by rememberSaveable(initial?.id) {
+        mutableStateOf(initial?.tertiaryValue?.let(::formatHealthNumber).orEmpty())
+    }
+    var quaternary by rememberSaveable(initial?.id) {
+        mutableStateOf(initial?.quaternaryValue?.let(::formatHealthNumber).orEmpty())
+    }
+    var notes by rememberSaveable(initial?.id) {
+        mutableStateOf(initial?.notes.orEmpty())
+    }
     var error by remember { mutableStateOf<String?>(null) }
 
     val title = when (type) {
@@ -1223,10 +1305,10 @@ private fun MeasurementEditorDialog(
     }
 
     RebuildInputDialog(
-        title = title,
+        title = if (initial == null) title else title.replace("Record", "Edit"),
         subtitle = "Add a dated result to your personal health history.",
         onDismissRequest = onDismiss,
-        primaryActionText = "Save measurement",
+        primaryActionText = if (initial == null) "Save measurement" else "Save changes",
         onPrimaryAction = save@{
             val validDate = runCatching { LocalDate.parse(date) }.getOrNull()
             val primaryValue = primary.toDoubleOrNull()
@@ -1239,13 +1321,15 @@ private fun MeasurementEditorDialog(
                     error = "Enter both systolic and diastolic values."
                 else -> onSave(
                     HealthMeasurement(
+                        id = initial?.id ?: 0L,
                         recordedDate = date,
                         type = type,
                         primaryValue = primaryValue,
                         secondaryValue = secondaryValue,
                         tertiaryValue = tertiary.toDoubleOrNull(),
                         quaternaryValue = quaternary.toDoubleOrNull(),
-                        notes = notes.trim()
+                        notes = notes.trim(),
+                        createdAt = initial?.createdAt ?: System.currentTimeMillis()
                     )
                 )
             }

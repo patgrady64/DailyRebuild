@@ -273,6 +273,10 @@ fun DailyRebuildApp(
         mutableStateOf(false)
     }
 
+    var showClearWaterConfirmation by rememberSaveable {
+        mutableStateOf(false)
+    }
+
     var showQuickPainDialog by rememberSaveable {
         mutableStateOf(false)
     }
@@ -371,6 +375,23 @@ fun DailyRebuildApp(
         mutableStateOf<
             SavedMealWithIngredients?
         >(null)
+    }
+
+    /*
+     * Today activity entries open the same focused editors used by their
+     * feature screens. These temporary values are UI-only and never change
+     * the database until the user confirms an edit.
+     */
+    var activityFoodBeingEdited by remember {
+        mutableStateOf<FoodLogEntry?>(null)
+    }
+
+    var activityMealLogBeingEdited by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    var activityMobilityBeingEdited by remember {
+        mutableStateOf<MobilitySession?>(null)
     }
 
     var isCreatingFoodForMeal by rememberSaveable {
@@ -475,6 +496,10 @@ fun DailyRebuildApp(
 
     var showMigraineLogDialog by rememberSaveable {
         mutableStateOf(false)
+    }
+
+    var migraineBeingEdited by remember {
+        mutableStateOf<MigraineLog?>(null)
     }
 
     /*
@@ -1785,10 +1810,19 @@ fun DailyRebuildApp(
                 meetingAttendanceHistory =
                     meetingDao.getAllAttendance()
                 meetingAttendancePendingDeletion = null
+                historyViewModel.refresh()
+                statsViewModel.refresh()
 
-                snackbarHostState.showSnackbar(
-                    message = "Meeting attendance removed."
-                )
+                snackbarHostState.showUndoableDelete(
+                    message = "Meeting attendance removed.",
+                    restoredMessage = "Meeting attendance restored."
+                ) {
+                    meetingDao.insertAttendance(attendance)
+                    meetingAttendanceHistory =
+                        meetingDao.getAllAttendance()
+                    historyViewModel.refresh()
+                    statsViewModel.refresh()
+                }
             } catch (exception: Exception) {
                 snackbarHostState.showSnackbar(
                     message = "Could not remove meeting attendance."
@@ -1832,9 +1866,13 @@ fun DailyRebuildApp(
             try {
                 iopGroupDao.delete(group)
                 iopGroups = iopGroupDao.getAll()
-                snackbarHostState.showSnackbar(
-                    message = "IOP group removed."
-                )
+                snackbarHostState.showUndoableDelete(
+                    message = "IOP group removed.",
+                    restoredMessage = "IOP group restored."
+                ) {
+                    iopGroupDao.insert(group)
+                    iopGroups = iopGroupDao.getAll()
+                }
             } catch (exception: Exception) {
                 snackbarHostState.showSnackbar(
                     message = "Could not remove the IOP group."
@@ -2249,6 +2287,10 @@ fun DailyRebuildApp(
             isDeletingCareVisit = true
 
             try {
+                val linkedAppointment = careAppointments.firstOrNull {
+                    it.convertedVisitId == visit.id
+                }
+
                 database.withTransaction {
                     careVisitDao.deleteVisitById(visit.id)
                     careAppointmentDao.clearConvertedVisitLink(
@@ -2260,9 +2302,30 @@ fun DailyRebuildApp(
                 careAppointments =
                     careAppointmentDao.getAllAppointments()
                 careVisitPendingDeletion = null
-                snackbarHostState.showSnackbar(
-                    message = "Care visit removed."
-                )
+                historyViewModel.refresh()
+                statsViewModel.refresh()
+
+                snackbarHostState.showUndoableDelete(
+                    message = "Care visit removed.",
+                    restoredMessage = "Care visit restored."
+                ) {
+                    database.withTransaction {
+                        careVisitDao.insertVisit(visit)
+                        linkedAppointment?.let { appointment ->
+                            careAppointmentDao.updateAppointment(
+                                appointment.copy(
+                                    convertedVisitId = visit.id,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                            )
+                        }
+                    }
+                    careVisits = careVisitDao.getAllVisits()
+                    careAppointments =
+                        careAppointmentDao.getAllAppointments()
+                    historyViewModel.refresh()
+                    statsViewModel.refresh()
+                }
             } catch (exception: Exception) {
                 snackbarHostState.showSnackbar(
                     message = "Could not remove the care visit."
@@ -2473,10 +2536,25 @@ fun DailyRebuildApp(
                 careAppointments =
                     careAppointmentDao.getAllAppointments()
                 appointmentWorkflow.deletingAppointment = null
+                historyViewModel.refresh()
+                statsViewModel.refresh()
 
-                snackbarHostState.showSnackbar(
-                    message = "Appointment removed."
-                )
+                snackbarHostState.showUndoableDelete(
+                    message = "Appointment removed.",
+                    restoredMessage = "Appointment restored."
+                ) {
+                    careAppointmentDao.insertAppointment(appointment)
+                    careAppointments =
+                        careAppointmentDao.getAllAppointments()
+                    if (appPreferences.appointmentRemindersEnabled) {
+                        AppointmentReminderScheduler.schedule(
+                            context,
+                            appointment
+                        )
+                    }
+                    historyViewModel.refresh()
+                    statsViewModel.refresh()
+                }
             } catch (exception: Exception) {
                 snackbarHostState.showSnackbar(
                     message = "Could not remove the appointment."
@@ -2554,6 +2632,8 @@ fun DailyRebuildApp(
     fun removeTodayShower() {
         coroutineScope.launch {
             try {
+                val removedLog = showerLogToday ?: ShowerLog(date = todayDate)
+
                 showerLogDao.deleteByDate(
                     todayDate
                 )
@@ -2564,11 +2644,21 @@ fun DailyRebuildApp(
                     showerDatesThisWeek.filterNot {
                         it == todayDate
                     }
+                historyViewModel.refresh()
+                statsViewModel.refresh()
 
-                snackbarHostState.showSnackbar(
-                    message =
-                        "Today’s shower log removed."
-                )
+                snackbarHostState.showUndoableDelete(
+                    message = "Today’s shower log removed.",
+                    restoredMessage = "Today’s shower log restored."
+                ) {
+                    showerLogDao.save(removedLog)
+                    showerLogToday = removedLog
+                    showeredToday = true
+                    showerDatesThisWeek =
+                        (showerDatesThisWeek + todayDate).distinct().sorted()
+                    historyViewModel.refresh()
+                    statsViewModel.refresh()
+                }
             } catch (exception: Exception) {
                 snackbarHostState.showSnackbar(
                     message =
@@ -2637,9 +2727,15 @@ fun DailyRebuildApp(
                 lifeMaintenanceLogs = lifeMaintenanceDao.getAllLogs()
                 historyViewModel.refresh()
                 statsViewModel.refresh()
-                snackbarHostState.showSnackbar(
-                    "Life-maintenance completion removed."
-                )
+                snackbarHostState.showUndoableDelete(
+                    message = "Life-maintenance completion removed.",
+                    restoredMessage = "Life-maintenance completion restored."
+                ) {
+                    lifeMaintenanceDao.restore(log)
+                    lifeMaintenanceLogs = lifeMaintenanceDao.getAllLogs()
+                    historyViewModel.refresh()
+                    statsViewModel.refresh()
+                }
             } catch (exception: Exception) {
                 snackbarHostState.showSnackbar(
                     "Could not remove that completion."
@@ -2658,6 +2754,7 @@ fun DailyRebuildApp(
             try {
                 migraineLogDao.save(
                     MigraineLog(
+                        id = draft.id,
                         date = draft.date,
                         occurredAt = draft.occurredAt,
                         auraDurationMinutes =
@@ -2668,17 +2765,25 @@ fun DailyRebuildApp(
                             draft.headPain,
                         foggyAfterward =
                             draft.foggyAfterward,
-                        notes = draft.notes
+                        notes = draft.notes,
+                        createdAt = draft.createdAt
                     )
                 )
 
                 migraineLogs =
                     migraineLogDao.getAllLogs()
                 showMigraineLogDialog = false
+                migraineBeingEdited = null
+                historyViewModel.refresh()
+                statsViewModel.refresh()
 
                 snackbarHostState.showSnackbar(
                     message =
-                        "Migraine / visual-aura event logged."
+                        if (draft.id == 0L) {
+                            "Migraine / visual-aura event logged."
+                        } else {
+                            "Migraine / visual-aura event updated."
+                        }
                 )
             } catch (exception: Exception) {
                 snackbarHostState.showSnackbar(
@@ -2702,11 +2807,18 @@ fun DailyRebuildApp(
                     migraineLogs.filterNot {
                         it.id == log.id
                     }
+                historyViewModel.refresh()
+                statsViewModel.refresh()
 
-                snackbarHostState.showSnackbar(
-                    message =
-                        "Migraine event removed."
-                )
+                snackbarHostState.showUndoableDelete(
+                    message = "Migraine event removed.",
+                    restoredMessage = "Migraine event restored."
+                ) {
+                    migraineLogDao.save(log)
+                    migraineLogs = migraineLogDao.getAllLogs()
+                    historyViewModel.refresh()
+                    statsViewModel.refresh()
+                }
             } catch (exception: Exception) {
                 snackbarHostState.showSnackbar(
                     message =
@@ -3059,6 +3171,31 @@ fun DailyRebuildApp(
         }
     }
 
+    fun updateMobilitySession(
+        session: MobilitySession
+    ) {
+        coroutineScope.launch {
+            isSavingMobility = true
+            try {
+                mobilitySessionDao.addSession(session)
+                mobilitySessionsToday =
+                    mobilitySessionDao.getSessionsForDate(todayDate)
+                mobilityCompleted = mobilitySessionsToday.isNotEmpty()
+                historyViewModel.refresh()
+                statsViewModel.refresh()
+                snackbarHostState.showSnackbar(
+                    message = "Mobility session updated."
+                )
+            } catch (_: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not update mobility session."
+                )
+            } finally {
+                isSavingMobility = false
+            }
+        }
+    }
+
     fun deleteMobilitySession(
         session: MobilitySession
     ) {
@@ -3082,12 +3219,20 @@ fun DailyRebuildApp(
                 ) {
                     mobilityCompleted = false
                 }
+                historyViewModel.refresh()
+                statsViewModel.refresh()
 
-                snackbarHostState
-                    .showSnackbar(
-                        message =
-                            "Mobility session deleted."
-                    )
+                snackbarHostState.showUndoableDelete(
+                    message = "Mobility session deleted.",
+                    restoredMessage = "Mobility session restored."
+                ) {
+                    mobilitySessionDao.addSession(session)
+                    mobilitySessionsToday =
+                        mobilitySessionDao.getSessionsForDate(todayDate)
+                    mobilityCompleted = mobilitySessionsToday.isNotEmpty()
+                    historyViewModel.refresh()
+                    statsViewModel.refresh()
+                }
             } catch (
                 exception: Exception
             ) {
@@ -3534,6 +3679,60 @@ fun DailyRebuildApp(
         }
     }
 
+    fun updateMealLogQuantity(
+        mealLogId: String,
+        newQuantity: Double,
+        date: String = todayDate
+    ) {
+        coroutineScope.launch {
+            try {
+                require(newQuantity > 0.0) {
+                    "Meal quantity must be greater than zero."
+                }
+
+                val mealEntries = foodDao.getEntriesForDate(date).filter {
+                    it.mealLogId == mealLogId
+                }
+                require(mealEntries.isNotEmpty()) {
+                    "That meal entry no longer exists."
+                }
+
+                val currentQuantity = mealEntries
+                    .maxOfOrNull { it.mealQuantity }
+                    ?.takeIf { it > 0.0 }
+                    ?: 1.0
+                val scale = newQuantity / currentQuantity
+
+                database.withTransaction {
+                    mealEntries.forEach { entry ->
+                        foodDao.updateFoodEntry(
+                            entry.copy(
+                                quantity = entry.quantity * scale,
+                                mealQuantity = newQuantity,
+                                calories = entry.calories * scale,
+                                proteinGrams = entry.proteinGrams * scale,
+                                carbohydrateGrams = entry.carbohydrateGrams * scale,
+                                fatGrams = entry.fatGrams * scale,
+                                sodiumMilligrams = entry.sodiumMilligrams * scale
+                            )
+                        )
+                    }
+                }
+
+                synchronizeFoodRecordedForDate(date)
+                historyViewModel.refresh()
+                statsViewModel.refresh()
+                snackbarHostState.showSnackbar(
+                    message = "Meal quantity updated."
+                )
+            } catch (_: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not update the meal quantity."
+                )
+            }
+        }
+    }
+
     fun deleteFoodEntry(
         entry: FoodLogEntry
     ) {
@@ -3544,13 +3743,19 @@ fun DailyRebuildApp(
                         entry.id
                     )
 
-                synchronizeFoodRecordedForDate(todayDate)
+                synchronizeFoodRecordedForDate(entry.date)
+                historyViewModel.refresh()
+                statsViewModel.refresh()
 
-                snackbarHostState
-                    .showSnackbar(
-                        message =
-                            "Food entry deleted."
-                    )
+                snackbarHostState.showUndoableDelete(
+                    message = "Food entry deleted.",
+                    restoredMessage = "Food entry restored."
+                ) {
+                    foodDao.addFoodEntry(entry)
+                    synchronizeFoodRecordedForDate(entry.date)
+                    historyViewModel.refresh()
+                    statsViewModel.refresh()
+                }
             } catch (
                 exception: Exception
             ) {
@@ -3568,18 +3773,33 @@ fun DailyRebuildApp(
     ) {
         coroutineScope.launch {
             try {
+                val removedEntries = foodEntries.filter {
+                    it.mealLogId == mealLogId
+                }
+                val entryDate = removedEntries.firstOrNull()?.date ?: todayDate
+
                 foodDao
                     .deleteFoodEntriesByMealLogId(
                         mealLogId
                     )
 
-                synchronizeFoodRecordedForDate(todayDate)
+                synchronizeFoodRecordedForDate(entryDate)
+                historyViewModel.refresh()
+                statsViewModel.refresh()
 
-                snackbarHostState
-                    .showSnackbar(
-                        message =
-                            "Meal deleted from today."
-                    )
+                snackbarHostState.showUndoableDelete(
+                    message = "Meal deleted.",
+                    restoredMessage = "Meal restored."
+                ) {
+                    database.withTransaction {
+                        removedEntries.forEach { entry ->
+                            foodDao.addFoodEntry(entry)
+                        }
+                    }
+                    synchronizeFoodRecordedForDate(entryDate)
+                    historyViewModel.refresh()
+                    statsViewModel.refresh()
+                }
             } catch (
                 exception: Exception
             ) {
@@ -3654,6 +3874,9 @@ fun DailyRebuildApp(
         onUpdateEntryQuantity = { entry, quantity ->
             updateFoodEntryQuantity(entry, quantity)
         },
+        onUpdateMealQuantity = { mealLogId, quantity ->
+            updateMealLogQuantity(mealLogId, quantity)
+        },
         onDeleteEntry = { deleteFoodEntry(it) },
         onDeleteMealLog = { deleteMealLog(it) },
         onSavePantryItem = { item -> savePantryEssential(item) },
@@ -3685,6 +3908,7 @@ fun DailyRebuildApp(
             navigationViewModel.selectMainTab(AppNavigationViewModel.HEALTH_TAB)
         },
         onSaveSession = { saveMobilitySession(it) },
+        onUpdateSession = { updateMobilitySession(it) },
         onDeleteSession = { deleteMobilitySession(it) }
     )
 
@@ -3715,7 +3939,14 @@ fun DailyRebuildApp(
         onOpenVisitHistory = {
             showCareVisitHistoryDialog = true
         },
-        onLogMigraine = { showMigraineLogDialog = true },
+        onLogMigraine = {
+            migraineBeingEdited = null
+            showMigraineLogDialog = true
+        },
+        onEditMigraine = { log ->
+            migraineBeingEdited = log
+            showMigraineLogDialog = true
+        },
         onDeleteMigraine = { deleteMigraineEvent(it) },
         onLogPain = { showQuickPainDialog = true },
         onConnectHealth = {
@@ -3846,6 +4077,111 @@ fun DailyRebuildApp(
                         onRepeatShortcut = { shortcut, quantity ->
                             repeatTodayShortcut(shortcut, quantity)
                         },
+                        onEditActivityItem = { item ->
+                            when {
+                                item.key.startsWith("food:") -> {
+                                    val entryId = item.key
+                                        .substringAfter("food:")
+                                        .toLongOrNull()
+                                    activityFoodBeingEdited = foodEntries
+                                        .firstOrNull { it.id == entryId }
+                                }
+
+                                item.key.startsWith("meal:") -> {
+                                    activityMealLogBeingEdited = item.key
+                                        .substringAfter("meal:")
+                                        .takeIf { it.isNotBlank() }
+                                }
+
+                                item.key.startsWith("mobility:") -> {
+                                    val sessionId = item.key
+                                        .substringAfter("mobility:")
+                                        .toLongOrNull()
+                                    activityMobilityBeingEdited = mobilitySessionsToday
+                                        .firstOrNull { it.id == sessionId }
+                                }
+
+                                item.key.startsWith("meeting:") -> {
+                                    val attendanceId = item.key
+                                        .substringAfter("meeting:")
+                                        .toLongOrNull()
+                                    meetingAttendanceHistory
+                                        .firstOrNull { it.id == attendanceId }
+                                        ?.let { attendance ->
+                                            attendanceBeingEdited = attendance
+                                            meetingForAttendance = attendance.savedMeetingId
+                                                ?.let { savedMeetingId ->
+                                                    savedMeetings.firstOrNull {
+                                                        it.id == savedMeetingId
+                                                    }
+                                                }
+                                            isOneTimeMeetingAttendance =
+                                                attendance.savedMeetingId == null
+                                            showMeetingAttendanceDialog = true
+                                        }
+                                }
+
+                                item.key.startsWith("maintenance:") -> {
+                                    navigationViewModel.openLogSection(
+                                        AppNavigationViewModel.LOG_MAINTENANCE_SECTION
+                                    )
+                                }
+                            }
+                        },
+                        onDeleteActivityItem = { item ->
+                            when {
+                                item.key.startsWith("food:") -> {
+                                    val entryId = item.key
+                                        .substringAfter("food:")
+                                        .toLongOrNull()
+                                    foodEntries
+                                        .firstOrNull { it.id == entryId }
+                                        ?.let(::deleteFoodEntry)
+                                }
+
+                                item.key.startsWith("meal:") -> {
+                                    item.key
+                                        .substringAfter("meal:")
+                                        .takeIf { it.isNotBlank() }
+                                        ?.let(::deleteMealLog)
+                                }
+
+                                item.key.startsWith("mobility:") -> {
+                                    val sessionId = item.key
+                                        .substringAfter("mobility:")
+                                        .toLongOrNull()
+                                    mobilitySessionsToday
+                                        .firstOrNull { it.id == sessionId }
+                                        ?.let(::deleteMobilitySession)
+                                }
+
+                                item.key.startsWith("meeting:") -> {
+                                    val attendanceId = item.key
+                                        .substringAfter("meeting:")
+                                        .toLongOrNull()
+                                    meetingAttendanceHistory
+                                        .firstOrNull { it.id == attendanceId }
+                                        ?.let(::deleteMeetingAttendance)
+                                }
+
+                                item.key.startsWith("maintenance:") -> {
+                                    val maintenanceIdentity = item.key
+                                        .removePrefix("maintenance:")
+                                        .split(":", limit = 2)
+                                    val taskKey = maintenanceIdentity.getOrNull(0)
+                                    val date = maintenanceIdentity.getOrNull(1)
+                                    lifeMaintenanceLogs
+                                        .firstOrNull { log ->
+                                            log.taskKey == taskKey && log.date == date
+                                        }
+                                        ?.let(::deleteLifeMaintenanceCompletion)
+                                }
+
+                                item.key.startsWith("shower:") -> {
+                                    removeTodayShower()
+                                }
+                            }
+                        },
                         onFoodRecordedChange = { foodRecorded = it },
                         onWalkCompletedChange = { walkCompleted = it },
                         onPainRecordedChange = { painRecorded = it },
@@ -3930,7 +4266,10 @@ fun DailyRebuildApp(
 
                         AppNavigationViewModel.LOG_HEALTH_SECTION -> HealthQuickLogScreen(
                             onLogHighestPain = { showQuickPainDialog = true },
-                            onLogMigraine = { showMigraineLogDialog = true },
+                            onLogMigraine = {
+                                migraineBeingEdited = null
+                                showMigraineLogDialog = true
+                            },
                             onLogCareVisit = { showCareVisitStartDialog = true },
                             onLogShower = { logShowerToday() },
                             onOpenMeasurements = {
@@ -4429,8 +4768,10 @@ fun DailyRebuildApp(
 
     if (showMigraineLogDialog) {
         MigraineLogDialog(
+            initial = migraineBeingEdited,
             onDismiss = {
                 showMigraineLogDialog = false
+                migraineBeingEdited = null
             },
             onSave = {
                 saveMigraineEvent(it)
@@ -4730,6 +5071,122 @@ fun DailyRebuildApp(
                 ) {
                     Text("Done")
                 }
+            },
+            dismissButton = {
+                if (
+                    plainReusableBottleCount +
+                        mioReusableBottleCount +
+                        plainDisposableBottleCount +
+                        mioDisposableBottleCount > 0
+                ) {
+                    TextButton(
+                        onClick = {
+                            showQuickWaterDialog = false
+                            showClearWaterConfirmation = true
+                        }
+                    ) {
+                        Text(
+                            text = "Clear today’s water",
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+        )
+    }
+
+    if (showClearWaterConfirmation) {
+        AlertDialog(
+            onDismissRequest = {
+                showClearWaterConfirmation = false
+                showQuickWaterDialog = true
+            },
+            title = { Text("Clear today’s water?") },
+            text = {
+                Text(
+                    "All four bottle counts for today will return to zero. You can immediately restore them with Undo."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val removedPlainReusable = plainReusableBottleCount
+                        val removedMioReusable = mioReusableBottleCount
+                        val removedPlainDisposable = plainDisposableBottleCount
+                        val removedMioDisposable = mioDisposableBottleCount
+
+                        plainReusableBottleCount = 0
+                        mioReusableBottleCount = 0
+                        plainDisposableBottleCount = 0
+                        mioDisposableBottleCount = 0
+                        showClearWaterConfirmation = false
+
+                        coroutineScope.launch {
+                            try {
+                                val currentRecord = dailyRecordDao
+                                    .getRecordByDate(todayDate)
+                                    ?: buildCurrentDailyRecord()
+                                dailyRecordDao.saveRecord(
+                                    currentRecord.copy(
+                                        plainReusableBottleCount = 0,
+                                        mioReusableBottleCount = 0,
+                                        plainDisposableBottleCount = 0,
+                                        mioDisposableBottleCount = 0,
+                                        updatedAt = System.currentTimeMillis()
+                                    )
+                                )
+                                historyViewModel.refresh()
+                                statsViewModel.refresh()
+                                snackbarHostState.showUndoableDelete(
+                                    message = "Today’s water cleared.",
+                                    restoredMessage = "Today’s water restored."
+                                ) {
+                                    plainReusableBottleCount = removedPlainReusable
+                                    mioReusableBottleCount = removedMioReusable
+                                    plainDisposableBottleCount = removedPlainDisposable
+                                    mioDisposableBottleCount = removedMioDisposable
+                                    val latestRecord = dailyRecordDao
+                                        .getRecordByDate(todayDate)
+                                        ?: buildCurrentDailyRecord()
+                                    dailyRecordDao.saveRecord(
+                                        latestRecord.copy(
+                                            plainReusableBottleCount = removedPlainReusable,
+                                            mioReusableBottleCount = removedMioReusable,
+                                            plainDisposableBottleCount = removedPlainDisposable,
+                                            mioDisposableBottleCount = removedMioDisposable,
+                                            updatedAt = System.currentTimeMillis()
+                                        )
+                                    )
+                                    historyViewModel.refresh()
+                                    statsViewModel.refresh()
+                                }
+                            } catch (_: Exception) {
+                                plainReusableBottleCount = removedPlainReusable
+                                mioReusableBottleCount = removedMioReusable
+                                plainDisposableBottleCount = removedPlainDisposable
+                                mioDisposableBottleCount = removedMioDisposable
+                                snackbarHostState.showSnackbar(
+                                    message = "Could not clear today’s water."
+                                )
+                            }
+                        }
+                    }
+                ) {
+                    Text(
+                        text = "Clear water",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showClearWaterConfirmation = false
+                        showQuickWaterDialog = true
+                    }
+                ) {
+                    Text("Cancel")
+                }
             }
         )
     }
@@ -4752,6 +5209,64 @@ fun DailyRebuildApp(
                 showQuickPainDialog = false
 
                 // The automatic daily save persists this correction immediately.
+            },
+            onDeleteRecord = if (painRecorded) {
+                {
+                    val removedBackPain = backPain
+                    val removedShinPain = shinPain
+                    backPain = 0f
+                    shinPain = 0f
+                    painRecorded = false
+                    showQuickPainDialog = false
+
+                    coroutineScope.launch {
+                        try {
+                            val currentRecord = dailyRecordDao
+                                .getRecordByDate(todayDate)
+                                ?: buildCurrentDailyRecord()
+                            dailyRecordDao.saveRecord(
+                                currentRecord.copy(
+                                    backPain = 0f,
+                                    shinPain = 0f,
+                                    painRecorded = false,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                            )
+                            historyViewModel.refresh()
+                            statsViewModel.refresh()
+                            snackbarHostState.showUndoableDelete(
+                                message = "Today’s pain entry deleted.",
+                                restoredMessage = "Today’s pain entry restored."
+                            ) {
+                                backPain = removedBackPain
+                                shinPain = removedShinPain
+                                painRecorded = true
+                                val latestRecord = dailyRecordDao
+                                    .getRecordByDate(todayDate)
+                                    ?: buildCurrentDailyRecord()
+                                dailyRecordDao.saveRecord(
+                                    latestRecord.copy(
+                                        backPain = removedBackPain,
+                                        shinPain = removedShinPain,
+                                        painRecorded = true,
+                                        updatedAt = System.currentTimeMillis()
+                                    )
+                                )
+                                historyViewModel.refresh()
+                                statsViewModel.refresh()
+                            }
+                        } catch (_: Exception) {
+                            backPain = removedBackPain
+                            shinPain = removedShinPain
+                            painRecorded = true
+                            snackbarHostState.showSnackbar(
+                                message = "Could not delete today’s pain entry."
+                            )
+                        }
+                    }
+                }
+            } else {
+                null
             },
             onDismiss = {
                 showQuickPainDialog = false
@@ -5545,6 +6060,66 @@ fun DailyRebuildApp(
         )
     }
 
+    activityFoodBeingEdited?.let { entry ->
+        FoodQuantityEditDialog(
+            entry = entry,
+            isSaving = false,
+            onDismiss = { activityFoodBeingEdited = null },
+            onSave = { newQuantity ->
+                activityFoodBeingEdited = null
+                updateFoodEntryQuantity(entry, newQuantity)
+            }
+        )
+    }
+
+    activityMealLogBeingEdited?.let { mealLogId ->
+        val mealEntries = foodEntries.filter {
+            it.mealLogId == mealLogId
+        }
+        val firstMealEntry = mealEntries.firstOrNull()
+        if (firstMealEntry != null) {
+            val currentMealQuantity = mealEntries
+                .maxOfOrNull { it.mealQuantity }
+                ?.takeIf { it > 0.0 }
+                ?: 1.0
+            LoggedMealQuantityEditDialog(
+                mealName = firstMealEntry.mealName
+                    ?.takeIf(String::isNotBlank)
+                    ?: "Saved meal",
+                currentQuantity = currentMealQuantity,
+                isSaving = false,
+                onDismiss = { activityMealLogBeingEdited = null },
+                onSave = { newQuantity ->
+                    activityMealLogBeingEdited = null
+                    updateMealLogQuantity(mealLogId, newQuantity)
+                }
+            )
+        } else {
+            LaunchedEffect(mealLogId) {
+                activityMealLogBeingEdited = null
+                snackbarHostState.showSnackbar(
+                    message = "That meal entry is no longer available."
+                )
+            }
+        }
+    }
+
+    activityMobilityBeingEdited?.let { session ->
+        MobilitySessionEditDialog(
+            session = session,
+            isSaving = isSavingMobility,
+            onDismiss = {
+                if (!isSavingMobility) {
+                    activityMobilityBeingEdited = null
+                }
+            },
+            onSave = { updatedSession ->
+                activityMobilityBeingEdited = null
+                updateMobilitySession(updatedSession)
+            }
+        )
+    }
+
     if (showDailyHistoryDialog) {
         DailyHistoryDialog(
             days = dailyHistoryDays,
@@ -5652,6 +6227,14 @@ fun DailyRebuildApp(
                 }
             },
 
+            onUpdateMealQuantity = { day, mealLogId, newQuantity ->
+                updateMealLogQuantity(
+                    mealLogId = mealLogId,
+                    newQuantity = newQuantity,
+                    date = day.date
+                )
+            },
+
             onDeleteFoodEntry = { day, entry ->
                 coroutineScope.launch {
                     isUpdatingHistoryDay = true
@@ -5660,7 +6243,17 @@ fun DailyRebuildApp(
                         synchronizeFoodRecordedForDate(day.date)
                         if (day.date == todayDate) dayReloadToken++
                         historyViewModel.refresh()
-                        snackbarHostState.showSnackbar("Food entry removed.")
+                        statsViewModel.refresh()
+                        snackbarHostState.showUndoableDelete(
+                            message = "Food entry removed.",
+                            restoredMessage = "Food entry restored."
+                        ) {
+                            foodDao.addFoodEntry(entry)
+                            synchronizeFoodRecordedForDate(day.date)
+                            if (day.date == todayDate) dayReloadToken++
+                            historyViewModel.refresh()
+                            statsViewModel.refresh()
+                        }
                     } catch (exception: Exception) {
                         snackbarHostState.showSnackbar("Could not remove that food entry.")
                     } finally {
@@ -5673,11 +6266,28 @@ fun DailyRebuildApp(
                 coroutineScope.launch {
                     isUpdatingHistoryDay = true
                     try {
+                        val removedEntries = day.foodEntries.filter {
+                            it.mealLogId == mealLogId
+                        }
                         foodDao.deleteFoodEntriesByMealLogId(mealLogId)
                         synchronizeFoodRecordedForDate(day.date)
                         if (day.date == todayDate) dayReloadToken++
                         historyViewModel.refresh()
-                        snackbarHostState.showSnackbar("Logged meal removed.")
+                        statsViewModel.refresh()
+                        snackbarHostState.showUndoableDelete(
+                            message = "Logged meal removed.",
+                            restoredMessage = "Logged meal restored."
+                        ) {
+                            database.withTransaction {
+                                removedEntries.forEach { entry ->
+                                    foodDao.addFoodEntry(entry)
+                                }
+                            }
+                            synchronizeFoodRecordedForDate(day.date)
+                            if (day.date == todayDate) dayReloadToken++
+                            historyViewModel.refresh()
+                            statsViewModel.refresh()
+                        }
                     } catch (exception: Exception) {
                         snackbarHostState.showSnackbar("Could not remove that logged meal.")
                     } finally {

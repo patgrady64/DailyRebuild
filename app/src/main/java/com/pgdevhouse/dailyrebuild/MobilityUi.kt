@@ -681,6 +681,7 @@ fun MobilitySection(
     sessions: List<MobilitySession>,
     isSaving: Boolean,
     onSaveSession: (MobilitySessionDraft) -> Unit,
+    onUpdateSession: (MobilitySession) -> Unit,
     onDeleteSession: (MobilitySession) -> Unit
 ) {
     val context = LocalContext.current
@@ -704,6 +705,10 @@ fun MobilitySection(
     }
 
     var sessionPendingDeletion by remember {
+        mutableStateOf<MobilitySession?>(null)
+    }
+
+    var sessionBeingEdited by remember {
         mutableStateOf<MobilitySession?>(null)
     }
 
@@ -797,6 +802,9 @@ fun MobilitySection(
             sessions.forEach { session ->
                 MobilitySessionCard(
                     session = session,
+                    onEdit = {
+                        sessionBeingEdited = session
+                    },
                     onDelete = {
                         sessionPendingDeletion = session
                     }
@@ -835,6 +843,20 @@ fun MobilitySection(
             onSave = { draft ->
                 onSaveSession(draft)
                 showQuickLog = false
+            }
+        )
+    }
+
+    sessionBeingEdited?.let { session ->
+        MobilitySessionEditDialog(
+            session = session,
+            isSaving = isSaving,
+            onDismiss = {
+                if (!isSaving) sessionBeingEdited = null
+            },
+            onSave = { updatedSession ->
+                sessionBeingEdited = null
+                onUpdateSession(updatedSession)
             }
         )
     }
@@ -882,6 +904,7 @@ fun MobilitySection(
 @Composable
 private fun MobilitySessionCard(
     session: MobilitySession,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     val completedCount =
@@ -937,12 +960,99 @@ private fun MobilitySessionCard(
                 }
             }
 
-            TextButton(
-                onClick = onDelete
+            Column(
+                horizontalAlignment = Alignment.End
             ) {
-                Text("Delete")
+                TextButton(
+                    onClick = onEdit
+                ) {
+                    Text("Edit")
+                }
+                TextButton(
+                    onClick = onDelete
+                ) {
+                    Text("Delete")
+                }
             }
         }
+    }
+}
+
+@Composable
+fun MobilitySessionEditDialog(
+    session: MobilitySession,
+    isSaving: Boolean = false,
+    onDismiss: () -> Unit,
+    onSave: (MobilitySession) -> Unit
+) {
+    var routineName by rememberSaveable(session.id) {
+        mutableStateOf(session.routineName)
+    }
+    var minutesText by rememberSaveable(session.id) {
+        mutableStateOf(
+            ((session.elapsedSeconds / 60.0).coerceAtLeast(1.0))
+                .let { String.format(Locale.US, "%.1f", it).trimEnd('0').trimEnd('.') }
+        )
+    }
+    var notes by rememberSaveable(session.id) {
+        mutableStateOf(session.notes)
+    }
+
+    val minutes = minutesText.toDoubleOrNull()
+    val isValid = routineName.isNotBlank() && minutes != null && minutes > 0.0
+
+    RebuildInputDialog(
+        title = "Edit mobility session",
+        subtitle = "Correct the name, duration, or notes without recreating the session.",
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        primaryActionText = if (isSaving) "Updating…" else "Save changes",
+        onPrimaryAction = {
+            if (isValid) {
+                onSave(
+                    session.copy(
+                        routineName = routineName.trim(),
+                        elapsedSeconds = (minutes!! * 60.0).toInt().coerceAtLeast(1),
+                        notes = notes.trim()
+                    )
+                )
+            }
+        },
+        primaryActionEnabled = isValid && !isSaving,
+        secondaryActionEnabled = !isSaving
+    ) {
+        OutlinedTextField(
+            value = routineName,
+            onValueChange = { routineName = it },
+            label = { Text("Session name") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        OutlinedTextField(
+            value = minutesText,
+            onValueChange = { minutesText = it },
+            label = { Text("Duration") },
+            suffix = { Text("minutes") },
+            supportingText = {
+                Text(if (minutesText.isBlank() || minutes != null && minutes > 0.0) {
+                    "Decimals are accepted."
+                } else {
+                    "Enter a duration greater than zero."
+                })
+            },
+            isError = minutesText.isNotBlank() && (minutes == null || minutes <= 0.0),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        OutlinedTextField(
+            value = notes,
+            onValueChange = { notes = it },
+            label = { Text("Notes (optional)") },
+            minLines = 3,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 

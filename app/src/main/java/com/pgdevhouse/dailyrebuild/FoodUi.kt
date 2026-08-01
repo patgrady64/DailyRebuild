@@ -123,6 +123,7 @@ fun FoodSection(
     onBuildMeal: () -> Unit,
     onOpenSavedMeals: () -> Unit,
     onUpdateQuantity: (FoodLogEntry, Double) -> Unit,
+    onUpdateMealQuantity: (String, Double) -> Unit,
     onDeleteEntry: (FoodLogEntry) -> Unit,
     onDeleteMealLog: (String) -> Unit
 ) {
@@ -136,11 +137,18 @@ fun FoodSection(
     var quantityEditorEntryId by rememberSaveable {
         mutableStateOf<Long?>(null)
     }
+    var mealQuantityEditorLogId by rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
 
     val quantityEditorEntry =
         entries.firstOrNull {
             it.id == quantityEditorEntryId
         }
+    val mealQuantityEditorEntries =
+        mealQuantityEditorLogId?.let { selectedMealLogId ->
+            entries.filter { it.mealLogId == selectedMealLogId }
+        }.orEmpty()
 
     RebuildSectionCard(
         title = "Food and nutrition",
@@ -277,6 +285,9 @@ fun FoodSection(
                         )
                         is FuelDisplayItem.LoggedMeal -> LoggedMealCard(
                             meal = item,
+                            onEditQuantity = {
+                                mealQuantityEditorLogId = item.mealLogId
+                            },
                             onDeleteMeal = { onDeleteMealLog(item.mealLogId) }
                         )
                     }
@@ -300,11 +311,32 @@ fun FoodSection(
             }
         )
     }
+
+    if (mealQuantityEditorEntries.isNotEmpty()) {
+        LoggedMealQuantityEditDialog(
+            mealName = mealQuantityEditorEntries.first().mealName
+                ?.takeIf { it.isNotBlank() }
+                ?: "Saved meal",
+            currentQuantity = mealQuantityEditorEntries
+                .maxOfOrNull { it.mealQuantity }
+                ?.takeIf { it > 0.0 }
+                ?: 1.0,
+            onDismiss = { mealQuantityEditorLogId = null },
+            onSave = { newQuantity ->
+                val selectedMealLogId = mealQuantityEditorLogId
+                mealQuantityEditorLogId = null
+                selectedMealLogId?.let {
+                    onUpdateMealQuantity(it, newQuantity)
+                }
+            }
+        )
+    }
 }
 
 @Composable
 private fun LoggedMealCard(
     meal: FuelDisplayItem.LoggedMeal,
+    onEditQuantity: () -> Unit,
     onDeleteMeal: () -> Unit
 ) {
     var expanded by rememberSaveable(meal.mealLogId) { mutableStateOf(false) }
@@ -394,6 +426,12 @@ private fun LoggedMealCard(
                     modifier = Modifier.weight(1f)
                 )
                 TextButton(
+                    onClick = onEditQuantity,
+                    modifier = Modifier.weight(0.55f)
+                ) {
+                    Text("Edit")
+                }
+                TextButton(
                     onClick = { showDeleteConfirmation = true },
                     modifier = Modifier.weight(0.55f)
                 ) {
@@ -423,6 +461,68 @@ private fun LoggedMealCard(
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirmation = false }) { Text("Cancel") }
             }
+        )
+    }
+}
+
+@Composable
+fun LoggedMealQuantityEditDialog(
+    mealName: String,
+    currentQuantity: Double,
+    isSaving: Boolean = false,
+    onDismiss: () -> Unit,
+    onSave: (Double) -> Unit
+) {
+    var quantityText by rememberSaveable(mealName, currentQuantity) {
+        mutableStateOf(currentQuantity.toEditableFoodAmount())
+    }
+    val parsedQuantity = parseFoodAmount(quantityText)
+    val isValid = parsedQuantity != null && parsedQuantity > 0.0
+
+    RebuildInputDialog(
+        title = "Update meal quantity",
+        subtitle = mealName,
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        primaryActionText = if (isSaving) "Updating…" else "Update meal",
+        onPrimaryAction = { parsedQuantity?.let(onSave) },
+        primaryActionEnabled = isValid && !isSaving,
+        secondaryActionEnabled = !isSaving
+    ) {
+        RebuildDialogInfoPanel {
+            Text(
+                text = "Current quantity",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = formatFoodNumber(currentQuantity),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Every ingredient amount and nutrition total will scale together.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        OutlinedTextField(
+            value = quantityText,
+            onValueChange = { quantityText = it },
+            label = { Text("New meal quantity") },
+            supportingText = {
+                Text(
+                    if (quantityText.isBlank() || isValid) {
+                        "Whole numbers, decimals, and fractions are accepted."
+                    } else {
+                        "Enter a quantity greater than zero."
+                    }
+                )
+            },
+            isError = quantityText.isNotBlank() && !isValid,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }

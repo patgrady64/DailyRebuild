@@ -112,6 +112,7 @@ fun DailyHistoryDialog(
     onAddFoodManually: (DailyHistoryDay) -> Unit,
     onUpdateWater: (DailyHistoryDay, WaterBottleCounts) -> Unit,
     onUpdateFoodEntryQuantity: (DailyHistoryDay, FoodLogEntry, Double) -> Unit,
+    onUpdateMealQuantity: (DailyHistoryDay, String, Double) -> Unit,
     onDeleteFoodEntry: (DailyHistoryDay, FoodLogEntry) -> Unit,
     onDeleteMealLog: (DailyHistoryDay, String) -> Unit,
     onDeleteDay: (DailyHistoryDay) -> Unit,
@@ -159,12 +160,17 @@ fun DailyHistoryDialog(
         mutableStateOf<String?>(null)
     }
 
+    var mealQuantityEditorLogId by remember {
+        mutableStateOf<String?>(null)
+    }
+
     LaunchedEffect(selectedDate) {
         dayPendingDeletion = null
         waterEditorDate = null
         foodEntryPendingDeletionId = null
         foodEntryQuantityEditorId = null
         mealLogPendingDeletionId = null
+        mealQuantityEditorLogId = null
     }
 
     val filteredDays =
@@ -256,6 +262,9 @@ fun DailyHistoryDialog(
                     onRequestDeleteFoodEntry = { entry ->
                         foodEntryPendingDeletionId = entry.id
                     },
+                    onRequestEditMeal = { mealLogId ->
+                        mealQuantityEditorLogId = mealLogId
+                    },
                     onRequestDeleteMeal = { mealLogId ->
                         mealLogPendingDeletionId = mealLogId
                     },
@@ -316,6 +325,33 @@ fun DailyHistoryDialog(
                     quantityEditorEntry,
                     newQuantity
                 )
+            }
+        )
+    }
+
+    val mealQuantityEditorEntries = selectedDay?.foodEntries
+        ?.filter { it.mealLogId == mealQuantityEditorLogId }
+        .orEmpty()
+
+    if (mealQuantityEditorEntries.isNotEmpty() && selectedDay != null) {
+        LoggedMealQuantityEditDialog(
+            mealName = mealQuantityEditorEntries.first().mealName
+                ?.takeIf { it.isNotBlank() }
+                ?: "Saved meal",
+            currentQuantity = mealQuantityEditorEntries
+                .maxOfOrNull { it.mealQuantity }
+                ?.takeIf { it > 0.0 }
+                ?: 1.0,
+            isSaving = isUpdatingDay,
+            onDismiss = {
+                if (!isUpdatingDay) mealQuantityEditorLogId = null
+            },
+            onSave = { newQuantity ->
+                val mealLogId = mealQuantityEditorLogId
+                mealQuantityEditorLogId = null
+                mealLogId?.let {
+                    onUpdateMealQuantity(selectedDay, it, newQuantity)
+                }
             }
         )
     }
@@ -796,6 +832,7 @@ private fun DailyHistoryDetailPage(
     onEditWater: () -> Unit,
     onRequestEditFoodEntry: (FoodLogEntry) -> Unit,
     onRequestDeleteFoodEntry: (FoodLogEntry) -> Unit,
+    onRequestEditMeal: (String) -> Unit,
     onRequestDeleteMeal: (String) -> Unit,
     onRequestDelete: () -> Unit
 ) {
@@ -956,6 +993,7 @@ private fun DailyHistoryDetailPage(
             isUpdating = isUpdatingDay,
             onRequestEditEntry = onRequestEditFoodEntry,
             onRequestDeleteEntry = onRequestDeleteFoodEntry,
+            onRequestEditMeal = onRequestEditMeal,
             onRequestDeleteMeal = onRequestDeleteMeal
         )
         if (record != null) {
@@ -1789,6 +1827,7 @@ private fun HistoryFoodCard(
     isUpdating: Boolean,
     onRequestEditEntry: (FoodLogEntry) -> Unit,
     onRequestDeleteEntry: (FoodLogEntry) -> Unit,
+    onRequestEditMeal: (String) -> Unit,
     onRequestDeleteMeal: (String) -> Unit
 ) {
     val totalCalories =
@@ -1849,6 +1888,9 @@ private fun HistoryFoodCard(
                 HistoryMealGroup(
                     entries = mealEntries,
                     isUpdating = isUpdating,
+                    onRequestEdit = {
+                        mealEntries.firstOrNull()?.mealLogId?.let(onRequestEditMeal)
+                    },
                     onRequestDelete = {
                         mealEntries.firstOrNull()?.mealLogId?.let(onRequestDeleteMeal)
                     }
@@ -1890,6 +1932,7 @@ private fun HistoryFoodCard(
 private fun HistoryMealGroup(
     entries: List<FoodLogEntry>,
     isUpdating: Boolean,
+    onRequestEdit: () -> Unit,
     onRequestDelete: () -> Unit
 ) {
     val mealName =
@@ -1932,10 +1975,19 @@ private fun HistoryMealGroup(
         )
     }
 
-    TextButton(
-        onClick = onRequestDelete,
-        enabled = !isUpdating
-    ) { Text("Remove logged meal") }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        TextButton(
+            onClick = onRequestEdit,
+            enabled = !isUpdating
+        ) { Text("Edit quantity") }
+
+        TextButton(
+            onClick = onRequestDelete,
+            enabled = !isUpdating
+        ) { Text("Remove logged meal") }
+    }
 }
 
 @Composable

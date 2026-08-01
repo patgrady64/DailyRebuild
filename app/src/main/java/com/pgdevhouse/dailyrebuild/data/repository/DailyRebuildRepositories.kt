@@ -284,6 +284,8 @@ class LifeMaintenanceRepository internal constructor(
         )
     }
 
+    suspend fun restore(log: LifeMaintenanceLog) = dao.save(log)
+
     suspend fun getAllLogs(): List<LifeMaintenanceLog> = dao.getAllLogs()
 
     suspend fun getLogsForDate(date: String): List<LifeMaintenanceLog> =

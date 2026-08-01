@@ -46,13 +46,15 @@ import java.util.Locale
  * Information collected by the quick migraine / visual-aura dialog.
  */
 data class MigraineLogDraft(
+    val id: Long = 0L,
     val date: String,
     val occurredAt: Long,
     val auraDurationMinutes: Int?,
     val visualAura: Boolean,
     val headPain: Boolean,
     val foggyAfterward: Boolean,
-    val notes: String
+    val notes: String,
+    val createdAt: Long = System.currentTimeMillis()
 )
 
 /**
@@ -66,6 +68,7 @@ data class MigraineLogDraft(
 fun MigraineTrackerCard(
     logs: List<MigraineLog>,
     onLogMigraine: () -> Unit,
+    onEditLog: (MigraineLog) -> Unit,
     onDeleteLog: (MigraineLog) -> Unit
 ) {
     val latestLog = logs.maxByOrNull { it.occurredAt }
@@ -133,9 +136,8 @@ fun MigraineTrackerCard(
                 .forEach { log ->
                     MigraineHistoryRow(
                         log = log,
-                        onDelete = {
-                            onDeleteLog(log)
-                        }
+                        onEdit = { onEditLog(log) },
+                        onDelete = { onDeleteLog(log) }
                     )
                 }
         }
@@ -152,6 +154,7 @@ fun MigraineTrackerCard(
 @Composable
 private fun MigraineHistoryRow(
     log: MigraineLog,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     RebuildInsetPanel {
@@ -184,39 +187,57 @@ private fun MigraineHistoryRow(
                 }
             }
 
-            TextButton(
-                onClick = onDelete
+            Column(
+                horizontalAlignment = Alignment.End
             ) {
-                Text("Delete")
+                TextButton(
+                    onClick = onEdit
+                ) {
+                    Text("Edit")
+                }
+                TextButton(
+                    onClick = onDelete
+                ) {
+                    Text("Delete")
+                }
             }
         }
     }
 }
 @Composable
 fun MigraineLogDialog(
+    initial: MigraineLog? = null,
     onDismiss: () -> Unit,
     onSave: (MigraineLogDraft) -> Unit
 ) {
     val context = LocalContext.current
-    val initialDateTime = remember { LocalDateTime.now() }
+    val initialDateTime = remember(initial?.id) {
+        initial?.occurredAt?.let { timestamp ->
+            Instant.ofEpochMilli(timestamp)
+                .atZone(ZoneId.systemDefault())
+                .toLocalDateTime()
+        } ?: LocalDateTime.now()
+    }
 
-    var dateText by rememberSaveable { mutableStateOf(initialDateTime.toLocalDate().toString()) }
-    var selectedHour by rememberSaveable { mutableIntStateOf(initialDateTime.hour) }
-    var selectedMinute by rememberSaveable { mutableIntStateOf(initialDateTime.minute) }
-    var durationText by rememberSaveable { mutableStateOf("") }
-    var visualAura by rememberSaveable { mutableStateOf(true) }
-    var headPain by rememberSaveable { mutableStateOf(false) }
-    var foggyAfterward by rememberSaveable { mutableStateOf(true) }
-    var notes by rememberSaveable { mutableStateOf("") }
+    var dateText by rememberSaveable(initial?.id) { mutableStateOf(initialDateTime.toLocalDate().toString()) }
+    var selectedHour by rememberSaveable(initial?.id) { mutableIntStateOf(initialDateTime.hour) }
+    var selectedMinute by rememberSaveable(initial?.id) { mutableIntStateOf(initialDateTime.minute) }
+    var durationText by rememberSaveable(initial?.id) {
+        mutableStateOf(initial?.auraDurationMinutes?.toString().orEmpty())
+    }
+    var visualAura by rememberSaveable(initial?.id) { mutableStateOf(initial?.visualAura ?: true) }
+    var headPain by rememberSaveable(initial?.id) { mutableStateOf(initial?.headPain ?: false) }
+    var foggyAfterward by rememberSaveable(initial?.id) { mutableStateOf(initial?.foggyAfterward ?: true) }
+    var notes by rememberSaveable(initial?.id) { mutableStateOf(initial?.notes.orEmpty()) }
     var validationMessage by rememberSaveable { mutableStateOf<String?>(null) }
 
     val selectedDate = runCatching { LocalDate.parse(dateText) }.getOrDefault(LocalDate.now())
 
     RebuildInputDialog(
-        title = "Log migraine or visual aura",
+        title = if (initial == null) "Log migraine or visual aura" else "Edit migraine or visual aura",
         subtitle = "Record when it happened, what you experienced, and how long it lasted.",
         onDismissRequest = onDismiss,
-        primaryActionText = "Save event",
+        primaryActionText = if (initial == null) "Save event" else "Save changes",
         onPrimaryAction = save@{
             val date = runCatching { LocalDate.parse(dateText) }.getOrNull()
             if (date == null) {
@@ -237,13 +258,15 @@ fun MigraineLogDialog(
 
             onSave(
                 MigraineLogDraft(
+                    id = initial?.id ?: 0L,
                     date = date.toString(),
                     occurredAt = occurredAt,
                     auraDurationMinutes = duration,
                     visualAura = visualAura,
                     headPain = headPain,
                     foggyAfterward = foggyAfterward,
-                    notes = notes.trim()
+                    notes = notes.trim(),
+                    createdAt = initial?.createdAt ?: System.currentTimeMillis()
                 )
             )
         }

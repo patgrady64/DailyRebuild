@@ -37,11 +37,13 @@ fun DailyPainDialog(
     wasRecordedToday: Boolean,
     onSaveDailyHighs: (backPain: Float, shinPain: Float) -> Unit,
     onCorrectValues: (backPain: Float, shinPain: Float) -> Unit,
+    onDeleteRecord: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     var selectedBackPain by remember(currentBackPain) { mutableFloatStateOf(currentBackPain) }
     var selectedShinPain by remember(currentShinPain) { mutableFloatStateOf(currentShinPain) }
     var correctionMode by remember { mutableStateOf(false) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
 
     RebuildInputDialog(
         title = if (correctionMode) "Correct today’s pain" else "Pain today",
@@ -84,11 +86,47 @@ fun DailyPainDialog(
                 TextButton(onClick = { correctionMode = !correctionMode }) {
                     Text(if (correctionMode) "Return to quick log" else "Correct a mistaken value")
                 }
+                if (onDeleteRecord != null) {
+                    TextButton(onClick = { showDeleteConfirmation = true }) {
+                        Text(
+                            text = "Delete today’s pain entry",
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
             }
         }
 
         DailyPainSlider("Back pain", selectedBackPain) { selectedBackPain = it }
         DailyPainSlider("Shin-splint pain", selectedShinPain) { selectedShinPain = it }
+    }
+
+    if (showDeleteConfirmation && onDeleteRecord != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmation = false },
+            title = { Text("Delete today’s pain entry?") },
+            text = {
+                Text("Both saved pain values for today will be cleared. You can immediately restore them with Undo.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirmation = false
+                        onDeleteRecord()
+                    }
+                ) {
+                    Text(
+                        text = "Delete",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmation = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
