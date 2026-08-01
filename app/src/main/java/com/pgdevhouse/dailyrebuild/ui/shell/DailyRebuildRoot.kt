@@ -29,6 +29,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -160,6 +161,38 @@ fun DailyRebuildApp(
         mutableStateOf(appPreferencesRepository.load())
     }
 
+    var showGlobalSearch by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var globalSearchQuery by rememberSaveable {
+        mutableStateOf("")
+    }
+
+    var globalSearchFilter by remember {
+        mutableStateOf(GlobalSearchFilter.ALL)
+    }
+
+    var globalSearchSnapshot by remember {
+        mutableStateOf(GlobalSearchSnapshot())
+    }
+
+    var isLoadingGlobalSearch by remember {
+        mutableStateOf(false)
+    }
+
+    var recentGlobalSearches by remember {
+        mutableStateOf(appPreferencesRepository.loadRecentSearches())
+    }
+
+    var requestedHealthFeature by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    var requestedHealthFeatureToken by remember {
+        mutableIntStateOf(0)
+    }
+
     val navigationViewModel: AppNavigationViewModel = viewModel()
     val barcodeViewModel: FoodBarcodeViewModel = viewModel()
     val pantryViewModel: PantryViewModel = viewModel(
@@ -286,7 +319,13 @@ fun DailyRebuildApp(
     }
 
     BackHandler(
-        enabled = selectedMainTab != 0
+        enabled = showGlobalSearch
+    ) {
+        showGlobalSearch = false
+    }
+
+    BackHandler(
+        enabled = !showGlobalSearch && selectedMainTab != 0
     ) {
         navigationViewModel.selectMainTab(0)
     }
@@ -3838,6 +3877,239 @@ fun DailyRebuildApp(
         pantryViewModel.markNeededPurchased(::showPantryResult)
     }
 
+    fun openGlobalSearch() {
+        showGlobalSearch = true
+        globalSearchQuery = ""
+        globalSearchFilter = GlobalSearchFilter.ALL
+        recentGlobalSearches = appPreferencesRepository.loadRecentSearches()
+
+        coroutineScope.launch {
+            isLoadingGlobalSearch = true
+            try {
+                globalSearchSnapshot = GlobalSearchSnapshot(
+                    products = foodDao.getAllProducts(),
+                    meals = mealDao.getAllMealsWithIngredients(),
+                    foodEntries = foodDao.getAllEntries(),
+                    dailyRecords = dailyRecordDao.getAllRecords(),
+                    carePlaces = careVisitDao.getActivePlaces(),
+                    careProviders = careVisitDao.getActiveProviders(),
+                    careVisits = careVisitDao.getAllVisits(),
+                    careAppointments = careAppointmentDao.getAllAppointments(),
+                    medications = healthProfileDao.getMedications(),
+                    measurements = healthProfileDao.getAllMeasurements(),
+                    migraineLogs = migraineLogDao.getAllLogs(),
+                    savedMeetings = meetingDao.getActiveMeetings(),
+                    meetingAttendance = meetingDao.getAllAttendance(),
+                    iopGroups = iopGroupDao.getAll(),
+                    mobilitySessions = mobilitySessionDao.getAllSessions(),
+                    mobilityMovements = MobilityMovementLibrary.movements.map { movement ->
+                        GlobalSearchMobilityMovement(
+                            id = movement.id,
+                            name = movement.name,
+                            primaryCategory = movement.primaryCategory.label,
+                            categories = movement.categories.joinToString { it.label },
+                            positions = movement.positions.joinToString { it.label },
+                            instructions = movement.instructions
+                        )
+                    },
+                    maintenanceLogs = lifeMaintenanceDao.getAllLogs(),
+                    pantryItems = repositories.pantry.getAll(),
+                    showerLogs = showerLogDao.getAllLogs()
+                )
+            } catch (_: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not load Global Search."
+                )
+            } finally {
+                isLoadingGlobalSearch = false
+            }
+        }
+    }
+
+    fun closeGlobalSearch() {
+        showGlobalSearch = false
+    }
+
+    fun rememberCurrentGlobalSearch() {
+        if (globalSearchQuery.isNotBlank()) {
+            recentGlobalSearches =
+                appPreferencesRepository.rememberSearch(globalSearchQuery)
+        }
+    }
+
+    fun openGlobalSearchResult(result: GlobalSearchResult) {
+        rememberCurrentGlobalSearch()
+        showGlobalSearch = false
+
+        when (val target = result.target) {
+            is GlobalSearchTarget.SavedFood -> {
+                globalSearchSnapshot.products
+                    .firstOrNull { it.id == target.id }
+                    ?.let { product ->
+                        navigationViewModel.openLogSection(
+                            AppNavigationViewModel.LOG_FOOD_SECTION
+                        )
+                        isCreatingFoodForMeal = false
+                        isEditingSavedFood = true
+                        scannedFoodPrefill = product.toFoodPrefill()
+                        showManualFoodDialog = true
+                    }
+            }
+
+            is GlobalSearchTarget.SavedMeal -> {
+                globalSearchSnapshot.meals
+                    .firstOrNull { it.meal.id == target.id }
+                    ?.let { savedMeal ->
+                        navigationViewModel.openPlanSection(
+                            AppNavigationViewModel.PLAN_MEALS_SECTION
+                        )
+                        savedProducts = globalSearchSnapshot.products
+                        mealBeingEdited = savedMeal
+                        showMealBuilderDialog = true
+                    }
+            }
+
+            is GlobalSearchTarget.HistoryDate -> {
+                openDailyHistory(target.date)
+            }
+
+            is GlobalSearchTarget.CarePlaceTarget,
+            is GlobalSearchTarget.CareProviderTarget -> {
+                requestedHealthFeature = "visits"
+                requestedHealthFeatureToken++
+                navigationViewModel.selectMainTab(
+                    AppNavigationViewModel.HEALTH_TAB
+                )
+            }
+
+            is GlobalSearchTarget.MedicationTarget,
+            is GlobalSearchTarget.MeasurementTarget -> {
+                requestedHealthFeature = "profile"
+                requestedHealthFeatureToken++
+                navigationViewModel.selectMainTab(
+                    AppNavigationViewModel.HEALTH_TAB
+                )
+            }
+
+            is GlobalSearchTarget.CareVisitTarget -> {
+                navigationViewModel.selectMainTab(
+                    AppNavigationViewModel.HEALTH_TAB
+                )
+                globalSearchSnapshot.careVisits
+                    .firstOrNull { it.id == target.id }
+                    ?.let { visit ->
+                        careVisitBeingEdited = visit
+                        selectedCarePlaceForVisit =
+                            visit.placeId?.let { id ->
+                                carePlaces.firstOrNull { it.id == id }
+                            }
+                        selectedCareProviderForVisit =
+                            visit.providerId?.let { id ->
+                                careProviders.firstOrNull { it.id == id }
+                            }
+                        isOneTimeCareVisit = visit.placeId == null
+                        returnToCareHistoryAfterVisitSave = false
+                        showCareVisitEditorDialog = true
+                    }
+            }
+
+            is GlobalSearchTarget.AppointmentTarget -> {
+                navigationViewModel.openPlanSection(
+                    AppNavigationViewModel.PLAN_APPOINTMENTS_SECTION
+                )
+                globalSearchSnapshot.careAppointments
+                    .firstOrNull { it.id == target.id }
+                    ?.let { appointment ->
+                        openAppointmentEditor(
+                            appointment = appointment,
+                            returnToHistory = false
+                        )
+                    }
+            }
+
+            is GlobalSearchTarget.MigraineTarget -> {
+                navigationViewModel.selectMainTab(
+                    AppNavigationViewModel.HEALTH_TAB
+                )
+                globalSearchSnapshot.migraineLogs
+                    .firstOrNull { it.id == target.id }
+                    ?.let { log ->
+                        migraineBeingEdited = log
+                        showMigraineLogDialog = true
+                    }
+            }
+
+            is GlobalSearchTarget.SavedMeetingTarget -> {
+                globalSearchSnapshot.savedMeetings
+                    .firstOrNull { it.id == target.id }
+                    ?.let { meeting ->
+                        navigationViewModel.openLogSection(
+                            AppNavigationViewModel.LOG_MEETINGS_SECTION
+                        )
+                        meetingBeingEdited = meeting
+                        logAttendanceAfterMeetingSave = false
+                        showMeetingEditorDialog = true
+                    }
+            }
+
+            is GlobalSearchTarget.MeetingAttendanceTarget -> {
+                globalSearchSnapshot.meetingAttendance
+                    .firstOrNull { it.id == target.id }
+                    ?.let { attendance ->
+                        navigationViewModel.openLogSection(
+                            AppNavigationViewModel.LOG_MEETINGS_SECTION
+                        )
+                        attendanceBeingEdited = attendance
+                        meetingForAttendance = attendance.savedMeetingId
+                            ?.let { savedMeetingId ->
+                                savedMeetings.firstOrNull {
+                                    it.id == savedMeetingId
+                                }
+                            }
+                        isOneTimeMeetingAttendance =
+                            attendance.savedMeetingId == null
+                        showMeetingAttendanceDialog = true
+                    }
+            }
+
+            is GlobalSearchTarget.IopGroupTarget -> {
+                navigationViewModel.openIopGroups()
+            }
+
+            is GlobalSearchTarget.MobilitySessionTarget -> {
+                globalSearchSnapshot.mobilitySessions
+                    .firstOrNull { it.id == target.id }
+                    ?.let { session ->
+                        navigationViewModel.openLogSection(
+                            AppNavigationViewModel.LOG_MOVEMENT_SECTION
+                        )
+                        activityMobilityBeingEdited = session
+                    }
+            }
+
+            is GlobalSearchTarget.MobilityMovementTarget -> {
+                navigationViewModel.selectMobilitySection(
+                    AppNavigationViewModel.MOBILITY_ROUTINES_SECTION
+                )
+                navigationViewModel.openLogSection(
+                    AppNavigationViewModel.LOG_MOVEMENT_SECTION
+                )
+            }
+
+            is GlobalSearchTarget.MaintenanceTarget -> {
+                navigationViewModel.openLogSection(
+                    AppNavigationViewModel.LOG_MAINTENANCE_SECTION
+                )
+            }
+
+            is GlobalSearchTarget.PantryTarget -> {
+                navigationViewModel.openPlanSection(
+                    AppNavigationViewModel.PLAN_PANTRY_SECTION
+                )
+            }
+        }
+    }
+
     val foodHubState = FoodHubState(
         selectedSection = 0,
         totalWaterOunces = totalWaterOunces,
@@ -3969,11 +4241,26 @@ fun DailyRebuildApp(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            if (!isLoading) {
+            if (!isLoading && !showGlobalSearch) {
                 DailyRebuildBottomNavigation(
                     selectedTab = selectedMainTab,
                     onTabSelected = {
                         navigationViewModel.selectMainTab(it)
+                    }
+                )
+            }
+        },
+        floatingActionButton = {
+            if (!isLoading && !showGlobalSearch) {
+                ExtendedFloatingActionButton(
+                    onClick = ::openGlobalSearch,
+                    text = { Text("Search") },
+                    icon = {
+                        Text(
+                            text = "⌕",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 )
             }
@@ -3990,6 +4277,28 @@ fun DailyRebuildApp(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
+            )
+        } else if (showGlobalSearch) {
+            GlobalSearchScreen(
+                query = globalSearchQuery,
+                selectedFilter = globalSearchFilter,
+                snapshot = globalSearchSnapshot,
+                recentSearches = recentGlobalSearches,
+                isLoading = isLoadingGlobalSearch,
+                onQueryChange = { globalSearchQuery = it },
+                onFilterChange = { globalSearchFilter = it },
+                onRecentSearch = { recent ->
+                    globalSearchQuery = recent
+                    globalSearchFilter = GlobalSearchFilter.ALL
+                },
+                onClearRecentSearches = {
+                    appPreferencesRepository.clearRecentSearches()
+                    recentGlobalSearches = emptyList()
+                },
+                onSearchSubmitted = ::rememberCurrentGlobalSearch,
+                onResultClick = ::openGlobalSearchResult,
+                onBack = ::closeGlobalSearch,
+                modifier = Modifier.padding(innerPadding)
             )
         } else {
             when (selectedMainTab) {
@@ -4352,6 +4661,11 @@ fun DailyRebuildApp(
                 AppNavigationViewModel.HEALTH_TAB -> HealthHubScreen(
                     state = healthHubState,
                     actions = healthHubActions,
+                    requestedFeature = requestedHealthFeature,
+                    requestToken = requestedHealthFeatureToken,
+                    onRequestedFeatureConsumed = {
+                        requestedHealthFeature = null
+                    },
                     profileContent = {
                         key(healthFeatureRefreshKey) {
                             HealthProfileFeature(repositories)

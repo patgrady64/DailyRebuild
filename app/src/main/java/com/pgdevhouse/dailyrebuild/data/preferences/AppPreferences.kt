@@ -197,6 +197,38 @@ class AppPreferencesRepository(
             .apply()
     }
 
+
+    fun loadRecentSearches(): List<String> {
+        return preferences.getString(KEY_RECENT_SEARCHES, null)
+            ?.split(RECENT_SEARCH_SEPARATOR)
+            ?.map(String::trim)
+            ?.filter(String::isNotBlank)
+            ?.distinct()
+            ?.take(MAX_RECENT_SEARCHES)
+            .orEmpty()
+    }
+
+    fun rememberSearch(query: String): List<String> {
+        val cleaned = query.trim()
+        if (cleaned.isBlank()) return loadRecentSearches()
+
+        val updated = (listOf(cleaned) + loadRecentSearches()
+            .filterNot { it.equals(cleaned, ignoreCase = true) })
+            .take(MAX_RECENT_SEARCHES)
+
+        preferences.edit()
+            .putString(KEY_RECENT_SEARCHES, updated.joinToString(RECENT_SEARCH_SEPARATOR))
+            .apply()
+
+        return updated
+    }
+
+    fun clearRecentSearches() {
+        preferences.edit()
+            .remove(KEY_RECENT_SEARCHES)
+            .apply()
+    }
+
     fun areIopDefaultsInitialized(): Boolean =
         preferences.getBoolean(KEY_IOP_DEFAULTS_INITIALIZED, false)
 
@@ -250,5 +282,9 @@ class AppPreferencesRepository(
         private const val KEY_HEIGHT_UNIT = "height_unit"
         private const val KEY_IOP_DEFAULTS_INITIALIZED = "iop_defaults_initialized"
         private const val KEY_TODAY_PHASE2_INITIALIZED = "today_phase2_initialized"
+
+        private const val KEY_RECENT_SEARCHES = "recent_searches"
+        private const val RECENT_SEARCH_SEPARATOR = "\n"
+        private const val MAX_RECENT_SEARCHES = 8
     }
 }

@@ -30,6 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -1867,6 +1868,9 @@ data class HealthHubActions(
 fun HealthHubScreen(
     state: HealthHubState,
     actions: HealthHubActions,
+    requestedFeature: String? = null,
+    requestToken: Int = 0,
+    onRequestedFeatureConsumed: () -> Unit = {},
     profileContent: @Composable () -> Unit,
     customizationContent: @Composable () -> Unit,
     backupContent: @Composable () -> Unit,
@@ -1874,6 +1878,13 @@ fun HealthHubScreen(
     showHeader: Boolean = true
 ) {
     var openFeature by rememberSaveable { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(requestToken) {
+        if (!requestedFeature.isNullOrBlank()) {
+            openFeature = requestedFeature
+            onRequestedFeatureConsumed()
+        }
+    }
 
     Column(
         modifier = modifier
