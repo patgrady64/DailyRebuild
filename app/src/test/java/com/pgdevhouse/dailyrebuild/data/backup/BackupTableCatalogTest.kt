@@ -6,7 +6,7 @@ import org.junit.Test
 
 class BackupTableCatalogTest {
     @Test
-    fun backupCatalogContainsEveryVersion14UserTableExactlyOnce() {
+    fun backupCatalogContainsEveryVersion18UserTableExactlyOnce() {
         val expected = setOf(
             "daily_records",
             "food_products",
@@ -28,7 +28,10 @@ class BackupTableCatalogTest {
             "care_providers",
             "care_visits",
             "care_appointments",
-            "pantry_essentials"
+            "pantry_essentials",
+            "life_maintenance_logs",
+            "iop_groups",
+            "iop_missed_occurrences"
         )
 
         val actual = DailyRebuildBackupManager.INSERT_ORDER
@@ -44,5 +47,7 @@ class BackupTableCatalogTest {
             actual.indexOf("saved_meals") <
                 actual.indexOf("saved_meal_ingredients")
         )
+        assertEquals(18, DailyRebuildBackupManager.DATABASE_VERSION)
+        assertEquals(2, DailyRebuildBackupManager.FORMAT_VERSION)
     }
 }

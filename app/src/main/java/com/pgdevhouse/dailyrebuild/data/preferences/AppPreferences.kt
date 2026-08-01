@@ -1,6 +1,7 @@
 package com.pgdevhouse.dailyrebuild.data.preferences
 
 import android.content.Context
+import android.content.SharedPreferences
 
 object DailyRebuildPreferenceIds {
     const val LOG_FOOD = "food"
@@ -105,6 +106,18 @@ data class DailyRebuildPreferences(
     }
 }
 
+/**
+ * The non-database state that travels with a portable Daily Rebuild backup.
+ * Keeping this model separate from SharedPreferences makes validation and
+ * backward-compatible restores explicit instead of copying an opaque XML file.
+ */
+data class PortableAppPreferences(
+    val settings: DailyRebuildPreferences,
+    val recentSearches: List<String>,
+    val ignoredDataQualitySignatures: Set<String>,
+    val iopDefaultsInitialized: Boolean
+)
+
 class AppPreferencesRepository(
     context: Context
 ) {
@@ -149,7 +162,7 @@ class AppPreferencesRepository(
             hiddenQuickLogActions = readSet(
                 KEY_HIDDEN_QUICK_LOG_ACTIONS,
                 emptySet()
-            ),
+            ).intersect(DailyRebuildPreferences.defaultQuickLogOrder.toSet()),
             visibleTodaySections = visibleTodaySections,
             statsOrder = readOrderedList(
                 KEY_STATS_ORDER,
@@ -158,11 +171,11 @@ class AppPreferencesRepository(
             hiddenStatsSections = readSet(
                 KEY_HIDDEN_STATS_SECTIONS,
                 emptySet()
-            ),
+            ).intersect(DailyRebuildPreferences.defaultStatsOrder.toSet()),
             statsDefaultRange = preferences.getString(
                 KEY_STATS_DEFAULT_RANGE,
                 "LAST_30_DAYS"
-            ) ?: "LAST_30_DAYS",
+            )?.takeIf { it in VALID_STATS_RANGES } ?: "LAST_30_DAYS",
             appointmentRemindersEnabled = preferences.getBoolean(
                 KEY_APPOINTMENT_REMINDERS,
                 true
@@ -175,54 +188,95 @@ class AppPreferencesRepository(
                 KEY_IOP_REMINDERS,
                 false
             ),
-            weightUnit = preferences.getString(KEY_WEIGHT_UNIT, "lb") ?: "lb",
-            distanceUnit = preferences.getString(KEY_DISTANCE_UNIT, "mi") ?: "mi",
-            waterUnit = preferences.getString(KEY_WATER_UNIT, "oz") ?: "oz",
-            temperatureUnit = preferences.getString(KEY_TEMPERATURE_UNIT, "f") ?: "f",
-            foodMassUnit = preferences.getString(KEY_FOOD_MASS_UNIT, "oz") ?: "oz",
-            heightUnit = preferences.getString(KEY_HEIGHT_UNIT, "ft_in") ?: "ft_in"
+            weightUnit = preferences.getString(KEY_WEIGHT_UNIT, "lb")
+                ?.takeIf { it in VALID_WEIGHT_UNITS } ?: "lb",
+            distanceUnit = preferences.getString(KEY_DISTANCE_UNIT, "mi")
+                ?.takeIf { it in VALID_DISTANCE_UNITS } ?: "mi",
+            waterUnit = preferences.getString(KEY_WATER_UNIT, "oz")
+                ?.takeIf { it in VALID_WATER_UNITS } ?: "oz",
+            temperatureUnit = preferences.getString(KEY_TEMPERATURE_UNIT, "f")
+                ?.takeIf { it in VALID_TEMPERATURE_UNITS } ?: "f",
+            foodMassUnit = preferences.getString(KEY_FOOD_MASS_UNIT, "oz")
+                ?.takeIf { it in VALID_FOOD_MASS_UNITS } ?: "oz",
+            heightUnit = preferences.getString(KEY_HEIGHT_UNIT, "ft_in")
+                ?.takeIf { it in VALID_HEIGHT_UNITS } ?: "ft_in"
         )
     }
 
     fun save(value: DailyRebuildPreferences) {
-        preferences.edit()
-            .putStringSet(KEY_ENABLED_LOG_SECTIONS, value.enabledLogSections)
-            .putString(KEY_QUICK_LOG_ORDER, value.quickLogOrder.joinToString(SEPARATOR))
-            .putStringSet(KEY_HIDDEN_QUICK_LOG_ACTIONS, value.hiddenQuickLogActions)
-            .putStringSet(KEY_VISIBLE_TODAY_SECTIONS, value.visibleTodaySections)
-            .putString(KEY_STATS_ORDER, value.statsOrder.joinToString(SEPARATOR))
-            .putStringSet(KEY_HIDDEN_STATS_SECTIONS, value.hiddenStatsSections)
-            .putString(KEY_STATS_DEFAULT_RANGE, value.statsDefaultRange)
-            .putBoolean(KEY_APPOINTMENT_REMINDERS, value.appointmentRemindersEnabled)
-            .putBoolean(KEY_MEETING_REMINDERS, value.meetingRemindersEnabled)
-            .putBoolean(KEY_IOP_REMINDERS, value.iopRemindersEnabled)
-            .putString(KEY_WEIGHT_UNIT, value.weightUnit)
-            .putString(KEY_DISTANCE_UNIT, value.distanceUnit)
-            .putString(KEY_WATER_UNIT, value.waterUnit)
-            .putString(KEY_TEMPERATURE_UNIT, value.temperatureUnit)
-            .putString(KEY_FOOD_MASS_UNIT, value.foodMassUnit)
-            .putString(KEY_HEIGHT_UNIT, value.heightUnit)
+        writeSettings(preferences.edit(), normalizeSettings(value))
+            .putBoolean(KEY_TODAY_PHASE2_INITIALIZED, true)
             .apply()
     }
 
+    fun exportPortablePreferences(): PortableAppPreferences =
+        PortableAppPreferences(
+            settings = load(),
+            recentSearches = loadRecentSearches(),
+            ignoredDataQualitySignatures = loadIgnoredDataQualitySignatures(),
+            iopDefaultsInitialized = areIopDefaultsInitialized()
+        )
+
+    /**
+     * Restores all known portable settings synchronously. A synchronous commit
+     * lets the backup manager keep the database and preference restore together.
+     */
+    fun restorePortablePreferences(value: PortableAppPreferences): Boolean {
+        val normalized = PortableAppPreferences(
+            settings = normalizeSettings(value.settings),
+            recentSearches = normalizeRecentSearches(value.recentSearches),
+            ignoredDataQualitySignatures = normalizeIgnoredSignatures(
+                value.ignoredDataQualitySignatures
+            ),
+            iopDefaultsInitialized = value.iopDefaultsInitialized
+        )
+
+        val editor = writeSettings(
+            preferences.edit(),
+            normalized.settings
+        )
+            .putBoolean(KEY_IOP_DEFAULTS_INITIALIZED, normalized.iopDefaultsInitialized)
+            // The restored visible-section set is already the user's deliberate
+            // choice, so do not run the old Phase 2 auto-enable migration again.
+            .putBoolean(KEY_TODAY_PHASE2_INITIALIZED, true)
+
+        if (normalized.recentSearches.isEmpty()) {
+            editor.remove(KEY_RECENT_SEARCHES)
+        } else {
+            editor.putString(
+                KEY_RECENT_SEARCHES,
+                normalized.recentSearches.joinToString(RECENT_SEARCH_SEPARATOR)
+            )
+        }
+
+        if (normalized.ignoredDataQualitySignatures.isEmpty()) {
+            editor.remove(KEY_IGNORED_DATA_QUALITY_SIGNATURES)
+        } else {
+            editor.putStringSet(
+                KEY_IGNORED_DATA_QUALITY_SIGNATURES,
+                normalized.ignoredDataQualitySignatures
+            )
+        }
+
+        return editor.commit()
+    }
 
     fun loadRecentSearches(): List<String> {
-        return preferences.getString(KEY_RECENT_SEARCHES, null)
-            ?.split(RECENT_SEARCH_SEPARATOR)
-            ?.map(String::trim)
-            ?.filter(String::isNotBlank)
-            ?.distinct()
-            ?.take(MAX_RECENT_SEARCHES)
-            .orEmpty()
+        return normalizeRecentSearches(
+            preferences.getString(KEY_RECENT_SEARCHES, null)
+                ?.split(RECENT_SEARCH_SEPARATOR)
+                .orEmpty()
+        )
     }
 
     fun rememberSearch(query: String): List<String> {
         val cleaned = query.trim()
         if (cleaned.isBlank()) return loadRecentSearches()
 
-        val updated = (listOf(cleaned) + loadRecentSearches()
-            .filterNot { it.equals(cleaned, ignoreCase = true) })
-            .take(MAX_RECENT_SEARCHES)
+        val updated = normalizeRecentSearches(
+            listOf(cleaned) + loadRecentSearches()
+                .filterNot { it.equals(cleaned, ignoreCase = true) }
+        )
 
         preferences.edit()
             .putString(KEY_RECENT_SEARCHES, updated.joinToString(RECENT_SEARCH_SEPARATOR))
@@ -238,13 +292,17 @@ class AppPreferencesRepository(
     }
 
     fun loadIgnoredDataQualitySignatures(): Set<String> =
-        preferences.getStringSet(KEY_IGNORED_DATA_QUALITY_SIGNATURES, emptySet())
-            ?.toSet()
-            .orEmpty()
+        normalizeIgnoredSignatures(
+            preferences.getStringSet(KEY_IGNORED_DATA_QUALITY_SIGNATURES, emptySet())
+                ?.toSet()
+                .orEmpty()
+        )
 
     fun ignoreDataQualitySignature(signature: String) {
         if (signature.isBlank()) return
-        val updated = loadIgnoredDataQualitySignatures() + signature
+        val updated = normalizeIgnoredSignatures(
+            loadIgnoredDataQualitySignatures() + signature
+        )
         preferences.edit()
             .putStringSet(KEY_IGNORED_DATA_QUALITY_SIGNATURES, updated)
             .apply()
@@ -265,6 +323,79 @@ class AppPreferencesRepository(
             .apply()
     }
 
+    private fun writeSettings(
+        editor: SharedPreferences.Editor,
+        value: DailyRebuildPreferences
+    ): SharedPreferences.Editor = editor
+        .putStringSet(KEY_ENABLED_LOG_SECTIONS, value.enabledLogSections)
+        .putString(KEY_QUICK_LOG_ORDER, value.quickLogOrder.joinToString(SEPARATOR))
+        .putStringSet(KEY_HIDDEN_QUICK_LOG_ACTIONS, value.hiddenQuickLogActions)
+        .putStringSet(KEY_VISIBLE_TODAY_SECTIONS, value.visibleTodaySections)
+        .putString(KEY_STATS_ORDER, value.statsOrder.joinToString(SEPARATOR))
+        .putStringSet(KEY_HIDDEN_STATS_SECTIONS, value.hiddenStatsSections)
+        .putString(KEY_STATS_DEFAULT_RANGE, value.statsDefaultRange)
+        .putBoolean(KEY_APPOINTMENT_REMINDERS, value.appointmentRemindersEnabled)
+        .putBoolean(KEY_MEETING_REMINDERS, value.meetingRemindersEnabled)
+        .putBoolean(KEY_IOP_REMINDERS, value.iopRemindersEnabled)
+        .putString(KEY_WEIGHT_UNIT, value.weightUnit)
+        .putString(KEY_DISTANCE_UNIT, value.distanceUnit)
+        .putString(KEY_WATER_UNIT, value.waterUnit)
+        .putString(KEY_TEMPERATURE_UNIT, value.temperatureUnit)
+        .putString(KEY_FOOD_MASS_UNIT, value.foodMassUnit)
+        .putString(KEY_HEIGHT_UNIT, value.heightUnit)
+
+    private fun normalizeSettings(value: DailyRebuildPreferences): DailyRebuildPreferences {
+        val enabledLogSections = value.enabledLogSections
+            .intersect(DailyRebuildPreferences.defaultLogSections)
+            .ifEmpty { setOf(DailyRebuildPreferenceIds.LOG_FOOD) }
+
+        return value.copy(
+            enabledLogSections = enabledLogSections,
+            quickLogOrder = normalizeOrderedList(
+                value.quickLogOrder,
+                DailyRebuildPreferences.defaultQuickLogOrder
+            ),
+            hiddenQuickLogActions = value.hiddenQuickLogActions
+                .intersect(DailyRebuildPreferences.defaultQuickLogOrder.toSet()),
+            visibleTodaySections = value.visibleTodaySections
+                .intersect(DailyRebuildPreferences.defaultTodaySections),
+            statsOrder = normalizeOrderedList(
+                value.statsOrder,
+                DailyRebuildPreferences.defaultStatsOrder
+            ),
+            hiddenStatsSections = value.hiddenStatsSections
+                .intersect(DailyRebuildPreferences.defaultStatsOrder.toSet()),
+            statsDefaultRange = value.statsDefaultRange
+                .takeIf { it in VALID_STATS_RANGES } ?: "LAST_30_DAYS",
+            weightUnit = value.weightUnit.takeIf { it in VALID_WEIGHT_UNITS } ?: "lb",
+            distanceUnit = value.distanceUnit.takeIf { it in VALID_DISTANCE_UNITS } ?: "mi",
+            waterUnit = value.waterUnit.takeIf { it in VALID_WATER_UNITS } ?: "oz",
+            temperatureUnit = value.temperatureUnit
+                .takeIf { it in VALID_TEMPERATURE_UNITS } ?: "f",
+            foodMassUnit = value.foodMassUnit
+                .takeIf { it in VALID_FOOD_MASS_UNITS } ?: "oz",
+            heightUnit = value.heightUnit.takeIf { it in VALID_HEIGHT_UNITS } ?: "ft_in"
+        )
+    }
+
+    private fun normalizeRecentSearches(values: List<String>): List<String> =
+        values.asSequence()
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .map { it.take(MAX_PORTABLE_TEXT_LENGTH) }
+            .distinctBy { it.lowercase() }
+            .take(MAX_RECENT_SEARCHES)
+            .toList()
+
+    private fun normalizeIgnoredSignatures(values: Set<String>): Set<String> =
+        values.asSequence()
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .map { it.take(MAX_PORTABLE_SIGNATURE_LENGTH) }
+            .distinct()
+            .take(MAX_IGNORED_SIGNATURES)
+            .toCollection(linkedSetOf())
+
     private fun readSet(
         key: String,
         defaultValue: Set<String>
@@ -284,8 +415,15 @@ class AppPreferencesRepository(
             ?.filter(String::isNotBlank)
             .orEmpty()
 
-        val validStored = stored.filter { it in defaultValue }
-        return (validStored + defaultValue.filterNot(validStored::contains)).distinct()
+        return normalizeOrderedList(stored, defaultValue)
+    }
+
+    private fun normalizeOrderedList(
+        stored: List<String>,
+        defaultValue: List<String>
+    ): List<String> {
+        val validStored = stored.filter { it in defaultValue }.distinct()
+        return validStored + defaultValue.filterNot(validStored::contains)
     }
 
     companion object {
@@ -316,5 +454,22 @@ class AppPreferencesRepository(
             "ignored_data_quality_signatures"
         private const val RECENT_SEARCH_SEPARATOR = "\n"
         private const val MAX_RECENT_SEARCHES = 8
+        private const val MAX_IGNORED_SIGNATURES = 500
+        private const val MAX_PORTABLE_TEXT_LENGTH = 200
+        private const val MAX_PORTABLE_SIGNATURE_LENGTH = 500
+
+        private val VALID_STATS_RANGES = setOf(
+            "LAST_7_DAYS",
+            "LAST_30_DAYS",
+            "LAST_90_DAYS",
+            "CUSTOM",
+            "ALL_TIME"
+        )
+        private val VALID_WEIGHT_UNITS = setOf("lb", "kg")
+        private val VALID_DISTANCE_UNITS = setOf("mi", "km")
+        private val VALID_WATER_UNITS = setOf("oz", "ml")
+        private val VALID_TEMPERATURE_UNITS = setOf("f", "c")
+        private val VALID_FOOD_MASS_UNITS = setOf("oz", "g")
+        private val VALID_HEIGHT_UNITS = setOf("ft_in", "cm")
     }
 }

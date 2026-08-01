@@ -107,7 +107,7 @@ fun BackupRestoreFeature(
                         .apply()
                     lastBackupTime = summary.createdAtEpochMillis
                     statusMessage =
-                        "Backup saved with ${summary.totalRecords} records."
+                        "Backup saved with ${summary.totalRecords} records and your app setup."
                 }.onFailure { error ->
                     errorMessage = error.userFacingBackupMessage(
                         "Could not create the backup."
@@ -178,8 +178,11 @@ fun BackupRestoreFeature(
 
             restoreAttempt.onSuccess { result ->
                 pendingRestoreUri = null
-                statusMessage =
-                    "Restored ${result.summary.totalRecords} records."
+                statusMessage = if (result.summary.preferencesIncluded) {
+                    "Restored ${result.summary.totalRecords} records and your app setup."
+                } else {
+                    "Restored ${result.summary.totalRecords} records. Your current app setup was kept."
+                }
                 restoreComplete = true
                 refreshEmergencyBackup()
             }.onFailure { error ->
@@ -224,8 +227,11 @@ fun BackupRestoreFeature(
             }
 
             restoreAttempt.onSuccess { result ->
-                statusMessage =
+                statusMessage = if (result.summary.preferencesIncluded) {
+                    "Emergency backup restored with ${result.summary.totalRecords} records and its app setup."
+                } else {
                     "Emergency backup restored with ${result.summary.totalRecords} records."
+                }
                 restoreComplete = true
                 refreshEmergencyBackup()
             }.onFailure { error ->
@@ -247,7 +253,7 @@ fun BackupRestoreFeature(
             accentColor = RebuildBlue
         ) {
             Text(
-                text = "A backup is one ZIP file containing readable JSON, record counts, the app version, and database version.",
+                text = "A backup is one ZIP file containing readable database JSON plus your Daily Rebuild layout, units, reminders, search history, and warning choices.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
@@ -320,7 +326,11 @@ fun BackupRestoreFeature(
                         "${emergency.totalRecords} records"
                 )
                 Text(
-                    text = "This copy is stored privately inside Daily Rebuild and can undo a bad restore.",
+                    text = if (emergency.preferencesIncluded) {
+                        "This private copy includes the database and app setup, and can undo a bad restore."
+                    } else {
+                        "This older private copy includes database records only and can undo a bad data restore."
+                    },
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 OutlinedButton(
@@ -353,9 +363,25 @@ fun BackupRestoreFeature(
                     Text("Created: ${formatBackupDate(inspection.summary.createdAtEpochMillis)}")
                     Text("App version: ${inspection.summary.appVersionName}")
                     Text("Database version: ${inspection.summary.databaseVersion}")
-                    Text("Records: ${inspection.summary.totalRecords}")
+                    Text("Backup format: ${inspection.summary.formatVersion}")
                     Text(
-                        text = "Restoring replaces every local Daily Rebuild record. An emergency copy of your current data will be created first.",
+                        "Database records: ${inspection.summary.totalRecords}",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = if (inspection.summary.preferencesIncluded) {
+                            "App preferences and layout: Included (${inspection.summary.preferenceItemCount} saved values)"
+                        } else {
+                            "App preferences and layout: Not included — your current setup will be kept"
+                        },
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = if (inspection.summary.preferencesIncluded) {
+                            "Restoring replaces every local Daily Rebuild record and restores the saved app setup. An emergency copy of your current data and setup will be created first."
+                        } else {
+                            "Restoring replaces every local Daily Rebuild record. This older backup will not change your current layout or preferences. An emergency copy will be created first."
+                        },
                         color = MaterialTheme.colorScheme.error
                     )
                 }
@@ -388,9 +414,15 @@ fun BackupRestoreFeature(
             title = { Text("Restore Emergency Copy?") },
             text = {
                 Text(
-                    "This replaces current Daily Rebuild data with the copy made on " +
-                        "${formatBackupDate(emergencyBackup!!.createdAtEpochMillis)}. " +
-                        "Another emergency copy of the current database will be made first."
+                    if (emergencyBackup!!.preferencesIncluded) {
+                        "This replaces current Daily Rebuild data and app setup with the copy made on " +
+                            "${formatBackupDate(emergencyBackup!!.createdAtEpochMillis)}. " +
+                            "Another emergency copy of the current database and setup will be made first."
+                    } else {
+                        "This replaces current Daily Rebuild data with the older database-only copy made on " +
+                            "${formatBackupDate(emergencyBackup!!.createdAtEpochMillis)}. " +
+                            "Your current app setup will be kept, and another emergency copy will be made first."
+                    }
                 )
             },
             confirmButton = {
@@ -435,6 +467,9 @@ private fun BackupCoverageCard(lastBackupTime: Long) {
         Text("Included", fontWeight = FontWeight.SemiBold)
         Text(
             "Daily records, foods, saved meals, water, activity snapshots, mobility, pain, measurements, medications, showers, migraines, meetings, IOP schedules and missed-attendance reasons, appointments, care visits, pantry essentials, and Life Maintenance."
+        )
+        Text(
+            "Today and Quick Log layout, hidden sections, Stats order and range, preferred units, reminder switches, recent searches, and exact-value warning exceptions."
         )
         Text("Not included", fontWeight = FontWeight.SemiBold)
         Text(

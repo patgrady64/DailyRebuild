@@ -9,6 +9,9 @@ import android.os.Build
 import android.util.Base64
 import androidx.room.withTransaction
 import com.pgdevhouse.dailyrebuild.data.local.DailyRebuildDatabase
+import com.pgdevhouse.dailyrebuild.data.preferences.AppPreferencesRepository
+import com.pgdevhouse.dailyrebuild.data.preferences.DailyRebuildPreferences
+import com.pgdevhouse.dailyrebuild.data.preferences.PortableAppPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -38,12 +41,16 @@ class DailyRebuildBackupManager(
     private val context: Context,
     private val database: DailyRebuildDatabase
 ) {
+    private val appPreferencesRepository = AppPreferencesRepository(context)
     data class BackupSummary(
         val createdAtEpochMillis: Long,
         val appVersionName: String,
         val databaseVersion: Int,
+        val formatVersion: Int,
         val totalRecords: Int,
-        val tableCounts: Map<String, Int>
+        val tableCounts: Map<String, Int>,
+        val preferencesIncluded: Boolean,
+        val preferenceItemCount: Int
     )
 
     data class BackupInspection(
@@ -59,7 +66,8 @@ class DailyRebuildBackupManager(
     data class EmergencyBackup(
         val file: File,
         val createdAtEpochMillis: Long,
-        val totalRecords: Int
+        val totalRecords: Int,
+        val preferencesIncluded: Boolean
     )
 
     suspend fun exportToUri(uri: Uri): BackupSummary =
@@ -115,7 +123,8 @@ class DailyRebuildBackupManager(
                         EmergencyBackup(
                             file = file,
                             createdAtEpochMillis = document.summary.createdAtEpochMillis,
-                            totalRecords = document.summary.totalRecords
+                            totalRecords = document.summary.totalRecords,
+                            preferencesIncluded = document.summary.preferencesIncluded
                         )
                     }
                 }
@@ -131,39 +140,62 @@ class DailyRebuildBackupManager(
     private suspend fun restoreValidatedDocument(
         document: BackupDocument
     ): RestoreResult {
-        // A restore is never allowed to begin until the current database has
-        // been preserved independently inside app-private storage.
+        // A restore is never allowed to begin until both the current database
+        // and current app setup have been preserved independently.
         val emergency = createEmergencyBackup()
+        val preferencesBeforeRestore = appPreferencesRepository
+            .exportPortablePreferences()
 
-        database.withTransaction {
-            val sqlite = database.openHelper.writableDatabase
+        try {
+            database.withTransaction {
+                val sqlite = database.openHelper.writableDatabase
 
-            DELETE_ORDER.forEach { table ->
-                sqlite.delete(table, null, null)
-            }
+                DELETE_ORDER.forEach { table ->
+                    sqlite.delete(table, null, null)
+                }
 
-            INSERT_ORDER.forEach { table ->
-                val rows = document.tables.getJSONArray(table)
-                for (index in 0 until rows.length()) {
-                    val values = jsonRowToContentValues(
-                        rows.getJSONObject(index)
-                    )
-                    val inserted = sqlite.insert(
-                        table,
-                        SQLiteDatabase.CONFLICT_ABORT,
-                        values
-                    )
-                    check(inserted != -1L) {
-                        "Could not restore a record in $table."
+                INSERT_ORDER.forEach { table ->
+                    val rows = document.tables.getJSONArray(table)
+                    for (index in 0 until rows.length()) {
+                        val values = jsonRowToContentValues(
+                            rows.getJSONObject(index)
+                        )
+                        val inserted = sqlite.insert(
+                            table,
+                            SQLiteDatabase.CONFLICT_ABORT,
+                            values
+                        )
+                        check(inserted != -1L) {
+                            "Could not restore a record in $table."
+                        }
+                    }
+                }
+
+                sqlite.query("PRAGMA foreign_key_check").use { cursor ->
+                    check(!cursor.moveToFirst()) {
+                        "The restored backup contains broken linked records."
+                    }
+                }
+
+                // Version 1 backups contain database rows only. In that case,
+                // deliberately retain the current installation's app setup.
+                document.preferences?.let { portablePreferences ->
+                    check(
+                        appPreferencesRepository.restorePortablePreferences(
+                            portablePreferences
+                        )
+                    ) {
+                        "Android could not save the restored app preferences."
                     }
                 }
             }
-
-            sqlite.query("PRAGMA foreign_key_check").use { cursor ->
-                check(!cursor.moveToFirst()) {
-                    "The restored backup contains broken linked records."
-                }
-            }
+        } catch (error: Throwable) {
+            // Preference writes are outside SQLite. Restore the previous setup
+            // if any later database step fails so the operation remains whole.
+            appPreferencesRepository.restorePortablePreferences(
+                preferencesBeforeRestore
+            )
+            throw error
         }
 
         return RestoreResult(
@@ -186,7 +218,8 @@ class DailyRebuildBackupManager(
         return EmergencyBackup(
             file = file,
             createdAtEpochMillis = document.summary.createdAtEpochMillis,
-            totalRecords = document.summary.totalRecords
+            totalRecords = document.summary.totalRecords,
+            preferencesIncluded = document.summary.preferencesIncluded
         )
     }
 
@@ -219,6 +252,12 @@ class DailyRebuildBackupManager(
         val versionName = packageInfo.versionName ?: "Unknown"
         val createdAt = System.currentTimeMillis()
         val totalRecords = tableCounts.values.sum()
+        val portablePreferences = appPreferencesRepository
+            .exportPortablePreferences()
+        val preferencesJson = portablePreferencesToJson(portablePreferences)
+        val preferenceItemCount = countPortablePreferenceItems(
+            portablePreferences
+        )
 
         val tableCountsJson = JSONObject().apply {
             tableCounts.forEach { (table, count) ->
@@ -237,6 +276,8 @@ class DailyRebuildBackupManager(
             put("appVersionCode", versionCode)
             put("totalRecords", totalRecords)
             put("tableCounts", tableCountsJson)
+            put("preferencesIncluded", true)
+            put("preferenceItemCount", preferenceItemCount)
             put(
                 "healthConnectNote",
                 "Contains only Daily Rebuild-owned activity snapshots, not original Health Connect records."
@@ -251,12 +292,17 @@ class DailyRebuildBackupManager(
         return BackupDocument(
             manifest = manifest,
             data = data,
+            preferencesJson = preferencesJson,
+            preferences = portablePreferences,
             summary = BackupSummary(
                 createdAtEpochMillis = createdAt,
                 appVersionName = versionName,
                 databaseVersion = DATABASE_VERSION,
+                formatVersion = FORMAT_VERSION,
                 totalRecords = totalRecords,
-                tableCounts = tableCounts
+                tableCounts = tableCounts,
+                preferencesIncluded = true,
+                preferenceItemCount = preferenceItemCount
             ),
             tables = tablesObject
         )
@@ -274,6 +320,12 @@ class DailyRebuildBackupManager(
             zip.putNextEntry(ZipEntry(DATA_ENTRY))
             zip.write(document.data.toString().toByteArray(Charsets.UTF_8))
             zip.closeEntry()
+
+            document.preferencesJson?.let { preferencesJson ->
+                zip.putNextEntry(ZipEntry(USER_PREFERENCES_ENTRY))
+                zip.write(preferencesJson.toString(2).toByteArray(Charsets.UTF_8))
+                zip.closeEntry()
+            }
         }
     }
 
@@ -290,11 +342,60 @@ class DailyRebuildBackupManager(
         require(manifest.optString("formatName") == FORMAT_NAME) {
             "This is not a Daily Rebuild backup."
         }
-        require(manifest.optInt("formatVersion", -1) == FORMAT_VERSION) {
-            "This backup format is not supported by this app version."
+
+        val sourceFormatVersion = manifest.optInt("formatVersion", -1)
+        require(sourceFormatVersion in MIN_SUPPORTED_FORMAT_VERSION..FORMAT_VERSION) {
+            if (sourceFormatVersion > FORMAT_VERSION) {
+                "This backup was created by a newer Daily Rebuild version. Update the app before restoring it."
+            } else {
+                "This backup format is not supported by this app version."
+            }
         }
-        require(sourceData.optInt("formatVersion", -1) == FORMAT_VERSION) {
+        require(sourceData.optInt("formatVersion", -1) == sourceFormatVersion) {
             "The backup data format does not match its manifest."
+        }
+
+        val preferencesBytes = entries[USER_PREFERENCES_ENTRY]
+        val manifestSaysPreferencesIncluded = manifest.optBoolean(
+            "preferencesIncluded",
+            false
+        )
+        val preferencesJson: JSONObject?
+        val portablePreferences: PortableAppPreferences?
+
+        if (sourceFormatVersion >= PORTABLE_PREFERENCES_FORMAT_VERSION) {
+            require(manifestSaysPreferencesIncluded) {
+                "The backup manifest does not identify its app preferences."
+            }
+            val requiredPreferencesBytes = preferencesBytes
+                ?: error("This backup is missing $USER_PREFERENCES_ENTRY.")
+            preferencesJson = JSONObject(
+                requiredPreferencesBytes.toString(Charsets.UTF_8)
+            )
+            require(
+                preferencesJson.optInt("formatVersion", -1) ==
+                    PORTABLE_PREFERENCES_FORMAT_VERSION
+            ) {
+                "The app preferences format is not supported."
+            }
+            portablePreferences = portablePreferencesFromJson(preferencesJson)
+            val countedPreferenceItems = countPortablePreferenceItems(
+                portablePreferences
+            )
+            require(
+                manifest.optInt("preferenceItemCount", -1) ==
+                    countedPreferenceItems
+            ) {
+                "The backup preference count does not match its data."
+            }
+        } else {
+            // Format 1 backups predate portable preferences. They remain valid,
+            // and restoring them deliberately keeps the current app setup.
+            require(preferencesBytes == null) {
+                "This older backup contains an unexpected preferences file."
+            }
+            preferencesJson = null
+            portablePreferences = null
         }
 
         val sourceDatabaseVersion = manifest.optInt("databaseVersion", -1)
@@ -348,13 +449,19 @@ class DailyRebuildBackupManager(
             counts[table] = tables.getJSONArray(table).length()
         }
         val countedTotal = counts.values.sum()
+        val preferenceItemCount = portablePreferences
+            ?.let(::countPortablePreferenceItems)
+            ?: 0
 
         val summary = BackupSummary(
             createdAtEpochMillis = manifest.optLong("createdAtEpochMillis", 0L),
             appVersionName = manifest.optString("appVersionName", "Unknown"),
             databaseVersion = sourceDatabaseVersion,
+            formatVersion = sourceFormatVersion,
             totalRecords = countedTotal,
-            tableCounts = counts
+            tableCounts = counts,
+            preferencesIncluded = portablePreferences != null,
+            preferenceItemCount = preferenceItemCount
         )
         require(summary.createdAtEpochMillis > 0L) {
             "The backup is missing its creation date."
@@ -368,6 +475,8 @@ class DailyRebuildBackupManager(
         return BackupDocument(
             manifest = manifest,
             data = normalizedData,
+            preferencesJson = preferencesJson,
+            preferences = portablePreferences,
             summary = summary,
             tables = tables
         )
@@ -490,6 +599,339 @@ class DailyRebuildBackupManager(
         return columns
     }
 
+    private fun portablePreferencesToJson(
+        value: PortableAppPreferences
+    ): JSONObject {
+        val settings = value.settings
+        return JSONObject().apply {
+            put("formatVersion", PORTABLE_PREFERENCES_FORMAT_VERSION)
+            put(
+                "settings",
+                JSONObject().apply {
+                    put(
+                        "enabledLogSections",
+                        orderedSetJson(
+                            settings.enabledLogSections,
+                            DailyRebuildPreferences.defaultLogSections.toList()
+                        )
+                    )
+                    put("quickLogOrder", stringListJson(settings.quickLogOrder))
+                    put(
+                        "hiddenQuickLogActions",
+                        orderedSetJson(
+                            settings.hiddenQuickLogActions,
+                            DailyRebuildPreferences.defaultQuickLogOrder
+                        )
+                    )
+                    put(
+                        "visibleTodaySections",
+                        orderedSetJson(
+                            settings.visibleTodaySections,
+                            DailyRebuildPreferences.defaultTodaySections.toList()
+                        )
+                    )
+                    put("statsOrder", stringListJson(settings.statsOrder))
+                    put(
+                        "hiddenStatsSections",
+                        orderedSetJson(
+                            settings.hiddenStatsSections,
+                            DailyRebuildPreferences.defaultStatsOrder
+                        )
+                    )
+                    put("statsDefaultRange", settings.statsDefaultRange)
+                    put(
+                        "appointmentRemindersEnabled",
+                        settings.appointmentRemindersEnabled
+                    )
+                    put(
+                        "meetingRemindersEnabled",
+                        settings.meetingRemindersEnabled
+                    )
+                    put("iopRemindersEnabled", settings.iopRemindersEnabled)
+                    put("weightUnit", settings.weightUnit)
+                    put("distanceUnit", settings.distanceUnit)
+                    put("waterUnit", settings.waterUnit)
+                    put("temperatureUnit", settings.temperatureUnit)
+                    put("foodMassUnit", settings.foodMassUnit)
+                    put("heightUnit", settings.heightUnit)
+                }
+            )
+            put("recentSearches", stringListJson(value.recentSearches))
+            put(
+                "ignoredDataQualitySignatures",
+                stringListJson(value.ignoredDataQualitySignatures.sorted())
+            )
+            put("iopDefaultsInitialized", value.iopDefaultsInitialized)
+        }
+    }
+
+    private fun portablePreferencesFromJson(
+        root: JSONObject
+    ): PortableAppPreferences {
+        val settingsJson = root.optJSONObject("settings")
+            ?: error("The backup app preferences do not contain settings.")
+
+        val enabledLogSections = requiredStringSet(
+            settingsJson,
+            "enabledLogSections",
+            DailyRebuildPreferences.defaultLogSections.size,
+            MAX_PREFERENCE_ID_LENGTH
+        )
+        require(enabledLogSections.isNotEmpty()) {
+            "The backup must keep at least one Log section enabled."
+        }
+        require(
+            enabledLogSections.all {
+                it in DailyRebuildPreferences.defaultLogSections
+            }
+        ) {
+            "The backup contains an unsupported Log section preference."
+        }
+
+        val quickLogOrder = requiredStringList(
+            settingsJson,
+            "quickLogOrder",
+            DailyRebuildPreferences.defaultQuickLogOrder.size,
+            MAX_PREFERENCE_ID_LENGTH
+        )
+        require(
+            quickLogOrder.size == DailyRebuildPreferences.defaultQuickLogOrder.size &&
+                quickLogOrder.toSet() ==
+                DailyRebuildPreferences.defaultQuickLogOrder.toSet()
+        ) {
+            "The backup Quick Log order is incomplete or invalid."
+        }
+
+        val hiddenQuickLogActions = requiredStringSet(
+            settingsJson,
+            "hiddenQuickLogActions",
+            DailyRebuildPreferences.defaultQuickLogOrder.size,
+            MAX_PREFERENCE_ID_LENGTH
+        )
+        require(
+            hiddenQuickLogActions.all {
+                it in DailyRebuildPreferences.defaultQuickLogOrder
+            }
+        ) {
+            "The backup contains an unsupported hidden Quick Log action."
+        }
+
+        val visibleTodaySections = requiredStringSet(
+            settingsJson,
+            "visibleTodaySections",
+            DailyRebuildPreferences.defaultTodaySections.size,
+            MAX_PREFERENCE_ID_LENGTH
+        )
+        require(
+            visibleTodaySections.all {
+                it in DailyRebuildPreferences.defaultTodaySections
+            }
+        ) {
+            "The backup contains an unsupported Today section preference."
+        }
+
+        val statsOrder = requiredStringList(
+            settingsJson,
+            "statsOrder",
+            DailyRebuildPreferences.defaultStatsOrder.size,
+            MAX_PREFERENCE_ID_LENGTH
+        )
+        require(
+            statsOrder.size == DailyRebuildPreferences.defaultStatsOrder.size &&
+                statsOrder.toSet() == DailyRebuildPreferences.defaultStatsOrder.toSet()
+        ) {
+            "The backup Stats order is incomplete or invalid."
+        }
+
+        val hiddenStatsSections = requiredStringSet(
+            settingsJson,
+            "hiddenStatsSections",
+            DailyRebuildPreferences.defaultStatsOrder.size,
+            MAX_PREFERENCE_ID_LENGTH
+        )
+        require(
+            hiddenStatsSections.all {
+                it in DailyRebuildPreferences.defaultStatsOrder
+            }
+        ) {
+            "The backup contains an unsupported hidden Stats section."
+        }
+
+        val settings = DailyRebuildPreferences(
+            enabledLogSections = enabledLogSections,
+            quickLogOrder = quickLogOrder,
+            hiddenQuickLogActions = hiddenQuickLogActions,
+            visibleTodaySections = visibleTodaySections,
+            statsOrder = statsOrder,
+            hiddenStatsSections = hiddenStatsSections,
+            statsDefaultRange = requiredAllowedString(
+                settingsJson,
+                "statsDefaultRange",
+                VALID_STATS_RANGES
+            ),
+            appointmentRemindersEnabled = requiredBoolean(
+                settingsJson,
+                "appointmentRemindersEnabled"
+            ),
+            meetingRemindersEnabled = requiredBoolean(
+                settingsJson,
+                "meetingRemindersEnabled"
+            ),
+            iopRemindersEnabled = requiredBoolean(
+                settingsJson,
+                "iopRemindersEnabled"
+            ),
+            weightUnit = requiredAllowedString(
+                settingsJson,
+                "weightUnit",
+                VALID_WEIGHT_UNITS
+            ),
+            distanceUnit = requiredAllowedString(
+                settingsJson,
+                "distanceUnit",
+                VALID_DISTANCE_UNITS
+            ),
+            waterUnit = requiredAllowedString(
+                settingsJson,
+                "waterUnit",
+                VALID_WATER_UNITS
+            ),
+            temperatureUnit = requiredAllowedString(
+                settingsJson,
+                "temperatureUnit",
+                VALID_TEMPERATURE_UNITS
+            ),
+            foodMassUnit = requiredAllowedString(
+                settingsJson,
+                "foodMassUnit",
+                VALID_FOOD_MASS_UNITS
+            ),
+            heightUnit = requiredAllowedString(
+                settingsJson,
+                "heightUnit",
+                VALID_HEIGHT_UNITS
+            )
+        )
+
+        val recentSearches = requiredStringList(
+            root,
+            "recentSearches",
+            MAX_RECENT_SEARCHES,
+            MAX_RECENT_SEARCH_LENGTH
+        )
+        require(
+            recentSearches.map { it.lowercase() }.distinct().size ==
+                recentSearches.size
+        ) {
+            "The backup contains duplicate recent searches."
+        }
+
+        val ignoredSignatures = requiredStringSet(
+            root,
+            "ignoredDataQualitySignatures",
+            MAX_IGNORED_SIGNATURES,
+            MAX_IGNORED_SIGNATURE_LENGTH
+        )
+
+        return PortableAppPreferences(
+            settings = settings,
+            recentSearches = recentSearches,
+            ignoredDataQualitySignatures = ignoredSignatures,
+            iopDefaultsInitialized = requiredBoolean(
+                root,
+                "iopDefaultsInitialized"
+            )
+        )
+    }
+
+    private fun countPortablePreferenceItems(
+        value: PortableAppPreferences
+    ): Int = PORTABLE_SETTINGS_FIELD_COUNT +
+        value.recentSearches.size +
+        value.ignoredDataQualitySignatures.size +
+        1
+
+    private fun orderedSetJson(
+        values: Set<String>,
+        order: List<String>
+    ): JSONArray = stringListJson(order.filter(values::contains))
+
+    private fun stringListJson(values: List<String>): JSONArray =
+        JSONArray().apply {
+            values.forEach(::put)
+        }
+
+    private fun requiredStringList(
+        objectValue: JSONObject,
+        key: String,
+        maximumCount: Int,
+        maximumLength: Int
+    ): List<String> {
+        val array = objectValue.optJSONArray(key)
+            ?: error("The backup app preferences are missing $key.")
+        require(array.length() <= maximumCount) {
+            "The backup app preference $key contains too many values."
+        }
+
+        return buildList(array.length()) {
+            for (index in 0 until array.length()) {
+                val value = array.optString(index, null)
+                    ?: error("The backup app preference $key contains a non-text value.")
+                require(value.isNotBlank() && value.length <= maximumLength) {
+                    "The backup app preference $key contains an invalid value."
+                }
+                add(value)
+            }
+        }
+    }
+
+    private fun requiredStringSet(
+        objectValue: JSONObject,
+        key: String,
+        maximumCount: Int,
+        maximumLength: Int
+    ): Set<String> {
+        val values = requiredStringList(
+            objectValue,
+            key,
+            maximumCount,
+            maximumLength
+        )
+        require(values.distinct().size == values.size) {
+            "The backup app preference $key contains duplicate values."
+        }
+        return values.toCollection(linkedSetOf())
+    }
+
+    private fun requiredAllowedString(
+        objectValue: JSONObject,
+        key: String,
+        allowed: Set<String>
+    ): String {
+        require(objectValue.has(key) && !objectValue.isNull(key)) {
+            "The backup app preferences are missing $key."
+        }
+        val value = objectValue.optString(key, "")
+        require(value in allowed) {
+            "The backup app preference $key is not supported."
+        }
+        return value
+    }
+
+    private fun requiredBoolean(
+        objectValue: JSONObject,
+        key: String
+    ): Boolean {
+        require(objectValue.has(key) && !objectValue.isNull(key)) {
+            "The backup app preferences are missing $key."
+        }
+        val value = objectValue.get(key)
+        require(value is Boolean) {
+            "The backup app preference $key is not true or false."
+        }
+        return value
+    }
+
     private fun cursorRowToJson(cursor: Cursor): JSONObject {
         val row = JSONObject()
         for (index in 0 until cursor.columnCount) {
@@ -557,7 +999,13 @@ class DailyRebuildBackupManager(
                     zip.closeEntry()
                     continue
                 }
-                require(entry.name in setOf(MANIFEST_ENTRY, DATA_ENTRY)) {
+                require(
+                    entry.name in setOf(
+                        MANIFEST_ENTRY,
+                        DATA_ENTRY,
+                        USER_PREFERENCES_ENTRY
+                    )
+                ) {
                     "The backup contains an unexpected file: ${entry.name}."
                 }
                 require(entry.name !in entries) {
@@ -612,6 +1060,8 @@ class DailyRebuildBackupManager(
     private data class BackupDocument(
         val manifest: JSONObject,
         val data: JSONObject,
+        val preferencesJson: JSONObject?,
+        val preferences: PortableAppPreferences?,
         val summary: BackupSummary,
         val tables: JSONObject
     )
@@ -627,14 +1077,37 @@ class DailyRebuildBackupManager(
         private const val LIFE_MAINTENANCE_DATABASE_VERSION = 15
         private const val IOP_GROUP_DATABASE_VERSION = 17
         private const val IOP_ATTENDANCE_DATABASE_VERSION = 18
-        const val FORMAT_VERSION = 1
+        const val FORMAT_VERSION = 2
+        private const val MIN_SUPPORTED_FORMAT_VERSION = 1
+        private const val PORTABLE_PREFERENCES_FORMAT_VERSION = 2
         const val FORMAT_NAME = "Daily Rebuild Backup"
 
         private const val MANIFEST_ENTRY = "backup-manifest.json"
         private const val DATA_ENTRY = "daily-rebuild-backup.json"
+        private const val USER_PREFERENCES_ENTRY = "user-preferences.json"
         private const val BLOB_MARKER = "__daily_rebuild_blob_base64"
         private const val MAX_UNCOMPRESSED_BYTES = 100L * 1024L * 1024L
         private const val MAX_EMERGENCY_BACKUPS = 3
+        private const val PORTABLE_SETTINGS_FIELD_COUNT = 16
+        private const val MAX_PREFERENCE_ID_LENGTH = 64
+        private const val MAX_RECENT_SEARCHES = 8
+        private const val MAX_RECENT_SEARCH_LENGTH = 200
+        private const val MAX_IGNORED_SIGNATURES = 500
+        private const val MAX_IGNORED_SIGNATURE_LENGTH = 500
+
+        private val VALID_STATS_RANGES = setOf(
+            "LAST_7_DAYS",
+            "LAST_30_DAYS",
+            "LAST_90_DAYS",
+            "CUSTOM",
+            "ALL_TIME"
+        )
+        private val VALID_WEIGHT_UNITS = setOf("lb", "kg")
+        private val VALID_DISTANCE_UNITS = setOf("mi", "km")
+        private val VALID_WATER_UNITS = setOf("oz", "ml")
+        private val VALID_TEMPERATURE_UNITS = setOf("f", "c")
+        private val VALID_FOOD_MASS_UNITS = setOf("oz", "g")
+        private val VALID_HEIGHT_UNITS = setOf("ft_in", "cm")
 
         /** Parent tables appear before children so linked records insert safely. */
         val INSERT_ORDER = listOf(
