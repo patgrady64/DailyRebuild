@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pgdevhouse.dailyrebuild.data.preferences.DailyRebuildPreferenceIds
 import com.pgdevhouse.dailyrebuild.data.preferences.DailyRebuildPreferences
+import com.pgdevhouse.dailyrebuild.ui.stats.StatsRange
 
 private data class PreferenceOption(
     val id: String,
@@ -64,6 +65,7 @@ private val statsOptions = listOf(
     PreferenceOption(DailyRebuildPreferenceIds.STATS_WATER, "Water"),
     PreferenceOption(DailyRebuildPreferenceIds.STATS_PAIN, "Pain"),
     PreferenceOption(DailyRebuildPreferenceIds.STATS_MOBILITY, "Mobility"),
+    PreferenceOption(DailyRebuildPreferenceIds.STATS_MEETINGS, "Meetings & IOP"),
     PreferenceOption(DailyRebuildPreferenceIds.STATS_HEALTH, "Health measurements"),
     PreferenceOption(DailyRebuildPreferenceIds.STATS_MIGRAINE, "Migraine / visual aura"),
     PreferenceOption(DailyRebuildPreferenceIds.STATS_MAINTENANCE, "Life Maintenance")
@@ -176,7 +178,7 @@ fun CustomizeDailyRebuildScreen(
 
         RebuildSectionCard(
             title = "Statistics Order",
-            subtitle = "Set the order for the expanded statistics release.",
+            subtitle = "Show, hide, and reorder the categories on Stats.",
             accentColor = RebuildBlue
         ) {
             preferences.statsOrder.forEachIndexed { index, id ->
@@ -210,10 +212,39 @@ fun CustomizeDailyRebuildScreen(
                 )
             }
             Text(
-                "The order is saved now and will be used when the expanded Stats cards are added.",
+                "This order controls the category buttons on the expanded Stats screen.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            Text(
+                "Default date range",
+                fontWeight = FontWeight.SemiBold
+            )
+            listOf(
+                StatsRange.LAST_7_DAYS,
+                StatsRange.LAST_30_DAYS,
+                StatsRange.LAST_90_DAYS,
+                StatsRange.ALL_TIME
+            ).chunked(2).forEach { ranges ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ranges.forEach { range ->
+                        FilterChip(
+                            selected = preferences.statsDefaultRange == range.name,
+                            onClick = {
+                                onPreferencesChange(
+                                    preferences.copy(statsDefaultRange = range.name)
+                                )
+                            },
+                            label = { Text(range.label) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
         }
 
         RebuildSectionCard(

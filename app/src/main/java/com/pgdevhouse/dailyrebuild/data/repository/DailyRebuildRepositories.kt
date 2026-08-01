@@ -14,6 +14,7 @@ import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
 import com.pgdevhouse.dailyrebuild.data.local.HealthProfile
 import com.pgdevhouse.dailyrebuild.data.local.IopGroup
+import com.pgdevhouse.dailyrebuild.data.local.IopMissedOccurrence
 import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
 import com.pgdevhouse.dailyrebuild.data.local.LifeMaintenanceLog
 import com.pgdevhouse.dailyrebuild.data.local.MedicationEntry
@@ -47,6 +48,7 @@ class DailyRebuildRepositories private constructor(
     val healthProfile: HealthProfileRepository,
     val lifeMaintenance: LifeMaintenanceRepository,
     val iopGroups: IopGroupRepository,
+    val iopAttendance: IopAttendanceRepository,
     val history: HistoryRepository
 ) {
     companion object {
@@ -66,6 +68,7 @@ class DailyRebuildRepositories private constructor(
                 healthProfile = HealthProfileRepository(database),
                 lifeMaintenance = LifeMaintenanceRepository(database),
                 iopGroups = IopGroupRepository(database),
+                iopAttendance = IopAttendanceRepository(database),
                 history = HistoryRepository(database)
             )
         }
@@ -311,6 +314,29 @@ class IopGroupRepository internal constructor(database: DailyRebuildDatabase) {
     suspend fun delete(group: IopGroup) = dao.delete(group)
     suspend fun getAll(): List<IopGroup> = dao.getAll()
     suspend fun getActive(): List<IopGroup> = dao.getActive()
+}
+
+class IopAttendanceRepository internal constructor(database: DailyRebuildDatabase) {
+    private val dao = database.iopMissedOccurrenceDao()
+
+    suspend fun saveMissed(value: IopMissedOccurrence): Long = dao.save(value)
+
+    suspend fun getAllMissed(): List<IopMissedOccurrence> = dao.getAll()
+
+    suspend fun getMissedBetween(
+        startDate: String,
+        endDate: String
+    ): List<IopMissedOccurrence> = dao.getBetween(startDate, endDate)
+
+    suspend fun getMissedForOccurrence(
+        groupId: Long,
+        occurrenceDate: String
+    ): IopMissedOccurrence? = dao.getForOccurrence(groupId, occurrenceDate)
+
+    suspend fun markAttended(
+        groupId: Long,
+        occurrenceDate: String
+    ) = dao.deleteForOccurrence(groupId, occurrenceDate)
 }
 
 class HealthProfileRepository internal constructor(database: DailyRebuildDatabase) {

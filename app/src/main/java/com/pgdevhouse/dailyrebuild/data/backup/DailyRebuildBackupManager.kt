@@ -387,6 +387,8 @@ class DailyRebuildBackupManager(
                     sourceDatabaseVersion < LIFE_MAINTENANCE_DATABASE_VERSION -> JSONArray()
                 table == "iop_groups" &&
                     sourceDatabaseVersion < IOP_GROUP_DATABASE_VERSION -> defaultIopGroupRows()
+                table == "iop_missed_occurrences" &&
+                    sourceDatabaseVersion < IOP_ATTENDANCE_DATABASE_VERSION -> JSONArray()
                 else -> error("The backup is incomplete: $table is missing.")
             }
 
@@ -620,10 +622,11 @@ class DailyRebuildBackupManager(
     )
 
     companion object {
-        const val DATABASE_VERSION = 17
+        const val DATABASE_VERSION = 18
         private const val MIN_SUPPORTED_DATABASE_VERSION = 14
         private const val LIFE_MAINTENANCE_DATABASE_VERSION = 15
         private const val IOP_GROUP_DATABASE_VERSION = 17
+        private const val IOP_ATTENDANCE_DATABASE_VERSION = 18
         const val FORMAT_VERSION = 1
         const val FORMAT_NAME = "Daily Rebuild Backup"
 
@@ -657,7 +660,8 @@ class DailyRebuildBackupManager(
             "care_appointments",
             "pantry_essentials",
             "life_maintenance_logs",
-            "iop_groups"
+            "iop_groups",
+            "iop_missed_occurrences"
         )
 
         val DELETE_ORDER = INSERT_ORDER.asReversed()

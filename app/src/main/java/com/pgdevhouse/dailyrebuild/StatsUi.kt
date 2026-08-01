@@ -1,11 +1,9 @@
 package com.pgdevhouse.dailyrebuild
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,11 +15,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,18 +38,24 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.pgdevhouse.dailyrebuild.data.preferences.DailyRebuildPreferences
 import com.pgdevhouse.dailyrebuild.ui.stats.StatsChart
 import com.pgdevhouse.dailyrebuild.ui.stats.StatsChartType
 import com.pgdevhouse.dailyrebuild.ui.stats.StatsFilter
+import com.pgdevhouse.dailyrebuild.ui.stats.StatsListItem
 import com.pgdevhouse.dailyrebuild.ui.stats.StatsMetric
 import com.pgdevhouse.dailyrebuild.ui.stats.StatsPoint
 import com.pgdevhouse.dailyrebuild.ui.stats.StatsRange
+import com.pgdevhouse.dailyrebuild.ui.stats.StatsSection
 import com.pgdevhouse.dailyrebuild.ui.stats.StatsUiState
+import java.time.LocalDate
 
 @Composable
 fun StatsScreen(
     state: StatsUiState,
+    preferences: DailyRebuildPreferences,
     onRangeSelected: (StatsRange) -> Unit,
+    onCustomRangeSelected: (LocalDate, LocalDate) -> Unit,
     onFilterSelected: (StatsFilter) -> Unit,
     onPreviousPeriod: () -> Unit,
     onNextPeriod: () -> Unit,
@@ -57,6 +64,20 @@ fun StatsScreen(
     onOpenHistoryDate: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showCustomRange by rememberSaveable { mutableStateOf(false) }
+    val visibleFilters = remember(
+        preferences.statsOrder,
+        preferences.hiddenStatsSections
+    ) {
+        val ordered = preferences.statsOrder.mapNotNull { preferenceId ->
+            StatsFilter.entries.firstOrNull { it.preferenceId == preferenceId }
+        }.filterNot { it.preferenceId in preferences.hiddenStatsSections }
+        listOf(StatsFilter.OVERVIEW) + ordered
+    }
+    val activeFilter = state.selectedFilter.takeIf { it in visibleFilters }
+        ?: StatsFilter.OVERVIEW
+    val section = state.sections[activeFilter] ?: StatsSection()
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -66,14 +87,22 @@ fun StatsScreen(
     ) {
         HubScreenHeader(
             title = "Stats",
-            subtitle = "Averages, comparisons, trends, goals, and data coverage without treating missing days as zero.",
+            subtitle = "Trends, comparisons, and data coverage. Missing days remain different from zero.",
             onOpenHistory = onOpenHistory
         )
 
         StatsChipGrid(
-            labels = StatsRange.entries.map { it.label },
-            selectedIndex = state.selectedRange.ordinal,
-            onSelected = { onRangeSelected(StatsRange.entries[it]) }
+            labels = StatsRange.entries.map(StatsRange::label),
+            selectedIndex = StatsRange.entries.indexOf(state.selectedRange),
+            columns = 3,
+            onSelected = { index ->
+                val range = StatsRange.entries[index]
+                if (range == StatsRange.CUSTOM) {
+                    showCustomRange = true
+                } else {
+                    onRangeSelected(range)
+                }
+            }
         )
 
         StatsPeriodNavigator(
@@ -83,11 +112,19 @@ fun StatsScreen(
             onNext = onNextPeriod
         )
 
+        if (state.comparisonPeriodLabel.isNotBlank()) {
+            Text(
+                text = "Comparisons use ${state.comparisonPeriodLabel}.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
         StatsChipGrid(
-            labels = StatsFilter.entries.map { it.label },
-            selectedIndex = state.selectedFilter.ordinal,
-            columns = 3,
-            onSelected = { onFilterSelected(StatsFilter.entries[it]) }
+            labels = visibleFilters.map(StatsFilter::label),
+            selectedIndex = visibleFilters.indexOf(activeFilter),
+            columns = 2,
+            onSelected = { onFilterSelected(visibleFilters[it]) }
         )
 
         when {
@@ -96,17 +133,32 @@ fun StatsScreen(
                 message = state.errorMessage,
                 onRetry = onRefresh
             )
+            section.isEmpty -> RebuildInsetPanel {
+                Text("No records are available for this category in the selected period.")
+                Text(
+                    "Try another date range or show a different Stats category in Customize Daily Rebuild.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             else -> {
-                StatsMetricGrid(state.selectedSection.metrics)
+                StatsMetricGrid(section.metrics)
 
-                state.selectedSection.charts.forEach { chart ->
+                if (section.highlights.isNotEmpty()) {
+                    StatsHighlights(
+                        items = section.highlights,
+                        onOpenHistoryDate = onOpenHistoryDate
+                    )
+                }
+
+                section.charts.forEach { chart ->
                     InteractiveStatsChart(
                         chart = chart,
                         onOpenHistoryDate = onOpenHistoryDate
                     )
                 }
 
-                state.selectedSection.notes.forEach { note ->
+                section.notes.forEach { note ->
                     RebuildInsetPanel {
                         Text(
                             text = note,
@@ -120,6 +172,146 @@ fun StatsScreen(
 
         Spacer(Modifier.height(12.dp))
     }
+
+    if (showCustomRange) {
+        StatsCustomRangeDialog(
+            initialStart = state.customStartDate,
+            initialEnd = state.customEndDate,
+            onSave = { start, end ->
+                onCustomRangeSelected(start, end)
+                showCustomRange = false
+            },
+            onDismiss = { showCustomRange = false }
+        )
+    }
+}
+
+@Composable
+private fun StatsHighlights(
+    items: List<StatsListItem>,
+    onOpenHistoryDate: (String) -> Unit
+) {
+    RebuildSectionCard(
+        title = "Highlights",
+        subtitle = "Useful details from the selected period.",
+        accentColor = RebuildAmber
+    ) {
+        items.forEach { item ->
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            item.label,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            item.value,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (item.detail.isNotBlank()) {
+                            Text(
+                                item.detail,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    item.historyDate?.let { date ->
+                        TextButton(onClick = { onOpenHistoryDate(date) }) {
+                            Text("Open")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatsCustomRangeDialog(
+    initialStart: LocalDate,
+    initialEnd: LocalDate,
+    onSave: (LocalDate, LocalDate) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var startText by rememberSaveable { mutableStateOf(initialStart.toString()) }
+    var endText by rememberSaveable { mutableStateOf(initialEnd.toString()) }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose custom date range") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Use YYYY-MM-DD. The end date cannot be in the future.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = startText,
+                    onValueChange = {
+                        startText = it
+                        error = null
+                    },
+                    label = { Text("Start date") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = endText,
+                    onValueChange = {
+                        endText = it
+                        error = null
+                    },
+                    label = { Text("End date") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                error?.let {
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val start = runCatching { LocalDate.parse(startText.trim()) }.getOrNull()
+                    val end = runCatching { LocalDate.parse(endText.trim()) }.getOrNull()
+                    error = when {
+                        start == null || end == null -> "Enter both dates in YYYY-MM-DD format."
+                        end.isBefore(start) -> "The end date must be on or after the start date."
+                        end.isAfter(LocalDate.now()) -> "The end date cannot be in the future."
+                        else -> null
+                    }
+                    if (error == null && start != null && end != null) {
+                        onSave(start, end)
+                    }
+                }
+            ) {
+                Text("Apply")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable

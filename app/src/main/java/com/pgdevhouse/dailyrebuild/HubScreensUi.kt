@@ -50,6 +50,7 @@ import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import com.pgdevhouse.dailyrebuild.data.local.PantryEssential
 import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
 import com.pgdevhouse.dailyrebuild.data.local.IopGroup
+import com.pgdevhouse.dailyrebuild.data.local.IopMissedOccurrence
 import com.pgdevhouse.dailyrebuild.data.preferences.DailyRebuildPreferenceIds
 import com.pgdevhouse.dailyrebuild.data.preferences.DailyRebuildPreferences
 import java.time.LocalDate
@@ -1777,9 +1778,11 @@ private fun MobilityActivitySummary(
 fun MeetingsHubScreen(
     weeklyAttendance: List<MeetingAttendance>,
     iopGroups: List<IopGroup>,
+    iopMissedOccurrences: List<IopMissedOccurrence>,
     selectedSection: Int,
     isSaving: Boolean,
     isSavingIop: Boolean,
+    isSavingIopAttendance: Boolean,
     onSectionChange: (Int) -> Unit,
     onOpenHistory: () -> Unit,
     onLogMeeting: () -> Unit,
@@ -1789,6 +1792,8 @@ fun MeetingsHubScreen(
     onViewFullHistory: () -> Unit,
     onSaveIopGroup: (IopGroup) -> Unit,
     onDeleteIopGroup: (IopGroup) -> Unit,
+    onMarkIopMissed: (IopOccurrence, String) -> Unit,
+    onMarkIopAttended: (IopOccurrence) -> Unit,
     modifier: Modifier = Modifier,
     showHeader: Boolean = true
 ) {
@@ -1826,9 +1831,13 @@ fun MeetingsHubScreen(
         } else {
             IopGroupsScreen(
                 groups = iopGroups,
+                missedOccurrences = iopMissedOccurrences,
                 isSaving = isSavingIop,
+                isSavingAttendance = isSavingIopAttendance,
                 onSave = onSaveIopGroup,
-                onDelete = onDeleteIopGroup
+                onDelete = onDeleteIopGroup,
+                onMarkMissed = onMarkIopMissed,
+                onMarkAttended = onMarkIopAttended
             )
         }
         Spacer(Modifier.height(12.dp))

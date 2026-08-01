@@ -434,7 +434,7 @@ private fun BackupCoverageCard(lastBackupTime: Long) {
     RebuildInsetPanel {
         Text("Included", fontWeight = FontWeight.SemiBold)
         Text(
-            "Daily records, foods, saved meals, water, activity snapshots, mobility, pain, measurements, medications, showers, migraines, meetings, appointments, care visits, and pantry essentials."
+            "Daily records, foods, saved meals, water, activity snapshots, mobility, pain, measurements, medications, showers, migraines, meetings, IOP schedules and missed-attendance reasons, appointments, care visits, pantry essentials, and Life Maintenance."
         )
         Text("Not included", fontWeight = FontWeight.SemiBold)
         Text(

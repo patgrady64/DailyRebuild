@@ -85,6 +85,7 @@ import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurementType
 import com.pgdevhouse.dailyrebuild.data.local.LifeMaintenanceLog
 import com.pgdevhouse.dailyrebuild.data.local.LifeMaintenanceTasks
 import com.pgdevhouse.dailyrebuild.data.local.IopGroup
+import com.pgdevhouse.dailyrebuild.data.local.IopMissedOccurrence
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -152,6 +153,7 @@ fun DailyRebuildApp(
     val healthProfileDao = repositories.healthProfile
     val lifeMaintenanceDao = repositories.lifeMaintenance
     val iopGroupDao = repositories.iopGroups
+    val iopAttendanceDao = repositories.iopAttendance
 
     val appPreferencesRepository = remember(context) {
         AppPreferencesRepository(context)
@@ -202,7 +204,7 @@ fun DailyRebuildApp(
         factory = HistoryViewModel.factory(repositories)
     )
     val statsViewModel: StatsViewModel = viewModel(
-        factory = StatsViewModel.factory(repositories)
+        factory = StatsViewModel.factory(repositories, appPreferences)
     )
 
     val healthConnectManager = remember(
@@ -607,6 +609,14 @@ fun DailyRebuildApp(
     }
 
     var isSavingIopGroup by remember {
+        mutableStateOf(false)
+    }
+
+    var iopMissedOccurrences by remember {
+        mutableStateOf<List<IopMissedOccurrence>>(emptyList())
+    }
+
+    var isSavingIopAttendance by remember {
         mutableStateOf(false)
     }
 
@@ -1179,6 +1189,13 @@ fun DailyRebuildApp(
                 userMessage = "Could not load the IOP group schedule."
             ) {
                 iopGroupDao.getAll()
+            } ?: emptyList()
+
+            iopMissedOccurrences = loadFeature(
+                feature = "IOP attendance",
+                userMessage = "Could not load missed IOP groups."
+            ) {
+                iopAttendanceDao.getAllMissed()
             } ?: emptyList()
 
             carePlaces = loadFeature(
@@ -1918,6 +1935,83 @@ fun DailyRebuildApp(
                 )
             } finally {
                 isSavingIopGroup = false
+            }
+        }
+    }
+
+    fun markIopMissed(
+        occurrence: IopOccurrence,
+        reason: String
+    ) {
+        coroutineScope.launch {
+            isSavingIopAttendance = true
+            try {
+                val now = System.currentTimeMillis()
+                val existing = iopAttendanceDao.getMissedForOccurrence(
+                    groupId = occurrence.group.id,
+                    occurrenceDate = occurrence.date.toString()
+                )
+                iopAttendanceDao.saveMissed(
+                    IopMissedOccurrence(
+                        id = existing?.id ?: 0L,
+                        groupId = occurrence.group.id,
+                        occurrenceDate = occurrence.date.toString(),
+                        groupNameSnapshot = occurrence.group.name,
+                        startMinutesSnapshot = occurrence.group.startMinutes,
+                        endMinutesSnapshot = occurrence.group.endMinutes,
+                        reason = reason.trim(),
+                        createdAt = existing?.createdAt ?: now,
+                        updatedAt = now
+                    )
+                )
+                iopMissedOccurrences = iopAttendanceDao.getAllMissed()
+                statsViewModel.refresh()
+                snackbarHostState.showSnackbar(
+                    if (existing == null) {
+                        "IOP group marked missed."
+                    } else {
+                        "Missed reason updated."
+                    }
+                )
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar("Could not update IOP attendance.")
+            } finally {
+                isSavingIopAttendance = false
+            }
+        }
+    }
+
+    fun markIopAttended(occurrence: IopOccurrence) {
+        coroutineScope.launch {
+            isSavingIopAttendance = true
+            try {
+                val existing = iopAttendanceDao.getMissedForOccurrence(
+                    groupId = occurrence.group.id,
+                    occurrenceDate = occurrence.date.toString()
+                )
+                iopAttendanceDao.markAttended(
+                    groupId = occurrence.group.id,
+                    occurrenceDate = occurrence.date.toString()
+                )
+                iopMissedOccurrences = iopAttendanceDao.getAllMissed()
+                statsViewModel.refresh()
+
+                if (existing == null) {
+                    snackbarHostState.showSnackbar("IOP group is already marked attended.")
+                } else {
+                    snackbarHostState.showUndoableDelete(
+                        message = "IOP group changed to attended.",
+                        restoredMessage = "IOP group changed back to missed."
+                    ) {
+                        iopAttendanceDao.saveMissed(existing)
+                        iopMissedOccurrences = iopAttendanceDao.getAllMissed()
+                        statsViewModel.refresh()
+                    }
+                }
+            } catch (exception: Exception) {
+                snackbarHostState.showSnackbar("Could not update IOP attendance.")
+            } finally {
+                isSavingIopAttendance = false
             }
         }
     }
@@ -4539,9 +4633,11 @@ fun DailyRebuildApp(
                         AppNavigationViewModel.LOG_MEETINGS_SECTION -> MeetingsHubScreen(
                             weeklyAttendance = weeklyMeetingAttendance,
                             iopGroups = iopGroups,
+                            iopMissedOccurrences = iopMissedOccurrences,
                             selectedSection = navigationViewModel.selectedMeetingsSection,
                             isSaving = isSavingMeeting,
                             isSavingIop = isSavingIopGroup,
+                            isSavingIopAttendance = isSavingIopAttendance,
                             onSectionChange = navigationViewModel::selectMeetingsSection,
                             onOpenHistory = { openDailyHistory() },
                             onLogMeeting = { showMeetingPickerDialog = true },
@@ -4570,6 +4666,8 @@ fun DailyRebuildApp(
                             },
                             onSaveIopGroup = ::saveIopGroup,
                             onDeleteIopGroup = ::deleteIopGroup,
+                            onMarkIopMissed = ::markIopMissed,
+                            onMarkIopAttended = ::markIopAttended,
                             showHeader = false
                         )
 
@@ -4677,6 +4775,7 @@ fun DailyRebuildApp(
                             onPreferencesChange = { updated ->
                                 appPreferences = updated
                                 appPreferencesRepository.save(updated)
+                                statsViewModel.updatePreferences(updated)
                             }
                         )
                     },
@@ -4688,7 +4787,14 @@ fun DailyRebuildApp(
 
                 else -> StatsScreen(
                     state = statsViewModel.state,
-                    onRangeSelected = statsViewModel::selectRange,
+                    preferences = appPreferences,
+                    onRangeSelected = { range ->
+                        statsViewModel.selectRange(range)
+                        val updated = appPreferences.copy(statsDefaultRange = range.name)
+                        appPreferences = updated
+                        appPreferencesRepository.save(updated)
+                    },
+                    onCustomRangeSelected = statsViewModel::selectCustomRange,
                     onFilterSelected = statsViewModel::selectFilter,
                     onPreviousPeriod = statsViewModel::movePrevious,
                     onNextPeriod = statsViewModel::moveNext,

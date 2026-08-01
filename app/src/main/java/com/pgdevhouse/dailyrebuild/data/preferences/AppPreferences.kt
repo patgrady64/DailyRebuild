@@ -37,6 +37,7 @@ object DailyRebuildPreferenceIds {
     const val STATS_HEALTH = "health"
     const val STATS_MIGRAINE = "migraine"
     const val STATS_MAINTENANCE = "maintenance"
+    const val STATS_MEETINGS = "meetings"
 }
 
 data class DailyRebuildPreferences(
@@ -46,6 +47,7 @@ data class DailyRebuildPreferences(
     val visibleTodaySections: Set<String> = defaultTodaySections,
     val statsOrder: List<String> = defaultStatsOrder,
     val hiddenStatsSections: Set<String> = emptySet(),
+    val statsDefaultRange: String = "LAST_30_DAYS",
     val appointmentRemindersEnabled: Boolean = true,
     val meetingRemindersEnabled: Boolean = false,
     val iopRemindersEnabled: Boolean = false,
@@ -95,6 +97,7 @@ data class DailyRebuildPreferences(
             DailyRebuildPreferenceIds.STATS_WATER,
             DailyRebuildPreferenceIds.STATS_PAIN,
             DailyRebuildPreferenceIds.STATS_MOBILITY,
+            DailyRebuildPreferenceIds.STATS_MEETINGS,
             DailyRebuildPreferenceIds.STATS_HEALTH,
             DailyRebuildPreferenceIds.STATS_MIGRAINE,
             DailyRebuildPreferenceIds.STATS_MAINTENANCE
@@ -156,6 +159,10 @@ class AppPreferencesRepository(
                 KEY_HIDDEN_STATS_SECTIONS,
                 emptySet()
             ),
+            statsDefaultRange = preferences.getString(
+                KEY_STATS_DEFAULT_RANGE,
+                "LAST_30_DAYS"
+            ) ?: "LAST_30_DAYS",
             appointmentRemindersEnabled = preferences.getBoolean(
                 KEY_APPOINTMENT_REMINDERS,
                 true
@@ -185,6 +192,7 @@ class AppPreferencesRepository(
             .putStringSet(KEY_VISIBLE_TODAY_SECTIONS, value.visibleTodaySections)
             .putString(KEY_STATS_ORDER, value.statsOrder.joinToString(SEPARATOR))
             .putStringSet(KEY_HIDDEN_STATS_SECTIONS, value.hiddenStatsSections)
+            .putString(KEY_STATS_DEFAULT_RANGE, value.statsDefaultRange)
             .putBoolean(KEY_APPOINTMENT_REMINDERS, value.appointmentRemindersEnabled)
             .putBoolean(KEY_MEETING_REMINDERS, value.meetingRemindersEnabled)
             .putBoolean(KEY_IOP_REMINDERS, value.iopRemindersEnabled)
@@ -271,6 +279,7 @@ class AppPreferencesRepository(
         private const val KEY_VISIBLE_TODAY_SECTIONS = "visible_today_sections"
         private const val KEY_STATS_ORDER = "stats_order"
         private const val KEY_HIDDEN_STATS_SECTIONS = "hidden_stats_sections"
+        private const val KEY_STATS_DEFAULT_RANGE = "stats_default_range"
         private const val KEY_APPOINTMENT_REMINDERS = "appointment_reminders_enabled"
         private const val KEY_MEETING_REMINDERS = "meeting_reminders_enabled"
         private const val KEY_IOP_REMINDERS = "iop_reminders_enabled"

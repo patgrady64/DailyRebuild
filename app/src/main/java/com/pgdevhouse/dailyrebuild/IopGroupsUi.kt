@@ -17,6 +17,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,9 +31,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pgdevhouse.dailyrebuild.data.local.IopGroup
+import com.pgdevhouse.dailyrebuild.data.local.IopMissedOccurrence
 import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -40,6 +44,60 @@ data class IopOccurrence(
     val group: IopGroup,
     val date: LocalDate
 )
+
+
+/**
+ * Builds scheduled IOP occurrences that have reached the relevant point in
+ * time. Past schedules are automatic attendance; a missed row is the only
+ * exception.
+ */
+fun iopOccurrencesInRange(
+    groups: List<IopGroup>,
+    startDate: LocalDate,
+    endDate: LocalDate,
+    nowDate: LocalDate = LocalDate.now(),
+    nowTime: LocalTime = LocalTime.now(),
+    includeStartedToday: Boolean = false
+): List<IopOccurrence> {
+    if (endDate.isBefore(startDate)) return emptyList()
+
+    return groups.flatMap { group ->
+        val createdDate = runCatching {
+            Instant.ofEpochMilli(group.createdAt)
+                .atZone(ZoneId.systemDefault())
+                .toLocalDate()
+        }.getOrDefault(startDate)
+
+        val updatedDate = runCatching {
+            Instant.ofEpochMilli(group.updatedAt)
+                .atZone(ZoneId.systemDefault())
+                .toLocalDate()
+        }.getOrDefault(endDate)
+        val scheduleEnd = if (group.active) endDate else minOf(endDate, updatedDate)
+        val effectiveStart = maxOf(startDate, createdDate)
+        buildList {
+            var date = effectiveStart
+            while (!date.isAfter(scheduleEnd) && !date.isAfter(nowDate)) {
+                if (date.dayOfWeek.value == group.dayOfWeek) {
+                    val eligible = when {
+                        date.isBefore(nowDate) -> true
+                        date.isAfter(nowDate) -> false
+                        includeStartedToday ->
+                            !nowTime.isBefore(minutesToLocalTime(group.startMinutes))
+                        else ->
+                            !nowTime.isBefore(minutesToLocalTime(group.endMinutes))
+                    }
+                    if (eligible) add(IopOccurrence(group, date))
+                }
+                date = date.plusDays(1)
+            }
+        }
+    }.sortedWith(
+        compareBy<IopOccurrence> { it.date }
+            .thenBy { it.group.startMinutes }
+            .thenBy { it.group.name.lowercase(Locale.US) }
+    )
+}
 
 fun defaultIopGroupSchedule(): List<IopGroup> =
     (DayOfWeek.MONDAY.value..DayOfWeek.THURSDAY.value).map { day ->
@@ -83,14 +141,20 @@ fun findNextIopOccurrence(
 @Composable
 fun IopGroupsScreen(
     groups: List<IopGroup>,
+    missedOccurrences: List<IopMissedOccurrence>,
     isSaving: Boolean,
+    isSavingAttendance: Boolean,
     onSave: (IopGroup) -> Unit,
     onDelete: (IopGroup) -> Unit,
+    onMarkMissed: (IopOccurrence, String) -> Unit,
+    onMarkAttended: (IopOccurrence) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var editingGroup by remember { mutableStateOf<IopGroup?>(null) }
     var showEditor by rememberSaveable { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<IopGroup?>(null) }
+    var occurrenceToMarkMissed by remember { mutableStateOf<IopOccurrence?>(null) }
+    var missedReasonBeingEdited by remember { mutableStateOf("") }
 
     Column(
         modifier = modifier,
@@ -118,6 +182,17 @@ fun IopGroupsScreen(
                 Text("Add IOP Group")
             }
         }
+
+        IopAttendanceSection(
+            groups = groups,
+            missedOccurrences = missedOccurrences,
+            isSaving = isSavingAttendance,
+            onMarkMissed = { occurrence, existingReason ->
+                occurrenceToMarkMissed = occurrence
+                missedReasonBeingEdited = existingReason.orEmpty()
+            },
+            onMarkAttended = onMarkAttended
+        )
 
         if (groups.isEmpty()) {
             RebuildInsetPanel {
@@ -170,6 +245,23 @@ fun IopGroupsScreen(
         )
     }
 
+    occurrenceToMarkMissed?.let { occurrence ->
+        IopMissedReasonDialog(
+            occurrence = occurrence,
+            initialReason = missedReasonBeingEdited,
+            isSaving = isSavingAttendance,
+            onSave = { reason ->
+                onMarkMissed(occurrence, reason)
+                occurrenceToMarkMissed = null
+                missedReasonBeingEdited = ""
+            },
+            onDismiss = {
+                occurrenceToMarkMissed = null
+                missedReasonBeingEdited = ""
+            }
+        )
+    }
+
     pendingDelete?.let { group ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
@@ -198,6 +290,203 @@ fun IopGroupsScreen(
         )
     }
 }
+
+@Composable
+private fun IopAttendanceSection(
+    groups: List<IopGroup>,
+    missedOccurrences: List<IopMissedOccurrence>,
+    isSaving: Boolean,
+    onMarkMissed: (IopOccurrence, String?) -> Unit,
+    onMarkAttended: (IopOccurrence) -> Unit
+) {
+    val today = LocalDate.now()
+    val recent = remember(groups, today) {
+        iopOccurrencesInRange(
+            groups = groups,
+            startDate = today.minusDays(35),
+            endDate = today,
+            includeStartedToday = true
+        ).asReversed().take(16)
+    }
+    val missedByOccurrence = remember(missedOccurrences) {
+        missedOccurrences.associateBy { "${it.groupId}|${it.occurrenceDate}" }
+    }
+
+    RebuildSectionCard(
+        title = "IOP Attendance",
+        subtitle = "Scheduled groups count as attended automatically. Mark only the groups you missed, and record why.",
+        accentColor = RebuildGreen
+    ) {
+        if (recent.isEmpty()) {
+            Text(
+                "Attendance will appear here after a scheduled IOP group begins.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            recent.forEach { occurrence ->
+                val missed = missedByOccurrence[
+                    "${occurrence.group.id}|${occurrence.date}"
+                ]
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    occurrence.group.name,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    "${formatIopAttendanceDate(occurrence.date)} · ${formatTimeRange(occurrence.group.startMinutes, occurrence.group.endMinutes)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Text(
+                                text = if (missed == null) "Attended" else "Missed",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = if (missed == null) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.error
+                                }
+                            )
+                        }
+
+                        if (missed != null) {
+                            Text(
+                                text = "Reason: ${missed.reason}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        if (missed == null) {
+                            OutlinedButton(
+                                onClick = { onMarkMissed(occurrence, null) },
+                                enabled = !isSaving,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Mark Missed")
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { onMarkMissed(occurrence, missed.reason) },
+                                    enabled = !isSaving,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Edit Reason")
+                                }
+                                OutlinedButton(
+                                    onClick = { onMarkAttended(occurrence) },
+                                    enabled = !isSaving,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Mark Attended")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun IopMissedReasonDialog(
+    occurrence: IopOccurrence,
+    initialReason: String,
+    isSaving: Boolean,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var reason by rememberSaveable(occurrence.group.id, occurrence.date, initialReason) {
+        mutableStateOf(initialReason)
+    }
+    var error by rememberSaveable(occurrence.group.id, occurrence.date) {
+        mutableStateOf<String?>(null)
+    }
+
+    val isEditingReason = initialReason.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(if (isEditingReason) "Edit missed reason" else "Mark IOP group missed")
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "${formatIopAttendanceDate(occurrence.date)} · ${formatTimeRange(occurrence.group.startMinutes, occurrence.group.endMinutes)}"
+                )
+                Text(
+                    "A reason is required so the record is intentional and can be corrected later.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = {
+                        reason = it
+                        if (it.isNotBlank()) error = null
+                    },
+                    label = { Text("Why was the group missed?") },
+                    minLines = 3,
+                    isError = error != null,
+                    supportingText = error?.let { message ->
+                        { Text(message) }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val cleaned = reason.trim()
+                    if (cleaned.isBlank()) {
+                        error = "Enter a reason before saving."
+                    } else {
+                        onSave(cleaned)
+                    }
+                },
+                enabled = !isSaving
+            ) {
+                Text(
+                    when {
+                        isSaving -> "Saving…"
+                        isEditingReason -> "Update Reason"
+                        else -> "Save as Missed"
+                    }
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isSaving) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+private fun formatIopAttendanceDate(date: LocalDate): String =
+    date.format(DateTimeFormatter.ofPattern("EEE, MMM d", Locale.US))
 
 @Composable
 private fun IopGroupCard(
