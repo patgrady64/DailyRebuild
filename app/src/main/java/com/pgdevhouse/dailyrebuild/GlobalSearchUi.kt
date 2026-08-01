@@ -105,7 +105,7 @@ fun GlobalSearchScreen(
             singleLine = true,
             shape = RoundedCornerShape(18.dp),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = onSearchSubmitted)
+            keyboardActions = KeyboardActions(onSearch = { onSearchSubmitted() })
         )
 
         Row(
