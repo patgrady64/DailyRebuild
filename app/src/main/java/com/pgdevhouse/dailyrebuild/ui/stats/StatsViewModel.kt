@@ -166,6 +166,7 @@ class StatsViewModel(
                 val period = periodFor(state.selectedRange, state.anchorDate, earliest)
                 val previous = previousPeriod(period, state.selectedRange)
                 val sections = buildSections(raw, period, previous)
+                val dailySteps = buildDailyStepPoints(raw.activity, period)
                 val selectedFilter = state.selectedFilter.takeIf { sections.containsKey(it) }
                     ?: StatsFilter.OVERVIEW
 
@@ -174,6 +175,7 @@ class StatsViewModel(
                     periodLabel = period.label,
                     comparisonPeriodLabel = previous?.label.orEmpty(),
                     canMoveNext = state.selectedRange != StatsRange.ALL_TIME && period.end < LocalDate.now(),
+                    dailySteps = dailySteps,
                     sections = sections,
                     isLoading = false,
                     errorMessage = null
@@ -824,6 +826,28 @@ class StatsViewModel(
         val sign = if (difference > 0.0) "+" else ""
         val suffixText = suffix.takeIf(String::isNotBlank)?.let { " $it" }.orEmpty()
         return "$sign${formatNumber(difference, decimals)}$suffixText vs ${previousPeriod.label}"
+    }
+
+    private fun buildDailyStepPoints(
+        activity: List<DailyActivitySnapshot>,
+        period: DatePeriod
+    ): List<StatsPoint> {
+        val stepsByDate = activity
+            .inPeriod(period) { it.date }
+            .associateBy(DailyActivitySnapshot::date)
+
+        return dateSequence(period.start, period.end).map { date ->
+            val snapshot = stepsByDate[date.toString()]
+            StatsPoint(
+                label = date.format(DateTimeFormatter.ofPattern("EEE, MMM d", Locale.US)),
+                value = snapshot?.steps?.toDouble() ?: 0.0,
+                valueText = snapshot?.steps
+                    ?.let { String.format(Locale.US, "%,d steps", it) }
+                    ?: "No activity data",
+                historyDate = date.toString(),
+                hasData = snapshot != null
+            )
+        }
     }
 
     private fun numericChart(

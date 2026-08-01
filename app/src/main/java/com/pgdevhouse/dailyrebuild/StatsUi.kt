@@ -3,6 +3,8 @@ package com.pgdevhouse.dailyrebuild
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -120,6 +122,16 @@ fun StatsScreen(
             )
         }
 
+        when {
+            state.isLoading -> Unit
+            state.errorMessage != null -> Unit
+            else -> DailyStepsPanel(
+                points = state.dailySteps,
+                periodLabel = state.periodLabel,
+                onOpenHistoryDate = onOpenHistoryDate
+            )
+        }
+
         StatsChipGrid(
             labels = visibleFilters.map(StatsFilter::label),
             selectedIndex = visibleFilters.indexOf(activeFilter),
@@ -183,6 +195,84 @@ fun StatsScreen(
             },
             onDismiss = { showCustomRange = false }
         )
+    }
+}
+
+@Composable
+private fun DailyStepsPanel(
+    points: List<StatsPoint>,
+    periodLabel: String,
+    onOpenHistoryDate: (String) -> Unit
+) {
+    RebuildSectionCard(
+        title = "Steps by day",
+        subtitle = if (periodLabel.isBlank()) {
+            "Every date in the selected period is shown."
+        } else {
+            "$periodLabel · Every date is shown."
+        },
+        accentColor = RebuildBlue
+    ) {
+        if (points.isEmpty()) {
+            Text(
+                text = "No dates are available for this period.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Text(
+                text = "A recorded zero means 0 steps. Missing Health Connect data is shown separately as No activity data.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(
+                    items = points,
+                    key = { it.historyDate ?: it.label }
+                ) { point ->
+                    Surface(
+                        onClick = {
+                            point.historyDate?.let(onOpenHistoryDate)
+                        },
+                        modifier = Modifier.width(126.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (point.hasData) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.58f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                        }
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Text(
+                                text = point.label,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = point.valueText,
+                                style = if (point.hasData) {
+                                    MaterialTheme.typography.titleMedium
+                                } else {
+                                    MaterialTheme.typography.bodyMedium
+                                },
+                                fontWeight = if (point.hasData) FontWeight.Bold else FontWeight.Medium
+                            )
+                            Text(
+                                text = "Open date",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

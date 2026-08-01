@@ -84,6 +84,7 @@ data class StatsUiState(
     val canMoveNext: Boolean = false,
     val isLoading: Boolean = true,
     val errorMessage: String? = null,
+    val dailySteps: List<StatsPoint> = emptyList(),
     val sections: Map<StatsFilter, StatsSection> = emptyMap()
 ) {
     val selectedSection: StatsSection
