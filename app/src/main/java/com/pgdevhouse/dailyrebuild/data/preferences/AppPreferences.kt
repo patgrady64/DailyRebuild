@@ -237,6 +237,25 @@ class AppPreferencesRepository(
             .apply()
     }
 
+    fun loadIgnoredDataQualitySignatures(): Set<String> =
+        preferences.getStringSet(KEY_IGNORED_DATA_QUALITY_SIGNATURES, emptySet())
+            ?.toSet()
+            .orEmpty()
+
+    fun ignoreDataQualitySignature(signature: String) {
+        if (signature.isBlank()) return
+        val updated = loadIgnoredDataQualitySignatures() + signature
+        preferences.edit()
+            .putStringSet(KEY_IGNORED_DATA_QUALITY_SIGNATURES, updated)
+            .apply()
+    }
+
+    fun clearIgnoredDataQualitySignatures() {
+        preferences.edit()
+            .remove(KEY_IGNORED_DATA_QUALITY_SIGNATURES)
+            .apply()
+    }
+
     fun areIopDefaultsInitialized(): Boolean =
         preferences.getBoolean(KEY_IOP_DEFAULTS_INITIALIZED, false)
 
@@ -293,6 +312,8 @@ class AppPreferencesRepository(
         private const val KEY_TODAY_PHASE2_INITIALIZED = "today_phase2_initialized"
 
         private const val KEY_RECENT_SEARCHES = "recent_searches"
+        private const val KEY_IGNORED_DATA_QUALITY_SIGNATURES =
+            "ignored_data_quality_signatures"
         private const val RECENT_SEARCH_SEPARATOR = "\n"
         private const val MAX_RECENT_SEARCHES = 8
     }

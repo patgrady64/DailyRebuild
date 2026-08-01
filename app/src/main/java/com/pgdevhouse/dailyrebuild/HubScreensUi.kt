@@ -94,6 +94,7 @@ data class TodayScreenState(
     val iopOccurrence: IopOccurrence?,
     val repeatShortcuts: TodayShortcutCollection,
     val activityItems: List<TodayActivityItem>,
+    val dataQualityWarnings: List<DataQualityWarning>,
     val preferences: DailyRebuildPreferences,
     val isSaving: Boolean
 )
@@ -116,6 +117,9 @@ data class TodayScreenActions(
     val onRepeatShortcut: (TodayRepeatShortcut, Double) -> Unit,
     val onEditActivityItem: (TodayActivityItem) -> Unit,
     val onDeleteActivityItem: (TodayActivityItem) -> Unit,
+    val onReviewDataQualityWarning: (DataQualityWarning) -> Unit,
+    val onKeepDataQualityWarning: (DataQualityWarning) -> Unit,
+    val onIgnoreDataQualityWarning: (DataQualityWarning) -> Unit,
     val onFoodRecordedChange: (Boolean) -> Unit,
     val onWalkCompletedChange: (Boolean) -> Unit,
     val onPainRecordedChange: (Boolean) -> Unit,
@@ -161,6 +165,13 @@ fun TodayScreen(
         if (DailyRebuildPreferenceIds.TODAY_GLANCE in visibleSections) {
             TodayAtAGlanceCard(state)
         }
+
+        DataQualitySummaryCard(
+            warnings = state.dataQualityWarnings,
+            onReview = actions.onReviewDataQualityWarning,
+            onKeep = actions.onKeepDataQualityWarning,
+            onIgnoreExactValue = actions.onIgnoreDataQualityWarning
+        )
 
         if (DailyRebuildPreferenceIds.TODAY_QUICK_LOG in visibleSections) {
             TodayQuickLogSection(state, actions)

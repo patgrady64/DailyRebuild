@@ -75,6 +75,8 @@ private val statsOptions = listOf(
 fun CustomizeDailyRebuildScreen(
     preferences: DailyRebuildPreferences,
     onPreferencesChange: (DailyRebuildPreferences) -> Unit,
+    ignoredDataQualityValueCount: Int = 0,
+    onResetIgnoredDataQualityValues: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -281,6 +283,34 @@ fun CustomizeDailyRebuildScreen(
                         preferences.copy(iopRemindersEnabled = it)
                     )
                 }
+            )
+        }
+
+        RebuildSectionCard(
+            title = "Data-quality Warnings",
+            subtitle = "Manage exact values you previously chose not to see again.",
+            accentColor = RebuildAmber
+        ) {
+            Text(
+                text = if (ignoredDataQualityValueCount == 0) {
+                    "No exact-value warnings are hidden."
+                } else {
+                    "$ignoredDataQualityValueCount exact-value ${if (ignoredDataQualityValueCount == 1) "choice is" else "choices are"} hidden."
+                },
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(
+                onClick = onResetIgnoredDataQualityValues,
+                enabled = ignoredDataQualityValueCount > 0,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text("Restore Hidden Exact-Value Warnings")
+            }
+            Text(
+                text = "Restoring these choices does not change any records. It only allows matching warnings to appear again.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 

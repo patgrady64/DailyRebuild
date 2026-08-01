@@ -275,6 +275,24 @@ fun DailyRebuildApp(
         SnackbarHostState()
     }
 
+    var dataQualityWarnings by remember {
+        mutableStateOf<List<DataQualityWarning>>(emptyList())
+    }
+
+    var keptDataQualityWarningIds by remember {
+        mutableStateOf<Set<String>>(emptySet())
+    }
+
+    var ignoredDataQualityValueCount by remember {
+        mutableIntStateOf(
+            appPreferencesRepository.loadIgnoredDataQualitySignatures().size
+        )
+    }
+
+    var dataQualityRefreshToken by remember {
+        mutableIntStateOf(0)
+    }
+
     val notificationPermissionLauncher =
         rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
@@ -1654,6 +1672,78 @@ fun DailyRebuildApp(
         }
     }
 
+    /*
+     * Data-quality checks are rebuilt from the database instead of being
+     * stored as records. That keeps them current after edits, deletes, Undo,
+     * restores, and Health/Profile changes without adding another Room table.
+     */
+    LaunchedEffect(
+        todayDate,
+        selectedMainTab,
+        hasLoadedActiveDay,
+        allFoodEntries,
+        savedProducts,
+        careAppointments,
+        careVisits,
+        meetingAttendanceHistory,
+        mobilitySessionsToday,
+        migraineLogs,
+        lifeMaintenanceLogs,
+        plainReusableBottleCount,
+        mioReusableBottleCount,
+        plainDisposableBottleCount,
+        mioDisposableBottleCount,
+        healthFeatureRefreshKey,
+        dayReloadToken,
+        dailyHistoryDays,
+        dataQualityRefreshToken
+    ) {
+        if (!hasLoadedActiveDay) return@LaunchedEffect
+
+        delay(300L)
+
+        try {
+            val allDailyRecords = dailyRecordDao.getAllRecords()
+                .filterNot { it.date == todayDate } +
+                buildCurrentDailyRecord(updatedAt = System.currentTimeMillis())
+
+            val ignoredSignatures =
+                appPreferencesRepository.loadIgnoredDataQualitySignatures()
+
+            val builtWarnings = DataQualityWarningEngine.build(
+                snapshot = DataQualitySnapshot(
+                    dailyRecords = allDailyRecords,
+                    foodEntries = foodDao.getAllEntries(),
+                    foodProducts = foodDao.getAllProducts(),
+                    activitySnapshots = dailyActivityDao.getAllSnapshots(),
+                    mobilitySessions = mobilitySessionDao.getAllSessions(),
+                    showerLogs = showerLogDao.getAllLogs(),
+                    migraineLogs = migraineLogDao.getAllLogs(),
+                    meetingAttendance = meetingDao.getAllAttendance(),
+                    careVisits = careVisitDao.getAllVisits(),
+                    appointments = careAppointmentDao.getAllAppointments(),
+                    healthMeasurements = healthProfileDao.getAllMeasurements(),
+                    medications = healthProfileDao.getMedications(),
+                    lifeMaintenanceLogs = lifeMaintenanceDao.getAllLogs()
+                ),
+                today = runCatching { LocalDate.parse(todayDate) }
+                    .getOrDefault(LocalDate.now()),
+                ignoredSignatures = ignoredSignatures
+            )
+
+            val activeWarningIds = builtWarnings.mapTo(mutableSetOf()) { it.id }
+            keptDataQualityWarningIds =
+                keptDataQualityWarningIds.intersect(activeWarningIds)
+            ignoredDataQualityValueCount = ignoredSignatures.size
+            dataQualityWarnings = builtWarnings.filterNot {
+                it.id in keptDataQualityWarningIds
+            }
+        } catch (_: Exception) {
+            // Data checks must never block the rest of Today from loading.
+            dataQualityWarnings = emptyList()
+        }
+    }
+
     fun refreshMeetingData() {
         coroutineScope.launch {
             try {
@@ -2729,6 +2819,95 @@ fun DailyRebuildApp(
                     snackbarHostState.showSnackbar(message)
                 }
             }
+        }
+    }
+
+    fun reviewDataQualityWarning(warning: DataQualityWarning) {
+        when (warning.target) {
+            DataQualityWarningTarget.FOOD -> {
+                if (warning.date != null && warning.date != todayDate) {
+                    openDailyHistory(warning.date)
+                } else {
+                    navigationViewModel.openLogSection(
+                        AppNavigationViewModel.LOG_FOOD_SECTION
+                    )
+                }
+            }
+
+            DataQualityWarningTarget.SAVED_FOODS -> {
+                navigationViewModel.openLogSection(
+                    AppNavigationViewModel.LOG_FOOD_SECTION
+                )
+                showSavedFoodsDialog = true
+            }
+
+            DataQualityWarningTarget.WATER -> {
+                if (warning.date != null && warning.date != todayDate) {
+                    openDailyHistory(warning.date)
+                } else {
+                    showQuickWaterDialog = true
+                }
+            }
+
+            DataQualityWarningTarget.APPOINTMENTS -> {
+                navigationViewModel.openPlanSection(
+                    AppNavigationViewModel.PLAN_APPOINTMENTS_SECTION
+                )
+            }
+
+            DataQualityWarningTarget.HEALTH -> {
+                navigationViewModel.selectMainTab(
+                    AppNavigationViewModel.HEALTH_TAB
+                )
+            }
+
+            DataQualityWarningTarget.MEETINGS -> {
+                navigationViewModel.openLogSection(
+                    AppNavigationViewModel.LOG_MEETINGS_SECTION
+                )
+            }
+
+            DataQualityWarningTarget.MOBILITY -> {
+                navigationViewModel.openLogSection(
+                    AppNavigationViewModel.LOG_MOVEMENT_SECTION
+                )
+            }
+
+            DataQualityWarningTarget.HISTORY -> {
+                openDailyHistory(warning.date)
+            }
+        }
+    }
+
+    fun keepDataQualityWarning(warning: DataQualityWarning) {
+        keptDataQualityWarningIds = keptDataQualityWarningIds + warning.id
+        dataQualityWarnings = dataQualityWarnings.filterNot { it.id == warning.id }
+    }
+
+    fun ignoreExactDataQualityWarning(warning: DataQualityWarning) {
+        appPreferencesRepository.ignoreDataQualitySignature(warning.signature)
+        keptDataQualityWarningIds = keptDataQualityWarningIds + warning.id
+        dataQualityWarnings = dataQualityWarnings.filterNot { it.id == warning.id }
+        ignoredDataQualityValueCount =
+            appPreferencesRepository.loadIgnoredDataQualitySignatures().size
+
+        coroutineScope.launch {
+            snackbarHostState.showSnackbar(
+                message = "This exact value will no longer trigger that warning."
+            )
+        }
+    }
+
+    fun resetIgnoredDataQualityWarnings() {
+        appPreferencesRepository.clearIgnoredDataQualitySignatures()
+        ignoredDataQualityValueCount = 0
+        keptDataQualityWarningIds = emptySet()
+        dataQualityRefreshToken++
+
+        coroutineScope.launch {
+            snackbarHostState.showSnackbar(
+                message = "Hidden exact-value warnings restored."
+            )
         }
     }
 
@@ -4432,6 +4611,7 @@ fun DailyRebuildApp(
                         iopOccurrence = nextIopOccurrence,
                         repeatShortcuts = todayRepeatShortcuts,
                         activityItems = todayActivityItems,
+                        dataQualityWarnings = dataQualityWarnings,
                         preferences = appPreferences,
                         isSaving = isSaving || isSavingLifeMaintenance || isSavingIopGroup
                     ),
@@ -4585,6 +4765,9 @@ fun DailyRebuildApp(
                                 }
                             }
                         },
+                        onReviewDataQualityWarning = ::reviewDataQualityWarning,
+                        onKeepDataQualityWarning = ::keepDataQualityWarning,
+                        onIgnoreDataQualityWarning = ::ignoreExactDataQualityWarning,
                         onFoodRecordedChange = { foodRecorded = it },
                         onWalkCompletedChange = { walkCompleted = it },
                         onPainRecordedChange = { painRecorded = it },
@@ -4776,7 +4959,9 @@ fun DailyRebuildApp(
                                 appPreferences = updated
                                 appPreferencesRepository.save(updated)
                                 statsViewModel.updatePreferences(updated)
-                            }
+                            },
+                            ignoredDataQualityValueCount = ignoredDataQualityValueCount,
+                            onResetIgnoredDataQualityValues = ::resetIgnoredDataQualityWarnings
                         )
                     },
                     backupContent = {
