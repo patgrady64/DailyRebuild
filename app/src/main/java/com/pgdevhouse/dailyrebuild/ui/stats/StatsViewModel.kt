@@ -332,8 +332,12 @@ class StatsViewModel(
         val currentHighestPainByDate = currentRecords.filter(DailyRecord::painRecorded)
             .associate { it.date to maxOf(it.backPain, it.shinPain).toDouble() }
 
-        val currentSteps = summaryOf(currentActivity.map { it.steps.toDouble() })
-        val previousSteps = summaryOf(previousActivity.map { it.steps.toDouble() })
+        val currentStepsByDate = dailyStepsByDate(currentActivity, current)
+        val previousStepsByDate = previous
+            ?.let { dailyStepsByDate(previousActivity, it) }
+            .orEmpty()
+        val currentSteps = summaryOf(currentStepsByDate.values)
+        val previousSteps = summaryOf(previousStepsByDate.values)
         val currentMobilityMinutes = currentMobility.sumOf { it.elapsedSeconds } / 60.0
         val previousMobilityMinutes = previousMobility.sumOf { it.elapsedSeconds } / 60.0
         val mobilityMinutesByDate = currentMobility.groupBy { it.date }
@@ -425,11 +429,11 @@ class StatsViewModel(
                 countMetric("Mobility sessions", currentMobility.size, previousMobility.size.takeIf { previous != null }, "Completed sessions", previous),
                 valueMetric("Total mobility time", currentMobilityMinutes, previousMobilityMinutes.takeIf { previous != null }, "min", currentMobility.size, previous),
                 valueMetric("Average session", currentMobility.takeIf { it.isNotEmpty() }?.let { currentMobilityMinutes / it.size }, previousMobility.takeIf { it.isNotEmpty() }?.let { previousMobilityMinutes / it.size }, "min", currentMobility.size, previous),
-                averageMetric("Average steps", currentSteps, previousSteps, "steps", days, "activity-data days", previous, 0)
+                averageMetric("Average steps", currentSteps, previousSteps, "steps", days, "selected days", previous, 0)
             ),
             charts = listOf(
                 numericChart("Mobility minutes", "Total completed mobility time each day.", StatsChartType.BAR, current, mobilityMinutesByDate, "min", 0),
-                numericChart("Steps", "Connected activity snapshots; missing days remain blank.", StatsChartType.LINE, current, currentActivity.associate { it.date to it.steps.toDouble() }, "steps", 0)
+                numericChart("Steps", "Every selected day is included; a day without a Fit snapshot counts as 0 steps.", StatsChartType.LINE, current, currentStepsByDate, "steps", 0, treatMissingAsZero = true)
             ),
             highlights = frequentMobilityRoutines(currentMobility),
             notes = listOf("Mobility and connected walking data stay separate so one does not silently substitute for the other.")
@@ -831,22 +835,29 @@ class StatsViewModel(
     private fun buildDailyStepPoints(
         activity: List<DailyActivitySnapshot>,
         period: DatePeriod
-    ): List<StatsPoint> {
-        val stepsByDate = activity
-            .inPeriod(period) { it.date }
-            .associateBy(DailyActivitySnapshot::date)
+    ): List<StatsPoint> = dailyStepsByDate(activity, period).map { (dateText, steps) ->
+        val date = LocalDate.parse(dateText)
+        StatsPoint(
+            label = date.format(DateTimeFormatter.ofPattern("EEE, MMM d", Locale.US)),
+            value = steps,
+            valueText = String.format(Locale.US, "%,d steps", steps.toLong()),
+            historyDate = dateText,
+            hasData = true
+        )
+    }
 
-        return dateSequence(period.start, period.end).map { date ->
-            val snapshot = stepsByDate[date.toString()]
-            StatsPoint(
-                label = date.format(DateTimeFormatter.ofPattern("EEE, MMM d", Locale.US)),
-                value = snapshot?.steps?.toDouble() ?: 0.0,
-                valueText = snapshot?.steps
-                    ?.let { String.format(Locale.US, "%,d steps", it) }
-                    ?: "No activity data",
-                historyDate = date.toString(),
-                hasData = snapshot != null
-            )
+    private fun dailyStepsByDate(
+        activity: List<DailyActivitySnapshot>,
+        period: DatePeriod
+    ): Map<String, Double> {
+        val recordedSteps = activity
+            .inPeriod(period) { it.date }
+            .associate { it.date to it.steps.toDouble() }
+
+        return linkedMapOf<String, Double>().apply {
+            dateSequence(period.start, period.end).forEach { date ->
+                put(date.toString(), recordedSteps[date.toString()] ?: 0.0)
+            }
         }
     }
 

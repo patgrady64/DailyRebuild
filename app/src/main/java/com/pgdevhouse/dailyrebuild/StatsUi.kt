@@ -220,7 +220,7 @@ private fun DailyStepsPanel(
             )
         } else {
             Text(
-                text = "A recorded zero means 0 steps. Missing Health Connect data is shown separately as No activity data.",
+                text = "Every selected day has a step count. When Fit has no data for a day, Daily Rebuild treats that day as 0 steps.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
