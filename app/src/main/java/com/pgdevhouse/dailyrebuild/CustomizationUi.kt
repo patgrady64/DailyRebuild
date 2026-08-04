@@ -44,7 +44,7 @@ private val logSectionOptions = listOf(
 
 private val quickLogOptions = listOf(
     PreferenceOption(DailyRebuildPreferenceIds.QUICK_FOOD, "Food"),
-    PreferenceOption(DailyRebuildPreferenceIds.QUICK_WATER, "Water"),
+    PreferenceOption(DailyRebuildPreferenceIds.QUICK_WATER, "Drinks"),
     PreferenceOption(DailyRebuildPreferenceIds.QUICK_MOBILITY, "Mobility"),
     PreferenceOption(DailyRebuildPreferenceIds.QUICK_PAIN, "Pain"),
     PreferenceOption(DailyRebuildPreferenceIds.QUICK_SHOWER, "Shower"),
@@ -69,7 +69,7 @@ private val todaySectionOptions = listOf(
 
 private val statsOptions = listOf(
     PreferenceOption(DailyRebuildPreferenceIds.STATS_NUTRITION, "Nutrition"),
-    PreferenceOption(DailyRebuildPreferenceIds.STATS_WATER, "Water"),
+    PreferenceOption(DailyRebuildPreferenceIds.STATS_WATER, "Drinks"),
     PreferenceOption(DailyRebuildPreferenceIds.STATS_PAIN, "Pain"),
     PreferenceOption(DailyRebuildPreferenceIds.STATS_MOBILITY, "Mobility"),
     PreferenceOption(DailyRebuildPreferenceIds.STATS_MEETINGS, "Meetings & IOP"),
@@ -454,7 +454,7 @@ fun CustomizeDailyRebuildScreen(
                 onSelected = { onPreferencesChange(preferences.copy(distanceUnit = it)) }
             )
             UnitChoiceRow(
-                label = "Water",
+                label = "Drinks",
                 value = preferences.waterUnit,
                 choices = listOf("oz" to "fl oz", "ml" to "mL"),
                 onSelected = { onPreferencesChange(preferences.copy(waterUnit = it)) }

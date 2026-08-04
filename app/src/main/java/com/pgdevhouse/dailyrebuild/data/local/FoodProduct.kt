@@ -75,6 +75,26 @@ data class FoodProduct(
      */
     val isCondiment: Boolean = false,
 
+    /*
+     * Prepared foods reuse the normal food and nutrition pipeline, but retain
+     * enough context to show where they came from and how trustworthy the
+     * nutrition estimate is. Existing packaged foods keep the defaults.
+     */
+    val sourceType: String = FoodSourceType.PACKAGED,
+
+    val sourceName: String = "",
+
+    val nutritionConfidence: String = NutritionConfidence.EXACT,
+
+    val calorieEstimateLow: Double? = null,
+
+    val calorieEstimateHigh: Double? = null,
+
+    val nutritionNotes: String = "",
+
+    /* One-off takeout can be logged without cluttering Saved Foods. */
+    val isReusable: Boolean = true,
+
     val createdAt: Long =
         System.currentTimeMillis(),
 

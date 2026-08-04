@@ -44,7 +44,12 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.pgdevhouse.dailyrebuild.data.local.DailyActivitySnapshot
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
+import com.pgdevhouse.dailyrebuild.data.local.DrinkDefinition
+import com.pgdevhouse.dailyrebuild.data.local.DrinkEntry
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
+import com.pgdevhouse.dailyrebuild.data.local.FoodSourceType
+import com.pgdevhouse.dailyrebuild.data.local.NutritionConfidence
+import com.pgdevhouse.dailyrebuild.data.local.isPreparedFood
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
 import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
@@ -72,6 +77,7 @@ data class DailyHistoryDay(
     val date: String,
     val record: DailyRecord?,
     val foodEntries: List<FoodLogEntry>,
+    val drinkEntries: List<DrinkEntry> = emptyList(),
     val activitySnapshot: DailyActivitySnapshot? = null,
     val mobilitySessions: List<MobilitySession> = emptyList(),
     val showerLogged: Boolean = false,
@@ -129,10 +135,18 @@ fun DailyHistoryDialog(
     isLoading: Boolean,
     isDeletingDay: Boolean,
     isUpdatingDay: Boolean,
+    drinkDefinitions: List<DrinkDefinition>,
     onAddSavedFood: (DailyHistoryDay) -> Unit,
     onAddSavedMeal: (DailyHistoryDay) -> Unit,
     onAddFoodManually: (DailyHistoryDay) -> Unit,
-    onUpdateWater: (DailyHistoryDay, WaterBottleCounts) -> Unit,
+    onAddPreparedFood: (DailyHistoryDay) -> Unit,
+    onEditPreparedFoodEntry: (DailyHistoryDay, FoodLogEntry) -> Unit,
+    onLogDrinkDefinition: (DailyHistoryDay, DrinkDefinition, Double) -> Unit,
+    onLogCustomDrink: (DailyHistoryDay, DrinkEntry, Boolean) -> Unit,
+    onUpdateDrinkEntry: (DailyHistoryDay, DrinkEntry) -> Unit,
+    onDeleteDrinkEntry: (DailyHistoryDay, DrinkEntry) -> Unit,
+    onSaveDrinkDefinition: (DrinkDefinition) -> Unit,
+    onClearDrinks: (DailyHistoryDay) -> Unit,
     onUpdateFoodEntryQuantity: (DailyHistoryDay, FoodLogEntry, Double) -> Unit,
     onUpdateMealQuantity: (DailyHistoryDay, String, Double) -> Unit,
     onDeleteFoodEntry: (DailyHistoryDay, FoodLogEntry) -> Unit,
@@ -289,9 +303,14 @@ fun DailyHistoryDialog(
                     onAddSavedFood = { onAddSavedFood(selectedDay) },
                     onAddSavedMeal = { onAddSavedMeal(selectedDay) },
                     onAddFoodManually = { onAddFoodManually(selectedDay) },
+                    onAddPreparedFood = { onAddPreparedFood(selectedDay) },
                     onEditWater = { waterEditorDate = selectedDay.date },
                     onRequestEditFoodEntry = { entry ->
-                        foodEntryQuantityEditorId = entry.id
+                        if (entry.isPreparedFood()) {
+                            onEditPreparedFoodEntry(selectedDay, entry)
+                        } else {
+                            foodEntryQuantityEditorId = entry.id
+                        }
                     },
                     onRequestDeleteFoodEntry = { entry ->
                         foodEntryPendingDeletionId = entry.id
@@ -328,12 +347,25 @@ fun DailyHistoryDialog(
                 }
         }
     if (waterEditorDay != null) {
-        HistoricalWaterEditorDialog(
-            day = waterEditorDay,
-            isSaving = isUpdatingDay,
-            onCountsChange = { counts ->
-                onUpdateWater(waterEditorDay, counts)
+        DrinksAndHydrationDialog(
+            date = waterEditorDay.date,
+            entries = waterEditorDay.drinkEntries,
+            definitions = drinkDefinitions,
+            isWorking = isUpdatingDay,
+            onLogDefinition = { definition, amount ->
+                onLogDrinkDefinition(waterEditorDay, definition, amount)
             },
+            onLogCustom = { entry, saveShortcut ->
+                onLogCustomDrink(waterEditorDay, entry, saveShortcut)
+            },
+            onUpdateEntry = { entry ->
+                onUpdateDrinkEntry(waterEditorDay, entry)
+            },
+            onDeleteEntry = { entry ->
+                onDeleteDrinkEntry(waterEditorDay, entry)
+            },
+            onSaveDefinition = onSaveDrinkDefinition,
+            onClearAll = { onClearDrinks(waterEditorDay) },
             onDismiss = { waterEditorDate = null }
         )
     }
@@ -1070,7 +1102,7 @@ private fun historyMarkersFor(day: DailyHistoryDay): List<DailyHistoryMarker> {
         if (day.foodEntries.isNotEmpty() || record?.foodRecorded == true) {
             add(DailyHistoryMarker.FOOD)
         }
-        if (record != null && calculateHistoryWaterOunces(record) > 0.0) {
+        if (historyTotalDrinkOunces(day) > 0.0) {
             add(DailyHistoryMarker.WATER)
         }
         if (record?.painRecorded == true) {
@@ -1121,9 +1153,16 @@ private fun buildHistoryDaySummary(day: DailyHistoryDay): String {
         if (foodParts.isNotEmpty()) parts += foodParts.joinToString(" + ")
     }
 
+    val drinkTotal = historyTotalDrinkOunces(day)
+    if (drinkTotal > 0.0) {
+        val water = historyWaterOunces(day)
+        parts += if (day.drinkEntries.isNotEmpty()) {
+            "${formatHistoryOunces(drinkTotal)} oz drinks (${formatHistoryOunces(water)} oz water)"
+        } else {
+            "${formatHistoryOunces(water)} oz water"
+        }
+    }
     record?.let {
-        val water = calculateHistoryWaterOunces(it)
-        if (water > 0.0) parts += "${formatHistoryOunces(water)} oz water"
         if (it.painRecorded) parts += "pain recorded"
     }
 
@@ -1172,6 +1211,7 @@ private fun DailyHistoryDetailPage(
     onAddSavedFood: () -> Unit,
     onAddSavedMeal: () -> Unit,
     onAddFoodManually: () -> Unit,
+    onAddPreparedFood: () -> Unit,
     onEditWater: () -> Unit,
     onRequestEditFoodEntry: (FoodLogEntry) -> Unit,
     onRequestDeleteFoodEntry: (FoodLogEntry) -> Unit,
@@ -1181,6 +1221,7 @@ private fun DailyHistoryDetailPage(
 ) {
     val hasSavedData =
         day.record != null ||
+            day.drinkEntries.isNotEmpty() ||
             day.activitySnapshot != null ||
             day.mobilitySessions.isNotEmpty() ||
             day.showerLogged ||
@@ -1241,7 +1282,7 @@ private fun DailyHistoryDetailPage(
                     onClick = onEditWater,
                     enabled = !isUpdatingDay,
                     modifier = Modifier.weight(1f)
-                ) { Text("Edit Water") }
+                ) { Text("Edit Drinks") }
                 OutlinedButton(
                     onClick = onAddSavedFood,
                     enabled = !isUpdatingDay,
@@ -1263,6 +1304,11 @@ private fun DailyHistoryDetailPage(
                     modifier = Modifier.weight(1f)
                 ) { Text("Enter Food") }
             }
+            OutlinedButton(
+                onClick = onAddPreparedFood,
+                enabled = !isUpdatingDay,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Takeout / Delivery / Prepared Food") }
             Text(
                 text = "Changes to this date are saved automatically.",
                 style = MaterialTheme.typography.bodySmall,
@@ -1271,20 +1317,22 @@ private fun DailyHistoryDetailPage(
         }
 
         val record = day.record
-        if (record == null) {
+        if (record == null && day.drinkEntries.isEmpty()) {
             RebuildInsetPanel {
                 Text("No daily details yet", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "No water, checklist, pain, medication, or journal details have been recorded for this date. Anything you add here is saved automatically.",
+                    "No drinks, checklist, pain, medication, or journal details have been recorded for this date. Anything you add here is saved automatically.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         } else {
-            HistoryChecklistCard(record)
-            HistoryWaterCard(record)
-            HistoryPainCard(record)
-            HistoryMedicationCard(record)
+            record?.let {
+                HistoryChecklistCard(it)
+                HistoryPainCard(it)
+                HistoryMedicationCard(it)
+            }
+            HistoryDrinksCard(day)
         }
 
         day.activitySnapshot?.let {
@@ -1333,6 +1381,7 @@ private fun DailyHistoryDetailPage(
 
         HistoryFoodCard(
             entries = day.foodEntries,
+            drinkEntries = day.drinkEntries,
             isUpdating = isUpdatingDay,
             onRequestEditEntry = onRequestEditFoodEntry,
             onRequestDeleteEntry = onRequestDeleteFoodEntry,
@@ -2029,47 +2078,72 @@ private fun HistoryChecklistCard(
 }
 
 @Composable
-private fun HistoryWaterCard(
-    record: DailyRecord
+private fun HistoryDrinksCard(
+    day: DailyHistoryDay
 ) {
-    val totalOunces =
-        calculateHistoryWaterOunces(
-            record
-        )
+    val totalOunces = historyTotalDrinkOunces(day)
+    val waterOunces = historyWaterOunces(day)
+    val otherOunces = (totalOunces - waterOunces).coerceAtLeast(0.0)
 
     HistorySectionCard(
-        title = "Water"
+        title = "Drinks"
     ) {
         Text(
-            text =
-                "Total: ${formatHistoryOunces(totalOunces)} oz",
+            text = "Total: ${formatHistoryOunces(totalOunces)} oz",
             fontWeight = FontWeight.SemiBold
         )
-
-        HistoryCountLine(
-            label = "24 oz plain water",
-            count = record.plainReusableBottleCount
-        )
-        HistoryCountLine(
-            label = "24 oz MiO water",
-            count = record.mioReusableBottleCount
-        )
-        HistoryCountLine(
-            label = "16.9 oz plain water",
-            count = record.plainDisposableBottleCount
-        )
-        HistoryCountLine(
-            label = "16.9 oz MiO water",
-            count = record.mioDisposableBottleCount
+        Text(
+            text = "Water ${formatHistoryOunces(waterOunces)} oz · Other ${formatHistoryOunces(otherOunces)} oz",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        if (
-            record.plainReusableBottleCount == 0 &&
-            record.mioReusableBottleCount == 0 &&
-            record.plainDisposableBottleCount == 0 &&
-            record.mioDisposableBottleCount == 0
-        ) {
-            Text("No water bottles recorded.")
+        if (day.drinkEntries.isNotEmpty()) {
+            day.drinkEntries.sortedBy(DrinkEntry::consumedAt).forEach { entry ->
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                ) {
+                    Text(
+                        "${entry.drinkNameSnapshot} · ${formatHistoryOunces(entry.amountFlOz)} oz",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        buildString {
+                            append(formatDrinkHistoryTime(entry.consumedAt))
+                            if (entry.calories > 0.0) append(" · ${formatHistoryOunces(entry.calories)} cal")
+                            if (entry.caffeineMilligrams > 0.0) append(" · ${formatHistoryOunces(entry.caffeineMilligrams)} mg caffeine")
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (entry.notes.isNotBlank()) {
+                        Text(entry.notes, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            val legacyOunces = calculateHistoryWaterOunces(day.record)
+            if (legacyOunces > 0.0) {
+                Text(
+                    "Original water counters · ${formatHistoryOunces(legacyOunces)} oz",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            val record = day.record
+            if (record != null && calculateHistoryWaterOunces(record) > 0.0) {
+                Text(
+                    "Legacy bottle-counter data",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                HistoryCountLine("24 oz plain water", record.plainReusableBottleCount)
+                HistoryCountLine("24 oz MiO water", record.mioReusableBottleCount)
+                HistoryCountLine("16.9 oz plain water", record.plainDisposableBottleCount)
+                HistoryCountLine("16.9 oz MiO water", record.mioDisposableBottleCount)
+            } else {
+                Text("No drinks recorded.")
+            }
         }
     }
 }
@@ -2167,18 +2241,26 @@ private fun HistoryMedicationCard(
 @Composable
 private fun HistoryFoodCard(
     entries: List<FoodLogEntry>,
+    drinkEntries: List<DrinkEntry>,
     isUpdating: Boolean,
     onRequestEditEntry: (FoodLogEntry) -> Unit,
     onRequestDeleteEntry: (FoodLogEntry) -> Unit,
     onRequestEditMeal: (String) -> Unit,
     onRequestDeleteMeal: (String) -> Unit
 ) {
+    val drinkCalories = drinkEntries.sumOf(DrinkEntry::calories)
+    val drinkProtein = drinkEntries.sumOf(DrinkEntry::proteinGrams)
+    val drinkCarbohydrates = drinkEntries.sumOf(DrinkEntry::carbohydrateGrams)
+    val drinkSugar = drinkEntries.sumOf(DrinkEntry::sugarGrams)
+    val hasDrinkNutrition =
+        drinkCalories > 0.0 || drinkProtein > 0.0 ||
+            drinkCarbohydrates > 0.0 || drinkSugar > 0.0
     val totalCalories =
-        entries.sumOf { it.calories }
+        entries.sumOf { it.calories } + drinkCalories
     val totalProtein =
-        entries.sumOf { it.proteinGrams }
+        entries.sumOf { it.proteinGrams } + drinkProtein
     val totalCarbohydrates =
-        entries.sumOf { it.carbohydrateGrams }
+        entries.sumOf { it.carbohydrateGrams } + drinkCarbohydrates
     val totalFat =
         entries.sumOf { it.fatGrams }
     val totalSodium =
@@ -2201,8 +2283,8 @@ private fun HistoryFoodCard(
     HistorySectionCard(
         title = "Food and Nutrition"
     ) {
-        if (entries.isEmpty()) {
-            Text("No food recorded.")
+        if (entries.isEmpty() && !hasDrinkNutrition) {
+            Text("No food or nutrition-bearing drinks recorded.")
         } else {
             Text(
                 text =
@@ -2216,12 +2298,23 @@ private fun HistoryFoodCard(
                         "${formatHistoryNumber(totalCarbohydrates)} g carbs"
             )
             Text(
-                text =
-                    "${formatHistoryNumber(totalFat)} g fat  •  " +
-                        "${formatHistoryNumber(totalSodium)} mg sodium"
+                text = buildString {
+                    append("${formatHistoryNumber(totalFat)} g fat  •  ")
+                    append("${formatHistoryNumber(totalSodium)} mg sodium")
+                    if (drinkSugar > 0.0) {
+                        append("  •  ${formatHistoryNumber(drinkSugar)} g drink sugar")
+                    }
+                }
             )
+            if (hasDrinkNutrition) {
+                Text(
+                    "Nutrition totals include recorded drinks.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
-            HorizontalDivider(
+            if (entries.isNotEmpty()) HorizontalDivider(
                 modifier = Modifier.padding(
                     vertical = 8.dp
                 )
@@ -2352,18 +2445,45 @@ private fun HistoryFoodEntry(
         fontWeight = FontWeight.SemiBold
     )
     Text(
-        text =
-            "${formatHistoryNumber(entry.quantity)} ${entry.unit}  •  " +
-                "${formatHistoryNumber(entry.calories)} calories",
+        text = buildString {
+            append("${formatHistoryNumber(entry.quantity)} ${entry.unit}")
+            if (
+                entry.isPreparedFood() &&
+                entry.nutritionConfidenceSnapshot == NutritionConfidence.UNKNOWN
+            ) {
+                append("  •  Nutrition not estimated")
+            } else {
+                append("  •  ${formatHistoryNumber(entry.calories)} calories")
+            }
+        },
         style = MaterialTheme.typography.bodySmall
     )
+    if (entry.isPreparedFood()) {
+        Text(
+            text = listOf(
+                entry.sourceNameSnapshot,
+                FoodSourceType.label(entry.sourceTypeSnapshot),
+                NutritionConfidence.label(entry.nutritionConfidenceSnapshot)
+            ).filter(String::isNotBlank).joinToString(" · "),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+        if (entry.calorieEstimateLow != null || entry.calorieEstimateHigh != null) {
+            Text(
+                text = "Likely ${formatHistoryNumber(entry.calorieEstimateLow ?: entry.calories)}–" +
+                    "${formatHistoryNumber(entry.calorieEstimateHigh ?: entry.calories)} calories",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         TextButton(
             onClick = onRequestEdit,
             enabled = !isUpdating
-        ) { Text("Edit quantity") }
+        ) { Text(if (entry.isPreparedFood()) "Edit details" else "Edit quantity") }
 
         TextButton(
             onClick = onRequestDelete,
@@ -2442,6 +2562,21 @@ private fun HistoryCountLine(
         Text("$label × $count")
     }
 }
+
+private fun historyTotalDrinkOunces(day: DailyHistoryDay): Double =
+    day.drinkEntries.sumOf { it.amountFlOz.coerceAtLeast(0.0) } +
+        calculateHistoryWaterOunces(day.record)
+
+private fun historyWaterOunces(day: DailyHistoryDay): Double =
+    day.drinkEntries.filter(DrinkEntry::countsAsWater)
+        .sumOf { it.amountFlOz.coerceAtLeast(0.0) } +
+        calculateHistoryWaterOunces(day.record)
+
+private fun formatDrinkHistoryTime(consumedAt: Long): String = runCatching {
+    Instant.ofEpochMilli(consumedAt)
+        .atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("h:mm a", Locale.US))
+}.getOrDefault("")
 
 private fun calculateHistoryWaterOunces(
     record: DailyRecord?
@@ -2548,6 +2683,7 @@ private fun dayMatchesHistoryFilter(
         DailyHistoryFilter.ALL -> true
         DailyHistoryFilter.FOOD ->
             day.foodEntries.isNotEmpty() ||
+                day.drinkEntries.any(DrinkEntry::countsAsFood) ||
                 record?.foodRecorded == true
         DailyHistoryFilter.MOBILITY ->
             day.activitySnapshot?.let {

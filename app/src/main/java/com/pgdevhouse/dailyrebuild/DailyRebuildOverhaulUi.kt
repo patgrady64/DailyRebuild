@@ -107,7 +107,7 @@ fun DailyRebuildLogScreen(
 
     val (title, subtitle) = when (selectedSection) {
         AppNavigationViewModel.LOG_FOOD_SECTION ->
-            "Food & Water" to "Log food, meals, condiments, and hydration."
+            "Food & Drinks" to "Log food, meals, condiments, drinks, and hydration."
         AppNavigationViewModel.LOG_MOVEMENT_SECTION ->
             "Movement" to "Walking, connected activity, mobility routines, and completed sessions."
         AppNavigationViewModel.LOG_MEETINGS_SECTION ->
@@ -172,7 +172,7 @@ private fun LogHomeScreen(
                         add(LogActionTile("Food", "Foods, meals, condiments", RebuildBlue) {
                             onSelectSection(AppNavigationViewModel.LOG_FOOD_SECTION)
                         })
-                        add(LogActionTile("Water", "Add a bottle", RebuildBlue, onLogWater))
+                        add(LogActionTile("Drinks", "Add any beverage", RebuildBlue, onLogWater))
                     }
                     if (DailyRebuildPreferenceIds.LOG_HEALTH in enabledSections) {
                         add(LogActionTile("Pain", "Back and shin", RebuildAmber, onLogPain))

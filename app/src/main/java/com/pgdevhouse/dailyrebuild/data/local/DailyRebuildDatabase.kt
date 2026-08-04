@@ -33,8 +33,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         LifeMaintenanceLog::class,
         IopGroup::class,
         IopMissedOccurrence::class,
+        DrinkDefinition::class,
+        DrinkEntry::class,
+        PreparedFoodLeftover::class,
     ],
-    version = 19,
+    version = 21,
     exportSchema = false
 )
 abstract class DailyRebuildDatabase :
@@ -234,7 +237,9 @@ abstract class DailyRebuildDatabase :
                                 MIGRATION_15_16,
                                 MIGRATION_16_17,
                                 MIGRATION_17_18,
-                                MIGRATION_18_19
+                                MIGRATION_18_19,
+                                MIGRATION_19_20,
+                                MIGRATION_20_21
                             )
                             .build()
 
@@ -367,4 +372,8 @@ abstract class DailyRebuildDatabase :
     abstract fun iopGroupDao(): IopGroupDao
 
     abstract fun iopMissedOccurrenceDao(): IopMissedOccurrenceDao
+
+    abstract fun drinkDao(): DrinkDao
+
+    abstract fun preparedFoodLeftoverDao(): PreparedFoodLeftoverDao
 }

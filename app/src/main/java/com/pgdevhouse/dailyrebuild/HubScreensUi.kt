@@ -75,6 +75,8 @@ data class TodayScreenState(
     val proteinGrams: Double,
     val calorieGoal: Int?,
     val waterOunces: Double,
+    val totalFluidOunces: Double,
+    val otherDrinkOunces: Double,
     val showerDatesThisWeek: List<String>,
     val showeredToday: Boolean,
     val showersThisWeek: Int,
@@ -346,7 +348,7 @@ private fun TodayAtAGlanceCard(
 
     RebuildSectionCard(
         title = "Today at a Glance",
-        subtitle = "Steps, water, food, and pain in one compact view.",
+        subtitle = "Steps, drinks, food, and pain in one compact view.",
         accentColor = RebuildBlue
     ) {
         Row(
@@ -361,12 +363,16 @@ private fun TodayAtAGlanceCard(
                 color = MaterialTheme.colorScheme.primaryContainer
             )
             TodayMetricTile(
-                label = "Water",
+                label = "Drinks",
                 value = formatPreferredWater(
-                    state.waterOunces,
+                    state.totalFluidOunces,
                     state.preferences.waterUnit
                 ),
-                supporting = if (state.waterOunces > 0.0) "Recorded" else "Not logged",
+                supporting = if (state.totalFluidOunces > 0.0) {
+                    "Water ${formatPreferredWater(state.waterOunces, state.preferences.waterUnit)} · Other ${formatPreferredWater(state.otherDrinkOunces, state.preferences.waterUnit)}"
+                } else {
+                    "Not logged"
+                },
                 modifier = Modifier.weight(1f),
                 color = MaterialTheme.colorScheme.secondaryContainer
             )
@@ -516,11 +522,11 @@ private fun TodayQuickLogButton(
             accent = RebuildBlue
         }
         DailyRebuildPreferenceIds.QUICK_WATER -> {
-            label = "Water"
-            supporting = if (state.waterOunces > 0.0) {
-                formatPreferredWater(state.waterOunces, state.preferences.waterUnit)
+            label = "Drinks"
+            supporting = if (state.totalFluidOunces > 0.0) {
+                formatPreferredWater(state.totalFluidOunces, state.preferences.waterUnit)
             } else {
-                "Add a bottle"
+                "Add water or another drink"
             }
             enabled = true
             onClick = actions.onOpenWater
@@ -1153,11 +1159,11 @@ private fun TodayPriorityCard(
             button = "Open Food"
             action = actions.onOpenFood
         }
-        state.waterOunces <= 0.0 &&
+        state.totalFluidOunces <= 0.0 &&
             DailyRebuildPreferenceIds.LOG_FOOD in state.preferences.enabledLogSections -> {
-            title = "Add today’s first water"
-            message = "No water has been recorded yet."
-            button = "Add Water"
+            title = "Add today’s first drink"
+            message = "No drinks have been recorded yet."
+            button = "Log Drink"
             action = actions.onOpenWater
         }
         !state.walkCompleted &&
@@ -1465,10 +1471,18 @@ private fun MedicationCheckPanel(
 data class FoodHubState(
     val selectedSection: Int,
     val totalWaterOunces: Double,
-    val totalBottleCount: Int,
+    val totalDrinkOunces: Double,
+    val otherDrinkOunces: Double,
+    val totalDrinkCount: Int,
+    val drinkCalories: Double,
+    val drinkProteinGrams: Double,
+    val drinkCarbohydrateGrams: Double,
+    val drinkSugarGrams: Double,
     val entries: List<FoodLogEntry>,
     val savedFoodCount: Int,
     val savedMealCount: Int,
+    val preparedFoodCount: Int,
+    val leftoverCount: Int,
     val lastScannedBarcode: String?,
     val isScanningBarcode: Boolean,
     val currentCalorieGoal: Int?,
@@ -1482,10 +1496,12 @@ data class FoodHubActions(
     val onAddWater: () -> Unit,
     val onScanFood: () -> Unit,
     val onAddFoodManually: () -> Unit,
+    val onOpenPreparedFood: () -> Unit,
     val onOpenSavedFoods: () -> Unit,
     val onBuildMeal: () -> Unit,
     val onOpenSavedMeals: () -> Unit,
     val onUpdateEntryQuantity: (FoodLogEntry, Double) -> Unit,
+    val onEditPreparedEntry: (FoodLogEntry) -> Unit,
     val onUpdateMealQuantity: (String, Double) -> Unit,
     val onDeleteEntry: (FoodLogEntry) -> Unit,
     val onDeleteMealLog: (String) -> Unit,
@@ -1530,21 +1546,31 @@ fun FoodHubScreen(
             0 -> {
                 FoodHydrationCard(
                     totalWaterOunces = state.totalWaterOunces,
-                    totalBottleCount = state.totalBottleCount,
+                    totalDrinkOunces = state.totalDrinkOunces,
+                    otherDrinkOunces = state.otherDrinkOunces,
+                    totalDrinkCount = state.totalDrinkCount,
                     onAddWater = actions.onAddWater
                 )
                 FoodSection(
                     entries = state.entries,
+                    drinkCalories = state.drinkCalories,
+                    drinkProteinGrams = state.drinkProteinGrams,
+                    drinkCarbohydrateGrams = state.drinkCarbohydrateGrams,
+                    drinkSugarGrams = state.drinkSugarGrams,
                     savedFoodCount = state.savedFoodCount,
                     savedMealCount = state.savedMealCount,
+                    preparedFoodCount = state.preparedFoodCount,
+                    leftoverCount = state.leftoverCount,
                     lastScannedBarcode = state.lastScannedBarcode,
                     isScanningBarcode = state.isScanningBarcode,
                     onScanFood = actions.onScanFood,
                     onAddFoodManually = actions.onAddFoodManually,
+                    onOpenPreparedFood = actions.onOpenPreparedFood,
                     onOpenSavedFoods = actions.onOpenSavedFoods,
                     onBuildMeal = actions.onBuildMeal,
                     onOpenSavedMeals = actions.onOpenSavedMeals,
                     onUpdateQuantity = actions.onUpdateEntryQuantity,
+                    onEditPreparedEntry = actions.onEditPreparedEntry,
                     onUpdateMealQuantity = actions.onUpdateMealQuantity,
                     onDeleteEntry = actions.onDeleteEntry,
                     onDeleteMealLog = actions.onDeleteMealLog

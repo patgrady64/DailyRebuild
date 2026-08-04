@@ -25,21 +25,23 @@ private const val WEEKLY_SHOWER_MINIMUM = 2
 private const val WEEKLY_SHOWER_PREFERRED = 3
 
 /**
- * Compact hydration entry point for the Food tab.
+ * Compact drinks and hydration entry point for the Food tab.
  *
- * It deliberately opens the same water dialog as Home so both locations use
- * one source of truth and one set of bottle counters.
+ * It opens the same logger as Today so beverage definitions, nutrition, and
+ * timestamped entries remain one source of truth.
  */
 @Composable
 fun FoodHydrationCard(
     totalWaterOunces: Double,
-    totalBottleCount: Int,
+    totalDrinkOunces: Double,
+    otherDrinkOunces: Double,
+    totalDrinkCount: Int,
     onAddWater: () -> Unit
 ) {
     RebuildSectionCard(
-        title = "Hydration today",
+        title = "Drinks today",
         subtitle =
-            "Water is available here because it is part of today’s intake.",
+            "Track water, coffee, soda, nutrition drinks, and custom containers.",
         accentColor = RebuildBlue,
         trailing = {
             TextButton(
@@ -56,33 +58,32 @@ fun FoodHydrationCard(
         ) {
             RebuildMetricPill(
                 label = "water",
-                value =
-                    "${formatHydrationOunces(totalWaterOunces)} oz",
+                value = "${formatHydrationOunces(totalWaterOunces)} oz",
                 modifier = Modifier.weight(1f),
-                color =
-                    MaterialTheme.colorScheme
-                        .primaryContainer
+                color = MaterialTheme.colorScheme.primaryContainer
             )
 
             RebuildMetricPill(
-                label = "bottles",
-                value = totalBottleCount.toString(),
+                label = "other",
+                value = "${formatHydrationOunces(otherDrinkOunces)} oz",
                 modifier = Modifier.weight(1f),
-                color =
-                    MaterialTheme.colorScheme
-                        .secondaryContainer,
-                contentColor =
-                    MaterialTheme.colorScheme
-                        .onSecondaryContainer
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
             )
         }
+
+        Text(
+            text = "$totalDrinkCount entr${if (totalDrinkCount == 1) "y" else "ies"} · ${formatHydrationOunces(totalDrinkOunces)} oz total",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
         Button(
             onClick = onAddWater,
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp)
         ) {
-            Text("Add Water")
+            Text("Log a Drink")
         }
     }
 }

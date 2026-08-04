@@ -9,6 +9,8 @@ import com.pgdevhouse.dailyrebuild.data.local.CareVisit
 import com.pgdevhouse.dailyrebuild.data.local.DailyActivitySnapshot
 import com.pgdevhouse.dailyrebuild.data.local.DailyRebuildDatabase
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
+import com.pgdevhouse.dailyrebuild.data.local.DrinkDefinition
+import com.pgdevhouse.dailyrebuild.data.local.DrinkEntry
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
@@ -21,6 +23,7 @@ import com.pgdevhouse.dailyrebuild.data.local.MedicationEntry
 import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import com.pgdevhouse.dailyrebuild.data.local.PantryEssential
+import com.pgdevhouse.dailyrebuild.data.local.PreparedFoodLeftover
 import com.pgdevhouse.dailyrebuild.data.local.SavedMeal
 import com.pgdevhouse.dailyrebuild.data.local.SavedMealIngredient
 import com.pgdevhouse.dailyrebuild.data.local.SavedMealWithIngredients
@@ -49,6 +52,8 @@ class DailyRebuildRepositories private constructor(
     val lifeMaintenance: LifeMaintenanceRepository,
     val iopGroups: IopGroupRepository,
     val iopAttendance: IopAttendanceRepository,
+    val drinks: DrinkRepository,
+    val preparedFoods: PreparedFoodRepository,
     val history: HistoryRepository
 ) {
     companion object {
@@ -69,6 +74,8 @@ class DailyRebuildRepositories private constructor(
                 lifeMaintenance = LifeMaintenanceRepository(database),
                 iopGroups = IopGroupRepository(database),
                 iopAttendance = IopAttendanceRepository(database),
+                drinks = DrinkRepository(database),
+                preparedFoods = PreparedFoodRepository(database),
                 history = HistoryRepository(database)
             )
         }
@@ -91,6 +98,9 @@ class FoodRepository internal constructor(database: DailyRebuildDatabase) {
     suspend fun getProductById(productId: Long): FoodProduct? = dao.getProductById(productId)
     suspend fun getProductByBarcode(barcode: String): FoodProduct? = dao.getProductByBarcode(barcode)
     suspend fun getAllProducts(): List<FoodProduct> = dao.getAllProducts()
+
+    suspend fun getRecentPreparedProducts(limit: Int = 12): List<FoodProduct> =
+        dao.getRecentPreparedProducts(limit)
     suspend fun getFavoriteProducts(): List<FoodProduct> = dao.getFavoriteProducts()
     suspend fun addFoodEntry(entry: FoodLogEntry): Long = dao.addFoodEntry(entry)
     suspend fun updateFoodEntry(entry: FoodLogEntry): Int = dao.updateFoodEntry(entry)
@@ -357,6 +367,70 @@ class HealthProfileRepository internal constructor(database: DailyRebuildDatabas
 }
 
 /** Cross-feature, transaction-safe operations used by global History. */
+
+class DrinkRepository internal constructor(database: DailyRebuildDatabase) {
+    private val dao = database.drinkDao()
+
+    suspend fun insertDefinition(definition: DrinkDefinition): Long =
+        dao.insertDefinition(definition)
+
+    suspend fun updateDefinition(definition: DrinkDefinition) =
+        dao.updateDefinition(definition)
+
+    suspend fun deleteDefinition(definition: DrinkDefinition) =
+        dao.deleteDefinition(definition)
+
+    suspend fun getActiveDefinitions(): List<DrinkDefinition> =
+        dao.getActiveDefinitions()
+
+    suspend fun getAllDefinitions(): List<DrinkDefinition> =
+        dao.getAllDefinitions()
+
+    suspend fun getDefinitionById(id: Long): DrinkDefinition? =
+        dao.getDefinitionById(id)
+
+    suspend fun insertEntry(entry: DrinkEntry): Long =
+        dao.insertEntry(entry)
+
+    suspend fun updateEntry(entry: DrinkEntry) =
+        dao.updateEntry(entry)
+
+    suspend fun deleteEntry(entry: DrinkEntry) =
+        dao.deleteEntry(entry)
+
+    suspend fun deleteEntryById(id: Long) =
+        dao.deleteEntryById(id)
+
+    suspend fun deleteEntriesForDate(date: String) =
+        dao.deleteEntriesForDate(date)
+
+    suspend fun getEntriesForDate(date: String): List<DrinkEntry> =
+        dao.getEntriesForDate(date)
+
+    suspend fun getEntriesBetween(startDate: String, endDate: String): List<DrinkEntry> =
+        dao.getEntriesBetween(startDate, endDate)
+
+    suspend fun getAllEntries(): List<DrinkEntry> =
+        dao.getAllEntries()
+}
+
+class PreparedFoodRepository internal constructor(database: DailyRebuildDatabase) {
+    private val dao = database.preparedFoodLeftoverDao()
+
+    suspend fun insert(leftover: PreparedFoodLeftover): Long = dao.insert(leftover)
+    suspend fun update(leftover: PreparedFoodLeftover): Int = dao.update(leftover)
+    suspend fun save(leftover: PreparedFoodLeftover): Long = dao.save(leftover)
+    suspend fun delete(leftover: PreparedFoodLeftover) = dao.delete(leftover)
+    suspend fun getById(id: Long): PreparedFoodLeftover? = dao.getById(id)
+    suspend fun getByOriginEntryId(entryId: Long): PreparedFoodLeftover? =
+        dao.getByOriginEntryId(entryId)
+    suspend fun deleteByOriginEntryId(entryId: Long): Int =
+        dao.deleteByOriginEntryId(entryId)
+    suspend fun deleteByOriginDate(date: String): Int = dao.deleteByOriginDate(date)
+    suspend fun getAvailable(): List<PreparedFoodLeftover> = dao.getAvailable()
+    suspend fun getAll(): List<PreparedFoodLeftover> = dao.getAll()
+}
+
 class HistoryRepository internal constructor(
     private val database: DailyRebuildDatabase
 ) {
@@ -364,7 +438,9 @@ class HistoryRepository internal constructor(
         database.dailyRecordDao().getRecordByDate(date)?.let { record ->
             database.dailyRecordDao().deleteRecord(record)
         }
+        database.preparedFoodLeftoverDao().deleteByOriginDate(date)
         database.foodDao().deleteEntriesForDate(date)
+        database.drinkDao().deleteEntriesForDate(date)
         database.dailyActivityDao().getSnapshotByDate(date)?.let { snapshot ->
             database.dailyActivityDao().deleteSnapshot(snapshot)
         }

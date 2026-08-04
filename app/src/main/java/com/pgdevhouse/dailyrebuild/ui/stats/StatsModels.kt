@@ -20,7 +20,7 @@ enum class StatsFilter(
 ) {
     OVERVIEW("Overview", null),
     NUTRITION("Nutrition", DailyRebuildPreferenceIds.STATS_NUTRITION),
-    WATER("Water", DailyRebuildPreferenceIds.STATS_WATER),
+    WATER("Drinks", DailyRebuildPreferenceIds.STATS_WATER),
     PAIN("Pain", DailyRebuildPreferenceIds.STATS_PAIN),
     MOBILITY("Mobility", DailyRebuildPreferenceIds.STATS_MOBILITY),
     MEETINGS("Meetings & IOP", DailyRebuildPreferenceIds.STATS_MEETINGS),

@@ -5,8 +5,14 @@ import com.pgdevhouse.dailyrebuild.data.local.CarePlace
 import com.pgdevhouse.dailyrebuild.data.local.CareProvider
 import com.pgdevhouse.dailyrebuild.data.local.CareVisit
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
+import com.pgdevhouse.dailyrebuild.data.local.DrinkCategory
+import com.pgdevhouse.dailyrebuild.data.local.DrinkDefinition
+import com.pgdevhouse.dailyrebuild.data.local.DrinkEntry
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
+import com.pgdevhouse.dailyrebuild.data.local.FoodSourceType
+import com.pgdevhouse.dailyrebuild.data.local.NutritionConfidence
+import com.pgdevhouse.dailyrebuild.data.local.isPreparedFood
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurementType
 import com.pgdevhouse.dailyrebuild.data.local.IopGroup
@@ -17,6 +23,7 @@ import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
 import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import com.pgdevhouse.dailyrebuild.data.local.PantryEssential
+import com.pgdevhouse.dailyrebuild.data.local.PreparedFoodLeftover
 import com.pgdevhouse.dailyrebuild.data.local.SavedMealWithIngredients
 import com.pgdevhouse.dailyrebuild.data.local.SavedMeeting
 import com.pgdevhouse.dailyrebuild.data.local.ShowerLog
@@ -39,6 +46,9 @@ data class GlobalSearchSnapshot(
     val products: List<FoodProduct> = emptyList(),
     val meals: List<SavedMealWithIngredients> = emptyList(),
     val foodEntries: List<FoodLogEntry> = emptyList(),
+    val preparedFoodLeftovers: List<PreparedFoodLeftover> = emptyList(),
+    val drinkDefinitions: List<DrinkDefinition> = emptyList(),
+    val drinkEntries: List<DrinkEntry> = emptyList(),
     val dailyRecords: List<DailyRecord> = emptyList(),
     val carePlaces: List<CarePlace> = emptyList(),
     val careProviders: List<CareProvider> = emptyList(),
@@ -72,6 +82,8 @@ enum class GlobalSearchFilter(val label: String) {
 sealed interface GlobalSearchTarget {
     data class SavedFood(val id: Long) : GlobalSearchTarget
     data class SavedMeal(val id: Long) : GlobalSearchTarget
+    data class DrinkDefinitionTarget(val id: Long) : GlobalSearchTarget
+    data class PreparedFoodLeftoverTarget(val id: Long) : GlobalSearchTarget
     data class HistoryDate(val date: String) : GlobalSearchTarget
     data class CarePlaceTarget(val id: Long) : GlobalSearchTarget
     data class CareProviderTarget(val id: Long) : GlobalSearchTarget
@@ -114,11 +126,18 @@ fun buildGlobalSearchResults(
     snapshot.products.forEach { product ->
         results += GlobalSearchResult(
             key = "saved-food:${product.id}",
-            group = if (product.isCondiment) "Condiments" else "Saved foods",
+            group = when {
+                product.isPreparedFood() -> "Frequent orders"
+                product.isCondiment -> "Condiments"
+                else -> "Saved foods"
+            },
             filter = GlobalSearchFilter.FOOD,
             title = product.name,
             subtitle = listOf(
-                product.brand,
+                product.sourceName.takeIf { product.isPreparedFood() }.orEmpty(),
+                product.brand.takeUnless { product.isPreparedFood() }.orEmpty(),
+                if (product.isPreparedFood()) FoodSourceType.label(product.sourceType) else "",
+                if (product.isPreparedFood()) NutritionConfidence.label(product.nutritionConfidence) else "",
                 if (product.isCondiment) "Condiment" else "",
                 formatServing(product)
             ).filter(String::isNotBlank).joinToString(" · "),
@@ -127,6 +146,10 @@ fun buildGlobalSearchResults(
                 product.brand,
                 product.barcode.orEmpty(),
                 product.servingUnit,
+                product.sourceName,
+                FoodSourceType.label(product.sourceType),
+                NutritionConfidence.label(product.nutritionConfidence),
+                if (product.isPreparedFood()) "takeout delivery restaurant prepared order" else "",
                 if (product.isCondiment) "condiment sauce dressing topping" else "food"
             ).joinToString(" "),
             target = GlobalSearchTarget.SavedFood(product.id),
@@ -185,6 +208,8 @@ fun buildGlobalSearchResults(
                 subtitle = listOf(
                     formatSearchDate(entry.date),
                     "${formatSearchNumber(entry.quantity)} ${entry.unit}",
+                    entry.sourceNameSnapshot,
+                    if (entry.isPreparedFood()) NutritionConfidence.label(entry.nutritionConfidenceSnapshot) else "",
                     if (isCondiment) "Condiment" else ""
                 ).filter(String::isNotBlank).joinToString(" · "),
                 searchableText = listOf(
@@ -193,12 +218,94 @@ fun buildGlobalSearchResults(
                     entry.date,
                     formatSearchDate(entry.date),
                     entry.unit,
+                    entry.sourceNameSnapshot,
+                    FoodSourceType.label(entry.sourceTypeSnapshot),
+                    NutritionConfidence.label(entry.nutritionConfidenceSnapshot),
+                    entry.nutritionNotes,
+                    if (entry.isPreparedFood()) "takeout delivery restaurant prepared order" else "",
                     if (isCondiment) "condiment" else "food"
                 ).joinToString(" "),
                 target = GlobalSearchTarget.HistoryDate(entry.date),
                 newestFirst = dateSortValue(entry.date, entry.createdAt)
             )
         }
+
+    snapshot.preparedFoodLeftovers.forEach { leftover ->
+        results += GlobalSearchResult(
+            key = "prepared-leftover:${leftover.id}",
+            group = "Available leftovers",
+            filter = GlobalSearchFilter.FOOD,
+            title = leftover.foodName,
+            subtitle = listOf(
+                leftover.sourceName,
+                "${formatSearchNumber(leftover.remainingQuantity)} ${leftover.portionUnit} left",
+                NutritionConfidence.label(leftover.nutritionConfidence),
+                "from ${formatSearchDate(leftover.originDate)}"
+            ).filter(String::isNotBlank).joinToString(" · "),
+            searchableText = listOf(
+                leftover.foodName,
+                leftover.sourceName,
+                FoodSourceType.label(leftover.sourceType),
+                NutritionConfidence.label(leftover.nutritionConfidence),
+                leftover.notes,
+                leftover.originDate,
+                formatSearchDate(leftover.originDate),
+                "leftover takeout delivery restaurant prepared food"
+            ).joinToString(" "),
+            target = GlobalSearchTarget.PreparedFoodLeftoverTarget(leftover.id),
+            newestFirst = leftover.updatedAt
+        )
+    }
+
+    snapshot.drinkDefinitions.forEach { definition ->
+        results += GlobalSearchResult(
+            key = "drink-definition:${definition.id}",
+            group = "Beverage library",
+            filter = GlobalSearchFilter.FOOD,
+            title = definition.name,
+            subtitle = listOf(
+                DrinkCategory.label(definition.category),
+                definition.containerName,
+                "${formatSearchNumber(definition.defaultAmountFlOz)} fl oz",
+                if (definition.isFavorite) "Favorite" else "",
+                if (!definition.isActive) "Hidden" else ""
+            ).filter(String::isNotBlank).joinToString(" · "),
+            searchableText = listOf(
+                definition.name,
+                DrinkCategory.label(definition.category),
+                definition.containerName,
+                definition.notes,
+                "drink beverage hydration water coffee tea soda juice milk protein sports energy"
+            ).joinToString(" "),
+            target = GlobalSearchTarget.DrinkDefinitionTarget(definition.id),
+            newestFirst = definition.updatedAt
+        )
+    }
+
+    snapshot.drinkEntries.forEach { entry ->
+        results += GlobalSearchResult(
+            key = "drink-entry:${entry.id}",
+            group = "Drink history",
+            filter = GlobalSearchFilter.FOOD,
+            title = entry.drinkNameSnapshot,
+            subtitle = listOf(
+                formatSearchDate(entry.date),
+                "${formatSearchNumber(entry.amountFlOz)} fl oz",
+                if (entry.countsAsWater) "Water" else "Other drink",
+                entry.notes
+            ).filter(String::isNotBlank).joinToString(" · "),
+            searchableText = listOf(
+                entry.drinkNameSnapshot,
+                DrinkCategory.label(entry.categorySnapshot),
+                entry.date,
+                formatSearchDate(entry.date),
+                entry.notes,
+                "drink beverage hydration"
+            ).joinToString(" "),
+            target = GlobalSearchTarget.HistoryDate(entry.date),
+            newestFirst = dateSortValue(entry.date, entry.consumedAt)
+        )
+    }
 
     buildDateResults(snapshot).forEach(results::add)
 
@@ -428,6 +535,7 @@ private fun buildDateResults(snapshot: GlobalSearchSnapshot): List<GlobalSearchR
     }
     snapshot.dailyRecords.forEach { mark(it.date, "Daily record") }
     snapshot.foodEntries.forEach { mark(it.date, "Food") }
+    snapshot.drinkEntries.forEach { mark(it.date, "Drinks") }
     snapshot.mobilitySessions.forEach { mark(it.date, "Mobility") }
     snapshot.showerLogs.forEach { mark(it.date, "Shower") }
     snapshot.migraineLogs.forEach { mark(it.date, "Migraine/aura") }

@@ -498,6 +498,12 @@ class DailyRebuildBackupManager(
                     sourceDatabaseVersion < IOP_GROUP_DATABASE_VERSION -> defaultIopGroupRows()
                 table == "iop_missed_occurrences" &&
                     sourceDatabaseVersion < IOP_ATTENDANCE_DATABASE_VERSION -> JSONArray()
+                table == "drink_definitions" &&
+                    sourceDatabaseVersion < DRINK_DATABASE_VERSION -> JSONArray()
+                table == "drink_entries" &&
+                    sourceDatabaseVersion < DRINK_DATABASE_VERSION -> JSONArray()
+                table == "prepared_food_leftovers" &&
+                    sourceDatabaseVersion < PREPARED_FOOD_DATABASE_VERSION -> JSONArray()
                 else -> error("The backup is incomplete: $table is missing.")
             }
 
@@ -510,6 +516,22 @@ class DailyRebuildBackupManager(
                     if (!row.has("isCondiment")) {
                         row.put("isCondiment", 0)
                     }
+                }
+            }
+
+            if (table == "food_products" &&
+                sourceDatabaseVersion < PREPARED_FOOD_DATABASE_VERSION
+            ) {
+                for (index in 0 until compatibleRows.length()) {
+                    val row = compatibleRows.optJSONObject(index)
+                        ?: error("$table contains a record that is not an object.")
+                    if (!row.has("sourceType")) row.put("sourceType", "PACKAGED")
+                    if (!row.has("sourceName")) row.put("sourceName", "")
+                    if (!row.has("nutritionConfidence")) row.put("nutritionConfidence", "EXACT")
+                    if (!row.has("calorieEstimateLow")) row.put("calorieEstimateLow", JSONObject.NULL)
+                    if (!row.has("calorieEstimateHigh")) row.put("calorieEstimateHigh", JSONObject.NULL)
+                    if (!row.has("nutritionNotes")) row.put("nutritionNotes", "")
+                    if (!row.has("isReusable")) row.put("isReusable", 1)
                 }
             }
 
@@ -535,6 +557,12 @@ class DailyRebuildBackupManager(
                     if (!row.has("mealQuantity")) {
                         row.put("mealQuantity", 1.0)
                     }
+                    if (!row.has("sourceTypeSnapshot")) row.put("sourceTypeSnapshot", "PACKAGED")
+                    if (!row.has("sourceNameSnapshot")) row.put("sourceNameSnapshot", "")
+                    if (!row.has("nutritionConfidenceSnapshot")) row.put("nutritionConfidenceSnapshot", "EXACT")
+                    if (!row.has("calorieEstimateLow")) row.put("calorieEstimateLow", JSONObject.NULL)
+                    if (!row.has("calorieEstimateHigh")) row.put("calorieEstimateHigh", JSONObject.NULL)
+                    if (!row.has("nutritionNotes")) row.put("nutritionNotes", "")
                 }
             }
 
@@ -1133,12 +1161,14 @@ class DailyRebuildBackupManager(
     )
 
     companion object {
-        const val DATABASE_VERSION = 19
+        const val DATABASE_VERSION = 21
         private const val MIN_SUPPORTED_DATABASE_VERSION = 14
         private const val LIFE_MAINTENANCE_DATABASE_VERSION = 15
         private const val IOP_GROUP_DATABASE_VERSION = 17
         private const val IOP_ATTENDANCE_DATABASE_VERSION = 18
         private const val CONDIMENT_DATABASE_VERSION = 19
+        private const val DRINK_DATABASE_VERSION = 20
+        private const val PREPARED_FOOD_DATABASE_VERSION = 21
         const val FORMAT_VERSION = 2
         private const val MIN_SUPPORTED_FORMAT_VERSION = 1
         private const val PORTABLE_PREFERENCES_FORMAT_VERSION = 2
@@ -1178,6 +1208,9 @@ class DailyRebuildBackupManager(
             "saved_meals",
             "saved_meal_ingredients",
             "food_log_entries",
+            "drink_definitions",
+            "drink_entries",
+            "prepared_food_leftovers",
             "daily_activity_snapshots",
             "mobility_sessions",
             "health_profile",

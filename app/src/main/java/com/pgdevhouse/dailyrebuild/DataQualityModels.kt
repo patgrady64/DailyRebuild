@@ -4,6 +4,8 @@ import com.pgdevhouse.dailyrebuild.data.local.CareAppointment
 import com.pgdevhouse.dailyrebuild.data.local.CareVisit
 import com.pgdevhouse.dailyrebuild.data.local.DailyActivitySnapshot
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
+import com.pgdevhouse.dailyrebuild.data.local.DrinkDefinition
+import com.pgdevhouse.dailyrebuild.data.local.DrinkEntry
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
@@ -13,6 +15,9 @@ import com.pgdevhouse.dailyrebuild.data.local.MedicationEntry
 import com.pgdevhouse.dailyrebuild.data.local.MeetingAttendance
 import com.pgdevhouse.dailyrebuild.data.local.MigraineLog
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
+import com.pgdevhouse.dailyrebuild.data.local.NutritionConfidence
+import com.pgdevhouse.dailyrebuild.data.local.PreparedFoodLeftover
+import com.pgdevhouse.dailyrebuild.data.local.isPreparedFood
 import com.pgdevhouse.dailyrebuild.data.local.ShowerLog
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -48,7 +53,10 @@ data class DataQualityWarning(
 data class DataQualitySnapshot(
     val dailyRecords: List<DailyRecord> = emptyList(),
     val foodEntries: List<FoodLogEntry> = emptyList(),
+    val drinkDefinitions: List<DrinkDefinition> = emptyList(),
+    val drinkEntries: List<DrinkEntry> = emptyList(),
     val foodProducts: List<FoodProduct> = emptyList(),
+    val preparedFoodLeftovers: List<PreparedFoodLeftover> = emptyList(),
     val activitySnapshots: List<DailyActivitySnapshot> = emptyList(),
     val mobilitySessions: List<MobilitySession> = emptyList(),
     val showerLogs: List<ShowerLog> = emptyList(),
@@ -73,8 +81,15 @@ object DataQualityWarningEngine {
 
         addFutureHistoryWarnings(warnings, snapshot, today)
         addWaterWarnings(warnings, snapshot.dailyRecords)
+        addDrinkWarnings(warnings, snapshot.drinkEntries, snapshot.drinkDefinitions)
         addFoodEntryWarnings(warnings, snapshot.foodEntries)
         addSavedFoodWarnings(warnings, snapshot.foodProducts)
+        addPreparedFoodWarnings(
+            warnings,
+            snapshot.foodEntries,
+            snapshot.foodProducts,
+            snapshot.preparedFoodLeftovers
+        )
         addDuplicateAppointmentWarnings(warnings, snapshot.appointments)
         addDuplicateMeetingWarnings(warnings, snapshot.meetingAttendance)
         addDuplicateMedicationWarnings(warnings, snapshot.medications)
@@ -112,6 +127,8 @@ object DataQualityWarningEngine {
 
         snapshot.dailyRecords.forEach { record(it.date, "daily record") }
         snapshot.foodEntries.forEach { record(it.date, "food") }
+        snapshot.preparedFoodLeftovers.forEach { record(it.originDate, "prepared-food leftovers") }
+        snapshot.drinkEntries.forEach { record(it.date, "drink") }
         snapshot.activitySnapshots.forEach { record(it.date, "activity") }
         snapshot.mobilitySessions.forEach { record(it.date, "mobility") }
         snapshot.showerLogs.forEach { record(it.date, "shower") }
@@ -174,6 +191,56 @@ object DataQualityWarningEngine {
                     target = DataQualityWarningTarget.WATER,
                     date = record.date,
                     priority = 25
+                )
+            }
+        }
+    }
+
+    private fun addDrinkWarnings(
+        warnings: MutableList<DataQualityWarning>,
+        entries: List<DrinkEntry>,
+        definitions: List<DrinkDefinition>
+    ) {
+        entries.forEach { entry ->
+            val reasons = buildList {
+                if (!entry.amountFlOz.isFinite() || entry.amountFlOz <= 0.0) {
+                    add("amount is ${formatNumber(entry.amountFlOz)} fl oz")
+                } else if (entry.amountFlOz > 256.0) {
+                    add("amount is ${formatNumber(entry.amountFlOz)} fl oz")
+                }
+                if (!entry.calories.isFinite() || entry.calories < 0.0 || entry.calories > 5_000.0) {
+                    add("calories are ${formatNumber(entry.calories)}")
+                }
+                if (!entry.caffeineMilligrams.isFinite() || entry.caffeineMilligrams < 0.0 || entry.caffeineMilligrams > 2_000.0) {
+                    add("caffeine is ${formatNumber(entry.caffeineMilligrams)} mg")
+                }
+            }
+            if (reasons.isNotEmpty()) {
+                val signature = "drink-entry|${entry.id}|${entry.amountFlOz}|${entry.calories}|${entry.caffeineMilligrams}"
+                warnings += DataQualityWarning(
+                    id = signature,
+                    signature = signature,
+                    title = "Drink entry needs review",
+                    summary = "${entry.drinkNameSnapshot} on ${formatDate(entry.date)}: ${reasons.joinToString()}.",
+                    details = "The entry is outside broad input ranges used only to catch typing mistakes. Keeping it will not change the log.",
+                    target = DataQualityWarningTarget.WATER,
+                    date = entry.date,
+                    priority = 25
+                )
+            }
+        }
+
+        definitions.forEach { definition ->
+            if (!definition.defaultAmountFlOz.isFinite() || definition.defaultAmountFlOz <= 0.0 || definition.defaultAmountFlOz > 256.0) {
+                val signature = "drink-definition|${definition.id}|${definition.defaultAmountFlOz}"
+                warnings += DataQualityWarning(
+                    id = signature,
+                    signature = signature,
+                    title = "Beverage shortcut needs review",
+                    summary = "${definition.name} has ${formatNumber(definition.defaultAmountFlOz)} fl oz as its default amount.",
+                    details = "Review the saved container amount in the Beverage Library.",
+                    target = DataQualityWarningTarget.WATER,
+                    priority = 35
                 )
             }
         }
@@ -276,6 +343,92 @@ object DataQualityWarningEngine {
                     details = "Review the serving and package fields. Daily Rebuild will not alter the saved food automatically.",
                     target = DataQualityWarningTarget.SAVED_FOODS,
                     priority = 35
+                )
+            }
+        }
+    }
+
+    private fun addPreparedFoodWarnings(
+        warnings: MutableList<DataQualityWarning>,
+        entries: List<FoodLogEntry>,
+        products: List<FoodProduct>,
+        leftovers: List<PreparedFoodLeftover>
+    ) {
+        entries.filter(FoodLogEntry::isPreparedFood).forEach { entry ->
+            val low = entry.calorieEstimateLow
+            val high = entry.calorieEstimateHigh
+            val rangeInvalid =
+                (low != null && (!low.isFinite() || low < 0.0)) ||
+                    (high != null && (!high.isFinite() || high < 0.0)) ||
+                    (low != null && high != null && low > high)
+            val knownButEmpty =
+                entry.nutritionConfidenceSnapshot != NutritionConfidence.UNKNOWN &&
+                    entry.calories <= 0.0 &&
+                    entry.proteinGrams <= 0.0 &&
+                    entry.carbohydrateGrams <= 0.0 &&
+                    entry.fatGrams <= 0.0
+
+            if (rangeInvalid || knownButEmpty) {
+                val signature = "prepared-entry|${entry.id}|$low|$high|${entry.nutritionConfidenceSnapshot}|${entry.calories}"
+                warnings += DataQualityWarning(
+                    id = signature,
+                    signature = signature,
+                    title = "Prepared-food estimate needs review",
+                    summary = buildString {
+                        append("${entry.productNameSnapshot} on ${formatDate(entry.date)}")
+                        append(if (rangeInvalid) " has an invalid calorie range." else " is marked as known nutrition but has no nutrition values.")
+                    },
+                    details = "Edit the entry to correct the estimate or mark nutrition as Unknown. Daily Rebuild will not invent missing values.",
+                    target = DataQualityWarningTarget.FOOD,
+                    date = entry.date,
+                    priority = 32
+                )
+            }
+        }
+
+        products.filter(FoodProduct::isPreparedFood).forEach { product ->
+            val low = product.calorieEstimateLow
+            val high = product.calorieEstimateHigh
+            if (
+                (low != null && (!low.isFinite() || low < 0.0)) ||
+                (high != null && (!high.isFinite() || high < 0.0)) ||
+                (low != null && high != null && low > high)
+            ) {
+                val signature = "prepared-template-range|${product.id}|$low|$high"
+                warnings += DataQualityWarning(
+                    id = signature,
+                    signature = signature,
+                    title = "Frequent-order estimate needs review",
+                    summary = "${product.name} has an invalid calorie range.",
+                    details = "Open the frequent order and correct the likely low and high values.",
+                    target = DataQualityWarningTarget.FOOD,
+                    priority = 34
+                )
+            }
+        }
+
+        leftovers.forEach { leftover ->
+            val reasons = buildList {
+                if (!leftover.remainingQuantity.isFinite() || leftover.remainingQuantity <= 0.0) {
+                    add("remaining quantity is ${formatNumber(leftover.remainingQuantity)}")
+                }
+                val low = leftover.calorieEstimateLowPerUnit
+                val high = leftover.calorieEstimateHighPerUnit
+                if (low != null && (!low.isFinite() || low < 0.0)) add("low calorie estimate is invalid")
+                if (high != null && (!high.isFinite() || high < 0.0)) add("high calorie estimate is invalid")
+                if (low != null && high != null && low > high) add("calorie range is reversed")
+            }
+            if (reasons.isNotEmpty()) {
+                val signature = "prepared-leftover|${leftover.id}|${leftover.remainingQuantity}|${leftover.calorieEstimateLowPerUnit}|${leftover.calorieEstimateHighPerUnit}"
+                warnings += DataQualityWarning(
+                    id = signature,
+                    signature = signature,
+                    title = "Prepared-food leftovers need review",
+                    summary = "${leftover.foodName}: ${reasons.joinToString()}.",
+                    details = "Open Takeout / Delivery to log, edit, or discard the leftover record.",
+                    target = DataQualityWarningTarget.FOOD,
+                    date = leftover.originDate,
+                    priority = 33
                 )
             }
         }

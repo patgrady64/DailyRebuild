@@ -74,6 +74,7 @@ class HistoryViewModel(
     private suspend fun loadHistoryDays(): List<DailyHistoryDay> {
         val records = repositories.dailyRecords.getAllRecords()
         val foodEntries = repositories.food.getAllEntries()
+        val drinkEntries = repositories.drinks.getAllEntries()
         val activitySnapshots = repositories.activity.getAllSnapshots()
         val mobilitySessions = repositories.mobility.getAllSessions()
         val showerLogs = repositories.showers.getAllLogs()
@@ -85,6 +86,7 @@ class HistoryViewModel(
 
         val recordsByDate = records.associateBy { it.date }
         val foodByDate = foodEntries.groupBy { it.date }
+        val drinksByDate = drinkEntries.groupBy { it.date }
         val activityByDate = activitySnapshots.associateBy { it.date }
         val mobilityByDate = mobilitySessions.groupBy { it.date }
         val showersByDate = showerLogs.associateBy { it.date }
@@ -97,6 +99,7 @@ class HistoryViewModel(
         val allDates = buildSet {
             addAll(recordsByDate.keys)
             addAll(foodByDate.keys)
+            addAll(drinksByDate.keys)
             addAll(activityByDate.keys)
             addAll(mobilityByDate.keys)
             addAll(showersByDate.keys)
@@ -112,6 +115,7 @@ class HistoryViewModel(
                 date = date,
                 record = recordsByDate[date],
                 foodEntries = foodByDate[date].orEmpty(),
+                drinkEntries = drinksByDate[date].orEmpty(),
                 activitySnapshot = activityByDate[date],
                 mobilitySessions = mobilityByDate[date].orEmpty(),
                 showerLogged = showersByDate.containsKey(date),

@@ -37,6 +37,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
+import com.pgdevhouse.dailyrebuild.data.local.FoodSourceType
+import com.pgdevhouse.dailyrebuild.data.local.NutritionConfidence
+import com.pgdevhouse.dailyrebuild.data.local.isPreparedFood
 import java.util.Locale
 import com.pgdevhouse.dailyrebuild.data.remote.ScannedFoodPrefill
 import java.math.BigDecimal
@@ -113,25 +116,38 @@ private fun buildFuelDisplayItems(
 @Composable
 fun FoodSection(
     entries: List<FoodLogEntry>,
+    drinkCalories: Double = 0.0,
+    drinkProteinGrams: Double = 0.0,
+    drinkCarbohydrateGrams: Double = 0.0,
+    drinkSugarGrams: Double = 0.0,
     lastScannedBarcode: String?,
     isScanningBarcode: Boolean,
     savedFoodCount: Int,
     savedMealCount: Int,
+    preparedFoodCount: Int = 0,
+    leftoverCount: Int = 0,
     onScanFood: () -> Unit,
     onAddFoodManually: () -> Unit,
+    onOpenPreparedFood: () -> Unit,
     onOpenSavedFoods: () -> Unit,
     onBuildMeal: () -> Unit,
     onOpenSavedMeals: () -> Unit,
     onUpdateQuantity: (FoodLogEntry, Double) -> Unit,
+    onEditPreparedEntry: (FoodLogEntry) -> Unit,
     onUpdateMealQuantity: (String, Double) -> Unit,
     onDeleteEntry: (FoodLogEntry) -> Unit,
     onDeleteMealLog: (String) -> Unit
 ) {
-    val totalCalories = entries.sumOf { it.calories }
-    val totalProtein = entries.sumOf { it.proteinGrams }
-    val totalCarbohydrates = entries.sumOf { it.carbohydrateGrams }
+    val totalCalories = entries.sumOf { it.calories } + drinkCalories
+    val totalProtein = entries.sumOf { it.proteinGrams } + drinkProteinGrams
+    val totalCarbohydrates =
+        entries.sumOf { it.carbohydrateGrams } + drinkCarbohydrateGrams
     val totalFat = entries.sumOf { it.fatGrams }
     val totalSodium = entries.sumOf { it.sodiumMilligrams }
+    val unknownPreparedNutritionCount = entries.count {
+        it.isPreparedFood() &&
+            it.nutritionConfidenceSnapshot == NutritionConfidence.UNKNOWN
+    }
     val displayItems = buildFuelDisplayItems(entries)
 
     var quantityEditorEntryId by rememberSaveable {
@@ -189,10 +205,39 @@ fun FoodSection(
         }
 
         Text(
-            text = "${formatFoodNumber(totalSodium)} mg sodium",
+            text = buildString {
+                append("${formatFoodNumber(totalSodium)} mg sodium")
+                if (drinkSugarGrams > 0.0) {
+                    append(" · ${formatFoodNumber(drinkSugarGrams)} g sugar from drinks")
+                }
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+
+        if (unknownPreparedNutritionCount > 0) {
+            Text(
+                text = "$unknownPreparedNutritionCount prepared-food " +
+                    if (unknownPreparedNutritionCount == 1) {
+                        "entry has unknown nutrition and is not included in these totals."
+                    } else {
+                        "entries have unknown nutrition and are not included in these totals."
+                    },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+
+        if (
+            drinkCalories > 0.0 || drinkProteinGrams > 0.0 ||
+            drinkCarbohydrateGrams > 0.0 || drinkSugarGrams > 0.0
+        ) {
+            Text(
+                text = "These nutrition totals include recorded drinks.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -210,6 +255,18 @@ fun FoodSection(
                 modifier = Modifier.weight(1f)
             )
         }
+
+        RebuildPrimaryAction(
+            text = buildString {
+                append("Takeout / delivery")
+                if (preparedFoodCount > 0 || leftoverCount > 0) {
+                    append(" · $preparedFoodCount saved")
+                    if (leftoverCount > 0) append(" · $leftoverCount leftover")
+                }
+            },
+            onClick = onOpenPreparedFood,
+            modifier = Modifier.fillMaxWidth()
+        )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -279,7 +336,11 @@ fun FoodSection(
                         is FuelDisplayItem.SingleFood -> FoodEntryRow(
                             entry = item.entry,
                             onEditQuantity = {
-                                quantityEditorEntryId = item.entry.id
+                                if (item.entry.isPreparedFood()) {
+                                    onEditPreparedEntry(item.entry)
+                                } else {
+                                    quantityEditorEntryId = item.entry.id
+                                }
                             },
                             onDelete = { onDeleteEntry(item.entry) }
                         )
@@ -579,8 +640,35 @@ private fun FoodEntryRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (entry.isPreparedFood()) {
+                    Text(
+                        text = listOf(
+                            entry.sourceNameSnapshot,
+                            FoodSourceType.label(entry.sourceTypeSnapshot),
+                            NutritionConfidence.label(entry.nutritionConfidenceSnapshot)
+                        ).filter(String::isNotBlank).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    if (entry.calorieEstimateLow != null || entry.calorieEstimateHigh != null) {
+                        Text(
+                            text = "Likely ${formatFoodNumber(entry.calorieEstimateLow ?: entry.calories)}–" +
+                                "${formatFoodNumber(entry.calorieEstimateHigh ?: entry.calories)} calories",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 Text(
-                    text = "${formatFoodNumber(entry.calories)} calories · ${formatFoodNumber(entry.proteinGrams)} g protein",
+                    text = if (
+                        entry.isPreparedFood() &&
+                        entry.nutritionConfidenceSnapshot == NutritionConfidence.UNKNOWN
+                    ) {
+                        "Nutrition not estimated"
+                    } else {
+                        "${formatFoodNumber(entry.calories)} calories · " +
+                            "${formatFoodNumber(entry.proteinGrams)} g protein"
+                    },
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -588,7 +676,7 @@ private fun FoodEntryRow(
                 horizontalAlignment = Alignment.End
             ) {
                 TextButton(onClick = onEditQuantity) {
-                    Text("Edit")
+                    Text(if (entry.isPreparedFood()) "Edit details" else "Edit")
                 }
                 TextButton(onClick = onDelete) {
                     Text("Delete")

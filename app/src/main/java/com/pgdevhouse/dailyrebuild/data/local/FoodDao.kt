@@ -68,6 +68,7 @@ interface FoodDao {
         """
         SELECT *
         FROM food_products
+        WHERE isReusable = 1
         ORDER BY name COLLATE NOCASE ASC
         """
     )
@@ -79,11 +80,30 @@ interface FoodDao {
         SELECT *
         FROM food_products
         WHERE isFavorite = 1
+          AND isReusable = 1
         ORDER BY name COLLATE NOCASE ASC
         """
     )
     suspend fun getFavoriteProducts():
             List<FoodProduct>
+
+
+    @Query(
+        """
+        SELECT product.*
+        FROM food_products AS product
+        INNER JOIN (
+            SELECT productId, MAX(createdAt) AS lastLoggedAt
+            FROM food_log_entries
+            WHERE sourceTypeSnapshot != 'PACKAGED'
+            GROUP BY productId
+        ) AS recent ON recent.productId = product.id
+        WHERE product.isReusable = 0
+        ORDER BY recent.lastLoggedAt DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun getRecentPreparedProducts(limit: Int = 12): List<FoodProduct>
 
     @Insert
     suspend fun addFoodEntry(

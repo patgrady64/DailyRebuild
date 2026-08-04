@@ -11,6 +11,8 @@ import com.pgdevhouse.dailyrebuild.data.local.CareAppointment
 import com.pgdevhouse.dailyrebuild.data.local.CareVisit
 import com.pgdevhouse.dailyrebuild.data.local.DailyActivitySnapshot
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
+import com.pgdevhouse.dailyrebuild.data.local.DrinkCategory
+import com.pgdevhouse.dailyrebuild.data.local.DrinkEntry
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
 import com.pgdevhouse.dailyrebuild.data.local.HealthMeasurement
@@ -39,6 +41,7 @@ import kotlin.math.abs
 private data class RawStatsData(
     val records: List<DailyRecord>,
     val foodEntries: List<FoodLogEntry>,
+    val drinkEntries: List<DrinkEntry>,
     val foodProducts: List<FoodProduct>,
     val activity: List<DailyActivitySnapshot>,
     val mobility: List<MobilitySession>,
@@ -195,6 +198,7 @@ class StatsViewModel(
     private suspend fun loadAllData(): RawStatsData = RawStatsData(
         records = repositories.dailyRecords.getAllRecords(),
         foodEntries = repositories.food.getAllEntries(),
+        drinkEntries = repositories.drinks.getAllEntries(),
         foodProducts = repositories.food.getAllProducts(),
         activity = repositories.activity.getAllSnapshots(),
         mobility = repositories.mobility.getAllSessions(),
@@ -213,6 +217,7 @@ class StatsViewModel(
         val dates = buildList {
             raw.records.mapNotNullTo(this) { parseDate(it.date) }
             raw.foodEntries.mapNotNullTo(this) { parseDate(it.date) }
+            raw.drinkEntries.mapNotNullTo(this) { parseDate(it.date) }
             raw.activity.mapNotNullTo(this) { parseDate(it.date) }
             raw.mobility.mapNotNullTo(this) { parseDate(it.date) }
             raw.showers.mapNotNullTo(this) { parseDate(it.date) }
@@ -288,6 +293,8 @@ class StatsViewModel(
         val previousRecords = previous?.let { raw.records.inPeriod(it) { row -> row.date } }.orEmpty()
         val currentFood = raw.foodEntries.inPeriod(current) { it.date }
         val previousFood = previous?.let { raw.foodEntries.inPeriod(it) { row -> row.date } }.orEmpty()
+        val currentDrinks = raw.drinkEntries.inPeriod(current) { it.date }
+        val previousDrinks = previous?.let { raw.drinkEntries.inPeriod(it) { row -> row.date } }.orEmpty()
         val currentActivity = raw.activity.inPeriod(current) { it.date }
         val previousActivity = previous?.let { raw.activity.inPeriod(it) { row -> row.date } }.orEmpty()
         val currentMobility = raw.mobility.inPeriod(current) { it.date }
@@ -301,32 +308,95 @@ class StatsViewModel(
         val currentMaintenance = raw.lifeMaintenance.inPeriod(current) { it.date }
         val previousMaintenance = previous?.let { raw.lifeMaintenance.inPeriod(it) { row -> row.date } }.orEmpty()
 
-        val currentCaloriesByDate = currentFood.groupBy { it.date }
+        val currentFoodCaloriesByDate = currentFood.groupBy { it.date }
             .mapValues { (_, rows) -> rows.sumOf { it.calories } }
-        val previousCaloriesByDate = previousFood.groupBy { it.date }
+        val previousFoodCaloriesByDate = previousFood.groupBy { it.date }
             .mapValues { (_, rows) -> rows.sumOf { it.calories } }
-        val currentProteinByDate = currentFood.groupBy { it.date }
+        val currentDrinkCaloriesByDate = currentDrinks.groupBy { it.date }
+            .mapValues { (_, rows) -> rows.sumOf { it.calories } }
+        val previousDrinkCaloriesByDate = previousDrinks.groupBy { it.date }
+            .mapValues { (_, rows) -> rows.sumOf { it.calories } }
+        val currentCaloriesByDate = mergeNumericDateMaps(
+            currentFoodCaloriesByDate,
+            currentDrinkCaloriesByDate
+        )
+        val previousCaloriesByDate = mergeNumericDateMaps(
+            previousFoodCaloriesByDate,
+            previousDrinkCaloriesByDate
+        )
+
+        val currentFoodProteinByDate = currentFood.groupBy { it.date }
             .mapValues { (_, rows) -> rows.sumOf { it.proteinGrams } }
-        val previousProteinByDate = previousFood.groupBy { it.date }
+        val previousFoodProteinByDate = previousFood.groupBy { it.date }
             .mapValues { (_, rows) -> rows.sumOf { it.proteinGrams } }
+        val currentDrinkProteinByDate = currentDrinks.groupBy { it.date }
+            .mapValues { (_, rows) -> rows.sumOf { it.proteinGrams } }
+        val previousDrinkProteinByDate = previousDrinks.groupBy { it.date }
+            .mapValues { (_, rows) -> rows.sumOf { it.proteinGrams } }
+        val currentProteinByDate = mergeNumericDateMaps(
+            currentFoodProteinByDate,
+            currentDrinkProteinByDate
+        )
+        val previousProteinByDate = mergeNumericDateMaps(
+            previousFoodProteinByDate,
+            previousDrinkProteinByDate
+        )
 
         val calorieSummary = summaryOf(currentCaloriesByDate.values)
         val previousCalorieSummary = summaryOf(previousCaloriesByDate.values)
         val proteinSummary = summaryOf(currentProteinByDate.values)
         val previousProteinSummary = summaryOf(previousProteinByDate.values)
 
-        val currentWaterByDate = currentRecords.mapNotNull { record ->
+        val currentLegacyWaterByDate = currentRecords.mapNotNull { record ->
             val total = waterOunces(record)
             if (total > 0.0) record.date to total else null
         }.toMap()
-        val previousWaterByDate = previousRecords.mapNotNull { record ->
+        val previousLegacyWaterByDate = previousRecords.mapNotNull { record ->
             val total = waterOunces(record)
             if (total > 0.0) record.date to total else null
         }.toMap()
-        val waterSummary = summaryOf(currentWaterByDate.values)
-        val previousWaterSummary = summaryOf(previousWaterByDate.values)
-        val plainWater = currentRecords.sumOf(::plainWaterOunces)
-        val flavoredWater = currentRecords.sumOf(::flavoredWaterOunces)
+        val currentDrinkGroups = currentDrinks.groupBy { it.date }
+        val previousDrinkGroups = previousDrinks.groupBy { it.date }
+        val currentWaterByDate = mergeDrinkWithLegacy(
+            currentDrinkGroups.mapValues { (_, rows) ->
+                rows.filter(DrinkEntry::countsAsWater).sumOf(DrinkEntry::amountFlOz)
+            },
+            currentLegacyWaterByDate
+        )
+        val previousWaterByDate = mergeDrinkWithLegacy(
+            previousDrinkGroups.mapValues { (_, rows) ->
+                rows.filter(DrinkEntry::countsAsWater).sumOf(DrinkEntry::amountFlOz)
+            },
+            previousLegacyWaterByDate
+        )
+        val currentFluidByDate = mergeDrinkWithLegacy(
+            currentDrinkGroups.mapValues { (_, rows) -> rows.sumOf(DrinkEntry::amountFlOz) },
+            currentLegacyWaterByDate
+        )
+        val previousFluidByDate = mergeDrinkWithLegacy(
+            previousDrinkGroups.mapValues { (_, rows) -> rows.sumOf(DrinkEntry::amountFlOz) },
+            previousLegacyWaterByDate
+        )
+        val currentOtherByDate = currentDrinkGroups.mapValues { (_, rows) ->
+            rows.filterNot(DrinkEntry::countsAsWater).sumOf(DrinkEntry::amountFlOz)
+        }.filterValues { it > 0.0 }
+        val previousOtherByDate = previousDrinkGroups.mapValues { (_, rows) ->
+            rows.filterNot(DrinkEntry::countsAsWater).sumOf(DrinkEntry::amountFlOz)
+        }.filterValues { it > 0.0 }
+        val fluidSummary = summaryOf(currentFluidByDate.values)
+        val previousFluidSummary = summaryOf(previousFluidByDate.values)
+        val waterSummary = summaryOf(currentWaterByDate.values.filter { it > 0.0 })
+        val previousWaterSummary = summaryOf(previousWaterByDate.values.filter { it > 0.0 })
+        val plainWater = currentDrinks
+            .filter { it.categorySnapshot == DrinkCategory.WATER }
+            .sumOf(DrinkEntry::amountFlOz) +
+            currentRecords.sumOf(::plainWaterOunces)
+        val flavoredWater = currentDrinks
+            .filter { it.categorySnapshot == DrinkCategory.FLAVORED_WATER }
+            .sumOf(DrinkEntry::amountFlOz) +
+            currentRecords.sumOf(::flavoredWaterOunces)
+        val otherFluids = currentOtherByDate.values.sum()
+        val caffeine = currentDrinks.sumOf(DrinkEntry::caffeineMilligrams)
 
         val currentBackPain = currentRecords.filter(DailyRecord::painRecorded).map { it.backPain.toDouble() }
         val previousBackPain = previousRecords.filter(DailyRecord::painRecorded).map { it.backPain.toDouble() }
@@ -351,9 +421,9 @@ class StatsViewModel(
 
         val nutrition = StatsSection(
             metrics = listOf(
-                averageMetric("Average calories", calorieSummary, previousCalorieSummary, "cal", days, "food-logged days", previous),
-                averageMetric("Average protein", proteinSummary, previousProteinSummary, "g", days, "food-logged days", previous, 1),
-                countMetric("Food-logged days", currentCaloriesByDate.size, previousCaloriesByDate.size.takeIf { previous != null }, "of $days selected days", previous),
+                averageMetric("Average calories", calorieSummary, previousCalorieSummary, "cal", days, "nutrition-logged days", previous),
+                averageMetric("Average protein", proteinSummary, previousProteinSummary, "g", days, "nutrition-logged days", previous, 1),
+                countMetric("Nutrition-logged days", currentCaloriesByDate.size, previousCaloriesByDate.size.takeIf { previous != null }, "of $days selected days", previous),
                 countMetric(
                     "Saved meals logged",
                     currentFood.mapNotNull(FoodLogEntry::mealLogId).distinct().size,
@@ -363,49 +433,66 @@ class StatsViewModel(
                 )
             ),
             charts = listOf(
-                numericChart("Daily calories", "Only days with food records are plotted.", StatsChartType.LINE, current, currentCaloriesByDate, "cal", 0),
-                numericChart("Daily protein", "Protein totals from saved food snapshots.", StatsChartType.LINE, current, currentProteinByDate, "g", 1)
+                numericChart("Daily calories", "Food and calorie-bearing drinks are included.", StatsChartType.LINE, current, currentCaloriesByDate, "cal", 0),
+                numericChart("Daily protein", "Food and protein-bearing drinks are included.", StatsChartType.LINE, current, currentProteinByDate, "g", 1)
             ),
             highlights = nutritionHighlights(
                 entries = currentFood,
                 products = raw.foodProducts,
                 caloriesByDate = currentCaloriesByDate
             ),
-            notes = listOf("Nutrition averages use food-logged days only. Missing days are not counted as zero.")
+            notes = listOf("Nutrition totals include recorded drinks. Missing days are not counted as zero.")
         )
 
         val water = StatsSection(
             metrics = listOf(
-                averageMetric("Average water", waterSummary, previousWaterSummary, waterUnitLabel(), days, "hydration days", previous, 1, ::displayWater),
+                averageMetric("Average fluids", fluidSummary, previousFluidSummary, waterUnitLabel(), days, "drink-logged days", previous, 1, ::displayWater),
                 valueMetric(
-                    "Total water",
-                    currentWaterByDate.values.takeIf { it.isNotEmpty() }?.sum()?.let(::displayWater),
-                    previousWaterByDate.values.takeIf { it.isNotEmpty() }?.sum()?.let(::displayWater),
+                    "Total fluids",
+                    currentFluidByDate.values.takeIf { it.isNotEmpty() }?.sum()?.let(::displayWater),
+                    previousFluidByDate.values.takeIf { it.isNotEmpty() }?.sum()?.let(::displayWater),
                     waterUnitLabel(),
-                    currentWaterByDate.size,
+                    currentFluidByDate.size,
                     previous
                 ),
                 valueMetric(
-                    "Plain water",
-                    plainWater.takeIf { currentWaterByDate.isNotEmpty() }?.let(::displayWater),
-                    null,
+                    "Water",
+                    currentWaterByDate.values.takeIf { it.isNotEmpty() }?.sum()?.let(::displayWater),
+                    previousWaterByDate.values.takeIf { it.isNotEmpty() }?.sum()?.let(::displayWater),
                     waterUnitLabel(),
-                    currentWaterByDate.size,
-                    null
+                    currentWaterByDate.count { it.value > 0.0 },
+                    previous
                 ),
                 valueMetric(
-                    "MiO / flavored",
-                    flavoredWater.takeIf { currentWaterByDate.isNotEmpty() }?.let(::displayWater),
-                    null,
+                    "Other drinks",
+                    otherFluids.takeIf { it > 0.0 }?.let(::displayWater),
+                    previousOtherByDate.values.sum().takeIf { it > 0.0 }?.let(::displayWater),
                     waterUnitLabel(),
-                    currentWaterByDate.size,
-                    null
+                    currentOtherByDate.size,
+                    previous
+                ),
+                valueMetric(
+                    "Caffeine",
+                    caffeine.takeIf { it > 0.0 },
+                    previousDrinks.sumOf(DrinkEntry::caffeineMilligrams).takeIf { it > 0.0 },
+                    "mg",
+                    currentDrinks.count { it.caffeineMilligrams > 0.0 },
+                    previous
                 )
             ),
             charts = listOf(
                 numericChart(
+                    "Total fluids by day",
+                    "${currentFluidByDate.size} day${plural(currentFluidByDate.size)} with drink records.",
+                    StatsChartType.BAR,
+                    current,
+                    currentFluidByDate.mapValues { displayWater(it.value) },
+                    waterUnitLabel(),
+                    1
+                ),
+                numericChart(
                     "Water by day",
-                    "${currentWaterByDate.size} day${plural(currentWaterByDate.size)} with water records.",
+                    "Plain and flavored water only.",
                     StatsChartType.BAR,
                     current,
                     currentWaterByDate.mapValues { displayWater(it.value) },
@@ -413,8 +500,12 @@ class StatsViewModel(
                     1
                 )
             ),
-            highlights = highLowHighlights(currentWaterByDate, waterUnitLabel(), 1, ::displayWater),
-            notes = listOf("Plain and MiO/flavored water are shown separately while both count toward the total.")
+            highlights = buildList {
+                if (plainWater > 0.0) add(StatsListItem("Plain water", "${formatNumber(displayWater(plainWater), 1)} ${waterUnitLabel()}"))
+                if (flavoredWater > 0.0) add(StatsListItem("Flavored water", "${formatNumber(displayWater(flavoredWater), 1)} ${waterUnitLabel()}"))
+                addAll(highLowHighlights(currentFluidByDate, waterUnitLabel(), 1, ::displayWater))
+            },
+            notes = listOf("Water and other drinks remain separate while Total fluids includes everything. Calorie-containing drinks also contribute to Nutrition statistics.")
         )
 
         val pain = StatsSection(
@@ -475,16 +566,16 @@ class StatsViewModel(
 
         val overview = StatsSection(
             metrics = listOf(
-                averageMetric("Average calories", calorieSummary, previousCalorieSummary, "cal", days, "food-logged days", previous),
-                averageMetric("Average water", waterSummary, previousWaterSummary, waterUnitLabel(), days, "hydration days", previous, 1, ::displayWater),
+                averageMetric("Average calories", calorieSummary, previousCalorieSummary, "cal", days, "nutrition-logged days", previous),
+                averageMetric("Average fluids", fluidSummary, previousFluidSummary, waterUnitLabel(), days, "drink-logged days", previous, 1, ::displayWater),
                 averageMetric("Average highest pain", summaryOf(currentHighestPainByDate.values), summaryOf(previousRecords.filter(DailyRecord::painRecorded).map { maxOf(it.backPain, it.shinPain).toDouble() }), "/ 10", days, "pain-recorded days", previous, 1),
                 countMetric("Mobility sessions", currentMobility.size, previousMobility.size.takeIf { previous != null }, "${formatNumber(currentMobilityMinutes, 0)} total minutes", previous),
                 countMetric("Recovery meetings", currentMeetings.size, previousMeetings.size.takeIf { previous != null }, "Manually logged", previous),
                 countMetric("IOP attended", currentIop.attended, previousIop?.attended, "${currentIop.missed} marked missed", previous)
             ),
             charts = listOf(
-                numericChart("Calories", "Food-logged days only.", StatsChartType.LINE, current, currentCaloriesByDate, "cal", 0),
-                numericChart("Water", "Hydration days only.", StatsChartType.BAR, current, currentWaterByDate.mapValues { displayWater(it.value) }, waterUnitLabel(), 1)
+                numericChart("Calories", "Food and calorie-bearing drinks.", StatsChartType.LINE, current, currentCaloriesByDate, "cal", 0),
+                numericChart("Drinks", "Drink-logged days only.", StatsChartType.BAR, current, currentFluidByDate.mapValues { displayWater(it.value) }, waterUnitLabel(), 1)
             ),
             notes = listOf("Every metric states its data coverage. No-data days remain different from a true value of zero.")
         )
@@ -951,6 +1042,23 @@ class StatsViewModel(
         decimals = 0,
         treatMissingAsZero = true
     )
+
+    private fun mergeNumericDateMaps(
+        first: Map<String, Double>,
+        second: Map<String, Double>
+    ): Map<String, Double> = (first.keys + second.keys).associateWith { date ->
+        first.getOrDefault(date, 0.0) + second.getOrDefault(date, 0.0)
+    }.filterValues { it != 0.0 }
+
+    private fun mergeDrinkWithLegacy(
+        drinkValues: Map<String, Double>,
+        legacyWaterValues: Map<String, Double>
+    ): Map<String, Double> = (drinkValues.keys + legacyWaterValues.keys)
+        .associateWith { date ->
+            drinkValues.getOrDefault(date, 0.0) +
+                legacyWaterValues.getOrDefault(date, 0.0)
+        }
+        .filterValues { it > 0.0 }
 
     private fun summaryOf(values: Collection<Double>): NumericSummary =
         NumericSummary(values.takeIf { it.isNotEmpty() }?.average(), values.size)

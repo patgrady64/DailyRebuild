@@ -70,6 +70,10 @@ import androidx.health.connect.client.PermissionController
 import com.pgdevhouse.dailyrebuild.data.local.DailyActivitySnapshot
 import com.pgdevhouse.dailyrebuild.data.local.DailyRebuildDatabase
 import com.pgdevhouse.dailyrebuild.data.local.DailyRecord
+import com.pgdevhouse.dailyrebuild.data.local.DrinkCategory
+import com.pgdevhouse.dailyrebuild.data.local.DrinkDefinition
+import com.pgdevhouse.dailyrebuild.data.local.DrinkEntry
+import com.pgdevhouse.dailyrebuild.data.local.defaultDrinkDefinitions
 import com.pgdevhouse.dailyrebuild.data.local.FoodLogEntry
 import com.pgdevhouse.dailyrebuild.data.local.MobilitySession
 import com.pgdevhouse.dailyrebuild.data.local.ShowerLog
@@ -92,7 +96,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Duration
+import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -104,6 +111,10 @@ import com.pgdevhouse.dailyrebuild.data.remote.FoodLookupResult
 import com.pgdevhouse.dailyrebuild.data.remote.OpenFoodFactsLookup
 import com.pgdevhouse.dailyrebuild.data.remote.ScannedFoodPrefill
 import com.pgdevhouse.dailyrebuild.data.local.FoodProduct
+import com.pgdevhouse.dailyrebuild.data.local.FoodSourceType
+import com.pgdevhouse.dailyrebuild.data.local.NutritionConfidence
+import com.pgdevhouse.dailyrebuild.data.local.PreparedFoodLeftover
+import com.pgdevhouse.dailyrebuild.data.local.isPreparedFood
 import com.pgdevhouse.dailyrebuild.data.local.MealAmountMode
 import androidx.room.withTransaction
 import com.pgdevhouse.dailyrebuild.data.local.SavedMeal
@@ -113,7 +124,12 @@ import com.pgdevhouse.dailyrebuild.data.repository.DailyRebuildRepositories
 import com.pgdevhouse.dailyrebuild.data.preferences.AppPreferencesRepository
 import com.pgdevhouse.dailyrebuild.data.preferences.DailyRebuildPreferenceIds
 import com.pgdevhouse.dailyrebuild.domain.isSupportedFoodBarcode
+import com.pgdevhouse.dailyrebuild.domain.toDrinkEntry
+import com.pgdevhouse.dailyrebuild.domain.totalFluidOunces
+import com.pgdevhouse.dailyrebuild.domain.totalWaterOunces
+import com.pgdevhouse.dailyrebuild.domain.otherDrinkOunces
 import com.pgdevhouse.dailyrebuild.domain.normalizeFoodBarcode
+import com.pgdevhouse.dailyrebuild.domain.remainingAfterLogging
 import com.pgdevhouse.dailyrebuild.ui.food.BarcodeManualSelection
 import com.pgdevhouse.dailyrebuild.ui.food.BarcodeSavePolicy
 import com.pgdevhouse.dailyrebuild.ui.food.FoodBarcodeViewModel
@@ -156,6 +172,8 @@ fun DailyRebuildApp(
     val lifeMaintenanceDao = repositories.lifeMaintenance
     val iopGroupDao = repositories.iopGroups
     val iopAttendanceDao = repositories.iopAttendance
+    val drinkDao = repositories.drinks
+    val preparedFoodRepository = repositories.preparedFoods
 
     val appPreferencesRepository = remember(context) {
         AppPreferencesRepository(context)
@@ -398,6 +416,30 @@ fun DailyRebuildApp(
         mutableStateOf(false)
     }
 
+    var showPreparedFoodDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var preparedFoodDialogDate by rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+
+    var preparedFoodEntryBeingEdited by remember {
+        mutableStateOf<FoodLogEntry?>(null)
+    }
+
+    var preparedFoodProductBeingEdited by remember {
+        mutableStateOf<FoodProduct?>(null)
+    }
+
+    var preparedFoodLeftovers by remember {
+        mutableStateOf<List<PreparedFoodLeftover>>(emptyList())
+    }
+
+    var isSavingPreparedFood by remember {
+        mutableStateOf(false)
+    }
+
     var isScanningBarcode by remember {
         mutableStateOf(false)
     }
@@ -437,6 +479,10 @@ fun DailyRebuildApp(
         mutableStateOf<List<FoodProduct>>(
             emptyList()
         )
+    }
+
+    var recentPreparedProducts by remember {
+        mutableStateOf<List<FoodProduct>>(emptyList())
     }
 
     val pantryEssentials = pantryViewModel.state.items
@@ -815,6 +861,18 @@ fun DailyRebuildApp(
         mutableStateOf(0)
     }
 
+    var drinkDefinitions by remember {
+        mutableStateOf<List<DrinkDefinition>>(emptyList())
+    }
+
+    var drinkEntriesToday by remember {
+        mutableStateOf<List<DrinkEntry>>(emptyList())
+    }
+
+    var isSavingDrink by remember {
+        mutableStateOf(false)
+    }
+
     /*
      * Morning pain relievers
      */
@@ -1086,6 +1144,7 @@ fun DailyRebuildApp(
         mioReusableBottleCount = 0
         plainDisposableBottleCount = 0
         mioDisposableBottleCount = 0
+        drinkEntriesToday = emptyList()
 
         morningAspirinTaken = true
         morningIbuprofenTaken = true
@@ -1099,6 +1158,8 @@ fun DailyRebuildApp(
         journalText = ""
         foodEntries = emptyList()
         allFoodEntries = emptyList()
+        preparedFoodLeftovers = emptyList()
+        recentPreparedProducts = emptyList()
         mobilitySessionsToday = emptyList()
         showeredToday = false
         showerLogToday = null
@@ -1150,6 +1211,24 @@ fun DailyRebuildApp(
                 nightAcetaminophenTaken = savedRecord.nightAcetaminophenTaken
                 journalText = savedRecord.journalText
             }
+
+            drinkDefinitions = loadFeature(
+                feature = "beverage library",
+                userMessage = "Could not load the beverage library."
+            ) {
+                val existing = drinkDao.getAllDefinitions()
+                if (existing.isEmpty()) {
+                    defaultDrinkDefinitions().forEach { drinkDao.insertDefinition(it) }
+                }
+                drinkDao.getAllDefinitions()
+            } ?: emptyList()
+
+            drinkEntriesToday = loadFeature(
+                feature = "drink history",
+                userMessage = "Could not load today’s drinks."
+            ) {
+                drinkDao.getEntriesForDate(todayDate)
+            } ?: emptyList()
 
             savedActivitySnapshot = loadFeature(
                 feature = "saved activity",
@@ -1305,6 +1384,20 @@ fun DailyRebuildApp(
                 foodDao.getAllProducts()
             } ?: emptyList()
 
+            recentPreparedProducts = loadFeature(
+                feature = "recent prepared foods",
+                userMessage = "Could not load recent prepared foods."
+            ) {
+                foodDao.getRecentPreparedProducts()
+            } ?: emptyList()
+
+            preparedFoodLeftovers = loadFeature(
+                feature = "prepared-food leftovers",
+                userMessage = "Could not load prepared-food leftovers."
+            ) {
+                preparedFoodRepository.getAvailable()
+            } ?: emptyList()
+
             savedMeals = loadFeature(
                 feature = "saved meals",
                 userMessage = "Could not load Saved Meals."
@@ -1322,7 +1415,7 @@ fun DailyRebuildApp(
             val savedProductsById = savedProducts.associateBy { it.id }
             foodRecorded = foodEntries.any { entry ->
                 savedProductsById[entry.productId]?.isCondiment != true
-            }
+            } || drinkEntriesToday.any(DrinkEntry::countsAsFood)
 
             loadFailures.summaryMessage()?.let { message ->
                 snackbarHostState.showSnackbar(message)
@@ -1452,15 +1545,29 @@ fun DailyRebuildApp(
     val progressPercent =
         completedTasks * 25
 
-    val totalWaterOunces =
+    val legacyWaterOunces =
         (plainReusableBottleCount + mioReusableBottleCount) * 24.0 +
             (plainDisposableBottleCount + mioDisposableBottleCount) * 16.9
 
+    // Migration 19 -> 20 clears the legacy counters after importing them.
+    // Older JSON backups can still restore those counters into a version 20
+    // database, so add them instead of choosing one storage system or the other.
+    val totalWaterOunces =
+        legacyWaterOunces + totalWaterOunces(drinkEntriesToday)
+
+    val totalDrinkOunces =
+        legacyWaterOunces + totalFluidOunces(drinkEntriesToday)
+
+    val totalOtherDrinkOunces =
+        otherDrinkOunces(drinkEntriesToday)
+
     val totalCaloriesToday =
-        foodEntries.sumOf { it.calories }
+        foodEntries.sumOf { it.calories } +
+            drinkEntriesToday.sumOf { it.calories }
 
     val totalProteinToday =
-        foodEntries.sumOf { it.proteinGrams }
+        foodEntries.sumOf { it.proteinGrams } +
+            drinkEntriesToday.sumOf { it.proteinGrams }
 
     val todayRepeatShortcuts =
         remember(allFoodEntries) {
@@ -1471,6 +1578,7 @@ fun DailyRebuildApp(
         remember(
             todayDate,
             foodEntries,
+            drinkEntriesToday,
             mobilitySessionsToday,
             showerLogToday,
             lifeMaintenanceLogs,
@@ -1733,6 +1841,7 @@ fun DailyRebuildApp(
         mobilitySessionsToday,
         migraineLogs,
         lifeMaintenanceLogs,
+        drinkEntriesToday,
         plainReusableBottleCount,
         mioReusableBottleCount,
         plainDisposableBottleCount,
@@ -1758,7 +1867,10 @@ fun DailyRebuildApp(
                 snapshot = DataQualitySnapshot(
                     dailyRecords = allDailyRecords,
                     foodEntries = foodDao.getAllEntries(),
+                    drinkDefinitions = drinkDao.getAllDefinitions(),
+                    drinkEntries = drinkDao.getAllEntries(),
                     foodProducts = foodDao.getAllProducts(),
+                    preparedFoodLeftovers = preparedFoodRepository.getAll(),
                     activitySnapshots = dailyActivityDao.getAllSnapshots(),
                     mobilitySessions = mobilitySessionDao.getAllSessions(),
                     showerLogs = showerLogDao.getAllLogs(),
@@ -3667,7 +3779,9 @@ fun DailyRebuildApp(
         date: String
     ): List<FoodLogEntry> {
         val entries = foodDao.getEntriesForDate(date)
-        val substantiveFoodRecorded = hasNonCondimentFood(entries)
+        val drinksForDate = drinkDao.getEntriesForDate(date)
+        val substantiveFoodRecorded =
+            hasNonCondimentFood(entries) || drinksForDate.any(DrinkEntry::countsAsFood)
         allFoodEntries = foodDao.getAllEntries()
 
         if (date == todayDate) {
@@ -3703,6 +3817,336 @@ fun DailyRebuildApp(
             }
     }
 
+    suspend fun refreshPreparedFoodState() {
+        savedProducts = foodDao.getAllProducts()
+        recentPreparedProducts = foodDao.getRecentPreparedProducts()
+        preparedFoodLeftovers = preparedFoodRepository.getAvailable()
+    }
+
+    fun closePreparedFoodDialog() {
+        showPreparedFoodDialog = false
+        preparedFoodDialogDate = null
+        preparedFoodEntryBeingEdited = null
+        preparedFoodProductBeingEdited = null
+    }
+
+    fun openPreparedFoodScreen(
+        date: String = todayDate,
+        entry: FoodLogEntry? = null,
+        product: FoodProduct? = null
+    ) {
+        coroutineScope.launch {
+            try {
+                refreshPreparedFoodState()
+                preparedFoodEntryBeingEdited = entry
+                preparedFoodProductBeingEdited = product ?: entry?.let {
+                    foodDao.getProductById(it.productId)
+                }
+                preparedFoodDialogDate = date
+                showPreparedFoodDialog = true
+            } catch (_: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not open prepared-food logging."
+                )
+            }
+        }
+    }
+
+    fun savePreparedFood(draft: PreparedFoodDraft) {
+        if (isSavingPreparedFood) return
+        isSavingPreparedFood = true
+
+        coroutineScope.launch {
+            val previousDate = preparedFoodEntryBeingEdited?.date
+            try {
+                database.withTransaction {
+                    val existingProduct = draft.productId?.let {
+                        foodDao.getProductById(it)
+                    }
+                    val now = System.currentTimeMillis()
+                    val componentNotes = draft.componentSummary
+                        .takeIf(String::isNotBlank)
+                        ?.let { "Estimate components: $it" }
+                    val combinedNotes = listOfNotNull(
+                        draft.nutritionNotes.takeIf(String::isNotBlank),
+                        componentNotes
+                    ).joinToString("\n")
+
+                    val product = FoodProduct(
+                        id = existingProduct?.id ?: 0L,
+                        barcode = null,
+                        name = draft.foodName,
+                        brand = draft.sourceName,
+                        caloriesPerServing = draft.nutritionPerUnit.calories,
+                        proteinGramsPerServing = draft.nutritionPerUnit.proteinGrams,
+                        carbohydrateGramsPerServing = draft.nutritionPerUnit.carbohydrateGrams,
+                        fatGramsPerServing = draft.nutritionPerUnit.fatGrams,
+                        sodiumMilligramsPerServing = draft.nutritionPerUnit.sodiumMilligrams,
+                        servingQuantity = 1.0,
+                        servingUnit = draft.unit,
+                        packageQuantity = null,
+                        packageUnit = null,
+                        isFavorite = existingProduct?.isFavorite ?: false,
+                        isCondiment = false,
+                        sourceType = draft.sourceType,
+                        sourceName = draft.sourceName,
+                        nutritionConfidence = draft.nutritionConfidence,
+                        calorieEstimateLow = draft.calorieEstimateLowPerUnit,
+                        calorieEstimateHigh = draft.calorieEstimateHighPerUnit,
+                        nutritionNotes = combinedNotes,
+                        isReusable = draft.saveAsReusable,
+                        createdAt = existingProduct?.createdAt ?: now,
+                        updatedAt = now
+                    )
+
+                    val productId = if (existingProduct == null) {
+                        foodDao.addProduct(product)
+                    } else {
+                        foodDao.updateProduct(product)
+                        product.id
+                    }
+
+                    val totalNutrition = draft.nutritionPerUnit.scaled(draft.quantityEaten)
+                    val entry = FoodLogEntry(
+                        id = draft.entryId ?: 0L,
+                        date = draft.date,
+                        productId = productId,
+                        quantity = draft.quantityEaten,
+                        unit = draft.unit,
+                        mealName = null,
+                        mealLogId = null,
+                        savedMealId = null,
+                        mealQuantity = 1.0,
+                        productNameSnapshot = draft.foodName,
+                        calories = totalNutrition.calories,
+                        proteinGrams = totalNutrition.proteinGrams,
+                        carbohydrateGrams = totalNutrition.carbohydrateGrams,
+                        fatGrams = totalNutrition.fatGrams,
+                        sodiumMilligrams = totalNutrition.sodiumMilligrams,
+                        sourceTypeSnapshot = draft.sourceType,
+                        sourceNameSnapshot = draft.sourceName,
+                        nutritionConfidenceSnapshot = draft.nutritionConfidence,
+                        calorieEstimateLow = draft.calorieEstimateLowPerUnit
+                            ?.times(draft.quantityEaten),
+                        calorieEstimateHigh = draft.calorieEstimateHighPerUnit
+                            ?.times(draft.quantityEaten),
+                        nutritionNotes = combinedNotes,
+                        createdAt = draft.consumedAt
+                    )
+
+                    val savedEntryId = if (draft.entryId == null) {
+                        foodDao.addFoodEntry(entry)
+                    } else {
+                        foodDao.updateFoodEntry(entry)
+                        draft.entryId
+                    }
+
+                    if (draft.entryId == null && draft.leftoverQuantity > 0.0) {
+                        preparedFoodRepository.insert(
+                            PreparedFoodLeftover(
+                                productId = productId,
+                                originEntryId = savedEntryId,
+                                originDate = draft.date,
+                                sourceType = draft.sourceType,
+                                sourceName = draft.sourceName,
+                                foodName = draft.foodName,
+                                portionUnit = draft.unit,
+                                remainingQuantity = draft.leftoverQuantity,
+                                caloriesPerUnit = draft.nutritionPerUnit.calories,
+                                proteinGramsPerUnit = draft.nutritionPerUnit.proteinGrams,
+                                carbohydrateGramsPerUnit = draft.nutritionPerUnit.carbohydrateGrams,
+                                fatGramsPerUnit = draft.nutritionPerUnit.fatGrams,
+                                sodiumMilligramsPerUnit = draft.nutritionPerUnit.sodiumMilligrams,
+                                nutritionConfidence = draft.nutritionConfidence,
+                                calorieEstimateLowPerUnit = draft.calorieEstimateLowPerUnit,
+                                calorieEstimateHighPerUnit = draft.calorieEstimateHighPerUnit,
+                                notes = combinedNotes,
+                                createdAt = now,
+                                updatedAt = now
+                            )
+                        )
+                    } else if (draft.entryId != null) {
+                        preparedFoodRepository.getByOriginEntryId(draft.entryId)
+                            ?.let { linkedLeftover ->
+                                preparedFoodRepository.update(
+                                    linkedLeftover.copy(
+                                        productId = productId,
+                                        originDate = draft.date,
+                                        sourceType = draft.sourceType,
+                                        sourceName = draft.sourceName,
+                                        foodName = draft.foodName,
+                                        portionUnit = draft.unit,
+                                        caloriesPerUnit = draft.nutritionPerUnit.calories,
+                                        proteinGramsPerUnit = draft.nutritionPerUnit.proteinGrams,
+                                        carbohydrateGramsPerUnit = draft.nutritionPerUnit.carbohydrateGrams,
+                                        fatGramsPerUnit = draft.nutritionPerUnit.fatGrams,
+                                        sodiumMilligramsPerUnit = draft.nutritionPerUnit.sodiumMilligrams,
+                                        nutritionConfidence = draft.nutritionConfidence,
+                                        calorieEstimateLowPerUnit = draft.calorieEstimateLowPerUnit,
+                                        calorieEstimateHighPerUnit = draft.calorieEstimateHighPerUnit,
+                                        notes = combinedNotes,
+                                        updatedAt = now
+                                    )
+                                )
+                            }
+                    }
+                }
+
+                previousDate
+                    ?.takeIf { it != draft.date }
+                    ?.let { synchronizeFoodRecordedForDate(it) }
+                synchronizeFoodRecordedForDate(draft.date)
+                refreshPreparedFoodState()
+                historyViewModel.refresh()
+                statsViewModel.refresh()
+                val historicalDate = historicalFoodLogDate
+                closePreparedFoodDialog()
+                if (historicalDate != null) {
+                    historicalFoodLogDate = null
+                    initialDailyHistoryDate = historicalDate
+                    historyViewModel.selectFilter(DailyHistoryFilter.ALL)
+                    showDailyHistoryDialog = true
+                }
+                snackbarHostState.showSnackbar(
+                    message = if (draft.entryId == null) {
+                        if (draft.nutritionConfidence == NutritionConfidence.UNKNOWN) {
+                            "Prepared food logged without estimated nutrition."
+                        } else {
+                            "Prepared food logged."
+                        }
+                    } else {
+                        "Prepared food updated."
+                    }
+                )
+            } catch (_: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not save the prepared food."
+                )
+            } finally {
+                isSavingPreparedFood = false
+            }
+        }
+    }
+
+    fun logPreparedFoodLeftover(draft: LeftoverLogDraft) {
+        if (isSavingPreparedFood) return
+        isSavingPreparedFood = true
+
+        coroutineScope.launch {
+            try {
+                database.withTransaction {
+                    val now = System.currentTimeMillis()
+                    val existingProduct = draft.leftover.productId?.let {
+                        foodDao.getProductById(it)
+                    }
+                    val productId = existingProduct?.id ?: foodDao.addProduct(
+                        FoodProduct(
+                            name = draft.leftover.foodName,
+                            brand = draft.leftover.sourceName,
+                            caloriesPerServing = draft.leftover.caloriesPerUnit,
+                            proteinGramsPerServing = draft.leftover.proteinGramsPerUnit,
+                            carbohydrateGramsPerServing = draft.leftover.carbohydrateGramsPerUnit,
+                            fatGramsPerServing = draft.leftover.fatGramsPerUnit,
+                            sodiumMilligramsPerServing = draft.leftover.sodiumMilligramsPerUnit,
+                            servingQuantity = 1.0,
+                            servingUnit = draft.leftover.portionUnit,
+                            sourceType = draft.leftover.sourceType,
+                            sourceName = draft.leftover.sourceName,
+                            nutritionConfidence = draft.leftover.nutritionConfidence,
+                            calorieEstimateLow = draft.leftover.calorieEstimateLowPerUnit,
+                            calorieEstimateHigh = draft.leftover.calorieEstimateHighPerUnit,
+                            nutritionNotes = draft.leftover.notes,
+                            isReusable = false,
+                            createdAt = now,
+                            updatedAt = now
+                        )
+                    )
+
+                    foodDao.addFoodEntry(
+                        FoodLogEntry(
+                            date = draft.date,
+                            productId = productId,
+                            quantity = draft.quantityEaten,
+                            unit = draft.leftover.portionUnit,
+                            productNameSnapshot = draft.leftover.foodName,
+                            calories = draft.leftover.caloriesPerUnit * draft.quantityEaten,
+                            proteinGrams = draft.leftover.proteinGramsPerUnit * draft.quantityEaten,
+                            carbohydrateGrams = draft.leftover.carbohydrateGramsPerUnit * draft.quantityEaten,
+                            fatGrams = draft.leftover.fatGramsPerUnit * draft.quantityEaten,
+                            sodiumMilligrams = draft.leftover.sodiumMilligramsPerUnit * draft.quantityEaten,
+                            sourceTypeSnapshot = draft.leftover.sourceType,
+                            sourceNameSnapshot = draft.leftover.sourceName,
+                            nutritionConfidenceSnapshot = draft.leftover.nutritionConfidence,
+                            calorieEstimateLow = draft.leftover.calorieEstimateLowPerUnit
+                                ?.times(draft.quantityEaten),
+                            calorieEstimateHigh = draft.leftover.calorieEstimateHighPerUnit
+                                ?.times(draft.quantityEaten),
+                            nutritionNotes = draft.leftover.notes,
+                            createdAt = draft.consumedAt
+                        )
+                    )
+
+                    val remainingQuantity = remainingAfterLogging(
+                        draft.leftover.remainingQuantity,
+                        draft.quantityEaten
+                    )
+                    if (remainingQuantity <= 0.0001) {
+                        preparedFoodRepository.delete(draft.leftover)
+                    } else {
+                        preparedFoodRepository.update(
+                            draft.leftover.copy(
+                                remainingQuantity = remainingQuantity,
+                                updatedAt = now
+                            )
+                        )
+                    }
+                }
+
+                synchronizeFoodRecordedForDate(draft.date)
+                refreshPreparedFoodState()
+                historyViewModel.refresh()
+                statsViewModel.refresh()
+                val historicalDate = historicalFoodLogDate
+                closePreparedFoodDialog()
+                if (historicalDate != null) {
+                    historicalFoodLogDate = null
+                    initialDailyHistoryDate = historicalDate
+                    historyViewModel.selectFilter(DailyHistoryFilter.ALL)
+                    showDailyHistoryDialog = true
+                }
+                snackbarHostState.showSnackbar("Leftovers logged.")
+            } catch (_: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not log those leftovers."
+                )
+            } finally {
+                isSavingPreparedFood = false
+            }
+        }
+    }
+
+    fun deletePreparedFoodLeftover(leftover: PreparedFoodLeftover) {
+        if (isSavingPreparedFood) return
+        isSavingPreparedFood = true
+        coroutineScope.launch {
+            try {
+                preparedFoodRepository.delete(leftover)
+                preparedFoodLeftovers = preparedFoodRepository.getAvailable()
+                snackbarHostState.showUndoableDelete(
+                    message = "Leftover removed.",
+                    restoredMessage = "Leftover restored."
+                ) {
+                    preparedFoodRepository.save(leftover)
+                    preparedFoodLeftovers = preparedFoodRepository.getAvailable()
+                }
+            } catch (_: Exception) {
+                snackbarHostState.showSnackbar("Could not remove the leftover.")
+            } finally {
+                isSavingPreparedFood = false
+            }
+        }
+    }
+
     fun scaleFoodEntryToQuantity(
         entry: FoodLogEntry,
         newQuantity: Double
@@ -3724,7 +4168,9 @@ fun DailyRebuildApp(
             proteinGrams = entry.proteinGrams * nutritionScale,
             carbohydrateGrams = entry.carbohydrateGrams * nutritionScale,
             fatGrams = entry.fatGrams * nutritionScale,
-            sodiumMilligrams = entry.sodiumMilligrams * nutritionScale
+            sodiumMilligrams = entry.sodiumMilligrams * nutritionScale,
+            calorieEstimateLow = entry.calorieEstimateLow?.times(nutritionScale),
+            calorieEstimateHigh = entry.calorieEstimateHigh?.times(nutritionScale)
         )
     }
 
@@ -4122,12 +4568,18 @@ fun DailyRebuildApp(
     ) {
         coroutineScope.launch {
             try {
-                foodDao
-                    .deleteFoodEntryById(
-                        entry.id
-                    )
+                val linkedLeftover = preparedFoodRepository
+                    .getByOriginEntryId(entry.id)
+
+                database.withTransaction {
+                    linkedLeftover?.let {
+                        preparedFoodRepository.delete(it)
+                    }
+                    foodDao.deleteFoodEntryById(entry.id)
+                }
 
                 synchronizeFoodRecordedForDate(entry.date)
+                refreshPreparedFoodState()
                 historyViewModel.refresh()
                 statsViewModel.refresh()
 
@@ -4135,8 +4587,14 @@ fun DailyRebuildApp(
                     message = "Food entry deleted.",
                     restoredMessage = "Food entry restored."
                 ) {
-                    foodDao.addFoodEntry(entry)
+                    database.withTransaction {
+                        foodDao.addFoodEntry(entry)
+                        linkedLeftover?.let {
+                            preparedFoodRepository.save(it)
+                        }
+                    }
                     synchronizeFoodRecordedForDate(entry.date)
+                    refreshPreparedFoodState()
                     historyViewModel.refresh()
                     statsViewModel.refresh()
                 }
@@ -4196,6 +4654,243 @@ fun DailyRebuildApp(
         }
     }
 
+    fun refreshDrinkScreens() {
+        historyViewModel.refresh()
+        statsViewModel.refresh()
+    }
+
+    fun logDrinkDefinition(
+        definition: DrinkDefinition,
+        amountFlOz: Double
+    ) {
+        if (isSavingDrink) return
+        isSavingDrink = true
+        coroutineScope.launch {
+            try {
+                val entry = definition.toDrinkEntry(
+                    date = todayDate,
+                    consumedAt = System.currentTimeMillis(),
+                    amountFlOz = amountFlOz
+                )
+                val id = drinkDao.insertEntry(entry)
+                drinkEntriesToday = (drinkEntriesToday + entry.copy(id = id))
+                    .sortedBy(DrinkEntry::consumedAt)
+                if (entry.countsAsFood) {
+                    synchronizeFoodRecordedForDate(todayDate)
+                }
+                refreshDrinkScreens()
+                snackbarHostState.showSnackbar(
+                    message = "${entry.drinkNameSnapshot} logged."
+                )
+            } catch (_: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not log that drink."
+                )
+            } finally {
+                isSavingDrink = false
+            }
+        }
+    }
+
+    fun logCustomDrink(
+        original: DrinkEntry,
+        saveShortcut: Boolean
+    ) {
+        if (isSavingDrink) return
+        isSavingDrink = true
+        coroutineScope.launch {
+            try {
+                var entry = original
+                if (saveShortcut) {
+                    val definition = DrinkDefinition(
+                        name = original.drinkNameSnapshot,
+                        category = original.categorySnapshot,
+                        defaultAmountFlOz = original.amountFlOz,
+                        caloriesPerDefaultAmount = original.calories,
+                        carbohydrateGramsPerDefaultAmount = original.carbohydrateGrams,
+                        sugarGramsPerDefaultAmount = original.sugarGrams,
+                        proteinGramsPerDefaultAmount = original.proteinGrams,
+                        caffeineMilligramsPerDefaultAmount = original.caffeineMilligrams,
+                        countsAsWater = original.countsAsWater,
+                        countsAsFood = original.countsAsFood,
+                        notes = original.notes,
+                        isFavorite = true
+                    )
+                    val definitionId = drinkDao.insertDefinition(definition)
+                    entry = original.copy(definitionId = definitionId)
+                    drinkDefinitions = drinkDao.getAllDefinitions()
+                }
+                val id = drinkDao.insertEntry(entry)
+                drinkEntriesToday = (drinkEntriesToday + entry.copy(id = id))
+                    .sortedBy(DrinkEntry::consumedAt)
+                if (entry.countsAsFood) {
+                    synchronizeFoodRecordedForDate(todayDate)
+                }
+                refreshDrinkScreens()
+                snackbarHostState.showSnackbar(
+                    message = "${entry.drinkNameSnapshot} logged."
+                )
+            } catch (_: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not log that drink."
+                )
+            } finally {
+                isSavingDrink = false
+            }
+        }
+    }
+
+    fun saveDrinkDefinition(definition: DrinkDefinition) {
+        if (isSavingDrink) return
+        isSavingDrink = true
+        coroutineScope.launch {
+            try {
+                if (definition.id == 0L) {
+                    drinkDao.insertDefinition(definition)
+                } else {
+                    drinkDao.updateDefinition(definition)
+                }
+                drinkDefinitions = drinkDao.getAllDefinitions()
+                snackbarHostState.showSnackbar(
+                    message = "Beverage shortcut saved."
+                )
+            } catch (_: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not save that beverage."
+                )
+            } finally {
+                isSavingDrink = false
+            }
+        }
+    }
+
+    fun updateDrinkEntry(entry: DrinkEntry) {
+        if (isSavingDrink) return
+        isSavingDrink = true
+        coroutineScope.launch {
+            try {
+                val previousDate = drinkEntriesToday
+                    .firstOrNull { it.id == entry.id }
+                    ?.date
+                    ?: entry.date
+                drinkDao.updateEntry(entry)
+                synchronizeFoodRecordedForDate(previousDate)
+                if (entry.date != previousDate) {
+                    synchronizeFoodRecordedForDate(entry.date)
+                }
+                drinkEntriesToday = drinkDao.getEntriesForDate(todayDate)
+                refreshDrinkScreens()
+                snackbarHostState.showSnackbar(
+                    message = "Drink updated."
+                )
+            } catch (_: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not update that drink."
+                )
+            } finally {
+                isSavingDrink = false
+            }
+        }
+    }
+
+    fun deleteDrinkEntry(entry: DrinkEntry) {
+        if (isSavingDrink) return
+        isSavingDrink = true
+        coroutineScope.launch {
+            try {
+                drinkDao.deleteEntry(entry)
+                drinkEntriesToday = drinkEntriesToday.filterNot { it.id == entry.id }
+                synchronizeFoodRecordedForDate(entry.date)
+                refreshDrinkScreens()
+                snackbarHostState.showUndoableDelete(
+                    message = "Drink deleted.",
+                    restoredMessage = "Drink restored."
+                ) {
+                    val restoredId = drinkDao.insertEntry(entry.copy(id = 0L))
+                    if (entry.date == todayDate) {
+                        drinkEntriesToday = (drinkEntriesToday + entry.copy(id = restoredId))
+                            .sortedBy(DrinkEntry::consumedAt)
+                    }
+                    synchronizeFoodRecordedForDate(entry.date)
+                    refreshDrinkScreens()
+                }
+            } catch (_: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = "Could not delete that drink."
+                )
+            } finally {
+                isSavingDrink = false
+            }
+        }
+    }
+
+    fun clearTodayDrinks() {
+        if (isSavingDrink) return
+        val removed = drinkEntriesToday
+        val legacyCounts = WaterBottleCounts(
+            plainReusable = plainReusableBottleCount,
+            mioReusable = mioReusableBottleCount,
+            plainDisposable = plainDisposableBottleCount,
+            mioDisposable = mioDisposableBottleCount
+        )
+        isSavingDrink = true
+        coroutineScope.launch {
+            try {
+                drinkDao.deleteEntriesForDate(todayDate)
+                drinkEntriesToday = emptyList()
+                plainReusableBottleCount = 0
+                mioReusableBottleCount = 0
+                plainDisposableBottleCount = 0
+                mioDisposableBottleCount = 0
+                val record = dailyRecordDao.getRecordByDate(todayDate)
+                if (record != null) {
+                    dailyRecordDao.saveRecord(
+                        record.copy(
+                            plainReusableBottleCount = 0,
+                            mioReusableBottleCount = 0,
+                            plainDisposableBottleCount = 0,
+                            mioDisposableBottleCount = 0,
+                            updatedAt = System.currentTimeMillis()
+                        )
+                    )
+                }
+                synchronizeFoodRecordedForDate(todayDate)
+                refreshDrinkScreens()
+                snackbarHostState.showUndoableDelete(
+                    message = "Today’s drinks cleared.",
+                    restoredMessage = "Today’s drinks restored."
+                ) {
+                    removed.forEach { drinkDao.insertEntry(it.copy(id = 0L)) }
+                    plainReusableBottleCount = legacyCounts.plainReusable
+                    mioReusableBottleCount = legacyCounts.mioReusable
+                    plainDisposableBottleCount = legacyCounts.plainDisposable
+                    mioDisposableBottleCount = legacyCounts.mioDisposable
+                    drinkEntriesToday = drinkDao.getEntriesForDate(todayDate)
+                    val latest = dailyRecordDao.getRecordByDate(todayDate)
+                        ?: buildCurrentDailyRecord()
+                    dailyRecordDao.saveRecord(
+                        latest.copy(
+                            plainReusableBottleCount = legacyCounts.plainReusable,
+                            mioReusableBottleCount = legacyCounts.mioReusable,
+                            plainDisposableBottleCount = legacyCounts.plainDisposable,
+                            mioDisposableBottleCount = legacyCounts.mioDisposable,
+                            updatedAt = System.currentTimeMillis()
+                        )
+                    )
+                    synchronizeFoodRecordedForDate(todayDate)
+                    refreshDrinkScreens()
+                }
+            } catch (_: Exception) {
+                drinkEntriesToday = removed
+                snackbarHostState.showSnackbar(
+                    message = "Could not clear today’s drinks."
+                )
+            } finally {
+                isSavingDrink = false
+            }
+        }
+    }
+
     fun showPantryResult(message: String?) {
         if (message == null) return
         coroutineScope.launch {
@@ -4235,6 +4930,9 @@ fun DailyRebuildApp(
                     products = foodDao.getAllProducts(),
                     meals = mealDao.getAllMealsWithIngredients(),
                     foodEntries = foodDao.getAllEntries(),
+                    preparedFoodLeftovers = preparedFoodRepository.getAvailable(),
+                    drinkDefinitions = drinkDao.getAllDefinitions(),
+                    drinkEntries = drinkDao.getAllEntries(),
                     dailyRecords = dailyRecordDao.getAllRecords(),
                     carePlaces = careVisitDao.getActivePlaces(),
                     careProviders = careVisitDao.getActiveProviders(),
@@ -4294,10 +4992,14 @@ fun DailyRebuildApp(
                         navigationViewModel.openLogSection(
                             AppNavigationViewModel.LOG_FOOD_SECTION
                         )
-                        isCreatingFoodForMeal = false
-                        isEditingSavedFood = true
-                        scannedFoodPrefill = product.toFoodPrefill()
-                        showManualFoodDialog = true
+                        if (product.isPreparedFood()) {
+                            openPreparedFoodScreen(product = product)
+                        } else {
+                            isCreatingFoodForMeal = false
+                            isEditingSavedFood = true
+                            scannedFoodPrefill = product.toFoodPrefill()
+                            showManualFoodDialog = true
+                        }
                     }
             }
 
@@ -4311,6 +5013,28 @@ fun DailyRebuildApp(
                         savedProducts = globalSearchSnapshot.products
                         mealBeingEdited = savedMeal
                         showMealBuilderDialog = true
+                    }
+            }
+
+            is GlobalSearchTarget.PreparedFoodLeftoverTarget -> {
+                globalSearchSnapshot.preparedFoodLeftovers
+                    .firstOrNull { it.id == target.id }
+                    ?.let {
+                        navigationViewModel.openLogSection(
+                            AppNavigationViewModel.LOG_FOOD_SECTION
+                        )
+                        openPreparedFoodScreen()
+                    }
+            }
+
+            is GlobalSearchTarget.DrinkDefinitionTarget -> {
+                globalSearchSnapshot.drinkDefinitions
+                    .firstOrNull { it.id == target.id }
+                    ?.let {
+                        navigationViewModel.openLogSection(
+                            AppNavigationViewModel.LOG_FOOD_SECTION
+                        )
+                        showQuickWaterDialog = true
                     }
             }
 
@@ -4459,14 +5183,22 @@ fun DailyRebuildApp(
     val foodHubState = FoodHubState(
         selectedSection = 0,
         totalWaterOunces = totalWaterOunces,
-        totalBottleCount =
-            plainReusableBottleCount +
-                mioReusableBottleCount +
-                plainDisposableBottleCount +
+        totalDrinkOunces = totalDrinkOunces,
+        otherDrinkOunces = totalOtherDrinkOunces,
+        totalDrinkCount =
+            drinkEntriesToday.size + plainReusableBottleCount +
+                mioReusableBottleCount + plainDisposableBottleCount +
                 mioDisposableBottleCount,
+        drinkCalories = drinkEntriesToday.sumOf(DrinkEntry::calories),
+        drinkProteinGrams = drinkEntriesToday.sumOf(DrinkEntry::proteinGrams),
+        drinkCarbohydrateGrams =
+            drinkEntriesToday.sumOf(DrinkEntry::carbohydrateGrams),
+        drinkSugarGrams = drinkEntriesToday.sumOf(DrinkEntry::sugarGrams),
         entries = foodEntries,
-        savedFoodCount = savedProducts.size,
+        savedFoodCount = savedProducts.count { !it.isPreparedFood() },
         savedMealCount = savedMeals.size,
+        preparedFoodCount = savedProducts.count { it.isPreparedFood() },
+        leftoverCount = preparedFoodLeftovers.size,
         lastScannedBarcode = lastScannedBarcode,
         isScanningBarcode = isScanningBarcode,
         currentCalorieGoal = currentCalorieGoal,
@@ -4486,11 +5218,15 @@ fun DailyRebuildApp(
             scannedFoodPrefill = null
             showManualFoodDialog = true
         },
+        onOpenPreparedFood = { openPreparedFoodScreen() },
         onOpenSavedFoods = { openSavedFoodsScreen() },
         onBuildMeal = { openMealBuilderScreen() },
         onOpenSavedMeals = { openSavedMealsScreen() },
         onUpdateEntryQuantity = { entry, quantity ->
             updateFoodEntryQuantity(entry, quantity)
+        },
+        onEditPreparedEntry = { entry ->
+            openPreparedFoodScreen(date = entry.date, entry = entry)
         },
         onUpdateMealQuantity = { mealLogId, quantity ->
             updateMealLogQuantity(mealLogId, quantity)
@@ -4676,6 +5412,8 @@ fun DailyRebuildApp(
                         proteinGrams = totalProteinToday,
                         calorieGoal = currentCalorieGoal,
                         waterOunces = totalWaterOunces,
+                        totalFluidOunces = totalDrinkOunces,
+                        otherDrinkOunces = totalOtherDrinkOunces,
                         showerDatesThisWeek = showerDatesThisWeek,
                         showeredToday = showeredToday,
                         showersThisWeek = showerCountThisWeek,
@@ -5771,300 +6509,18 @@ fun DailyRebuildApp(
     }
 
     if (showQuickWaterDialog) {
-        AlertDialog(
-            onDismissRequest = {
-                showQuickWaterDialog = false
-            },
-            title = {
-                Text("Log Water")
-            },
-            text = {
-                Column(
-                    modifier =
-                        Modifier
-                            .heightIn(max = 520.dp)
-                            .verticalScroll(
-                                rememberScrollState()
-                            ),
-                    verticalArrangement =
-                        Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text =
-                            "${formatOunces(totalWaterOunces)} oz recorded today",
-                        style =
-                            MaterialTheme.typography.titleMedium
-                    )
-
-                    Row(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(
-                                    RoundedCornerShape(16.dp)
-                                )
-                                .clickable {
-                                    nextBottleHasMio =
-                                        !nextBottleHasMio
-                                }
-                                .padding(8.dp),
-                        verticalAlignment =
-                            Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked =
-                                nextBottleHasMio,
-                            onCheckedChange = {
-                                nextBottleHasMio = it
-                            }
-                        )
-
-                        Text(
-                            text =
-                                "The next bottle has MiO",
-                            style =
-                                MaterialTheme.typography
-                                    .bodyMedium
-                        )
-                    }
-
-                    Button(
-                        onClick = {
-                            if (nextBottleHasMio) {
-                                mioReusableBottleCount++
-                            } else {
-                                plainReusableBottleCount++
-                            }
-                            showQuickWaterDialog = false
-                        },
-                        modifier =
-                            Modifier.fillMaxWidth(),
-                        shape =
-                            RoundedCornerShape(16.dp)
-                    ) {
-                        Text("Add 24 oz reusable bottle")
-                    }
-
-                    OutlinedButton(
-                        onClick = {
-                            if (nextBottleHasMio) {
-                                mioDisposableBottleCount++
-                            } else {
-                                plainDisposableBottleCount++
-                            }
-                            showQuickWaterDialog = false
-                        },
-                        modifier =
-                            Modifier.fillMaxWidth(),
-                        shape =
-                            RoundedCornerShape(16.dp)
-                    ) {
-                        Text("Add 16.9 oz disposable bottle")
-                    }
-
-                    if (
-                        plainReusableBottleCount +
-                            mioReusableBottleCount +
-                            plainDisposableBottleCount +
-                            mioDisposableBottleCount >
-                        0
-                    ) {
-                        HorizontalDivider()
-
-                        Text(
-                            text = "Today’s bottles",
-                            style =
-                                MaterialTheme.typography
-                                    .titleMedium
-                        )
-
-                        if (
-                            plainReusableBottleCount >
-                            0
-                        ) {
-                            WaterCountRow(
-                                label =
-                                    "24 oz plain water",
-                                count =
-                                    plainReusableBottleCount,
-                                onRemoveOne = {
-                                    plainReusableBottleCount--
-                                }
-                            )
-                        }
-
-                        if (
-                            mioReusableBottleCount >
-                            0
-                        ) {
-                            WaterCountRow(
-                                label =
-                                    "24 oz MiO water",
-                                count =
-                                    mioReusableBottleCount,
-                                onRemoveOne = {
-                                    mioReusableBottleCount--
-                                }
-                            )
-                        }
-
-                        if (
-                            plainDisposableBottleCount >
-                            0
-                        ) {
-                            WaterCountRow(
-                                label =
-                                    "16.9 oz plain water",
-                                count =
-                                    plainDisposableBottleCount,
-                                onRemoveOne = {
-                                    plainDisposableBottleCount--
-                                }
-                            )
-                        }
-
-                        if (
-                            mioDisposableBottleCount >
-                            0
-                        ) {
-                            WaterCountRow(
-                                label =
-                                    "16.9 oz MiO water",
-                                count =
-                                    mioDisposableBottleCount,
-                                onRemoveOne = {
-                                    mioDisposableBottleCount--
-                                }
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showQuickWaterDialog = false
-                    }
-                ) {
-                    Text("Done")
-                }
-            },
-            dismissButton = {
-                if (
-                    plainReusableBottleCount +
-                        mioReusableBottleCount +
-                        plainDisposableBottleCount +
-                        mioDisposableBottleCount > 0
-                ) {
-                    TextButton(
-                        onClick = {
-                            showQuickWaterDialog = false
-                            showClearWaterConfirmation = true
-                        }
-                    ) {
-                        Text(
-                            text = "Clear today’s water",
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
-            }
-        )
-    }
-
-    if (showClearWaterConfirmation) {
-        AlertDialog(
-            onDismissRequest = {
-                showClearWaterConfirmation = false
-                showQuickWaterDialog = true
-            },
-            title = { Text("Clear today’s water?") },
-            text = {
-                Text(
-                    "All four bottle counts for today will return to zero. You can immediately restore them with Undo."
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val removedPlainReusable = plainReusableBottleCount
-                        val removedMioReusable = mioReusableBottleCount
-                        val removedPlainDisposable = plainDisposableBottleCount
-                        val removedMioDisposable = mioDisposableBottleCount
-
-                        plainReusableBottleCount = 0
-                        mioReusableBottleCount = 0
-                        plainDisposableBottleCount = 0
-                        mioDisposableBottleCount = 0
-                        showClearWaterConfirmation = false
-
-                        coroutineScope.launch {
-                            try {
-                                val currentRecord = dailyRecordDao
-                                    .getRecordByDate(todayDate)
-                                    ?: buildCurrentDailyRecord()
-                                dailyRecordDao.saveRecord(
-                                    currentRecord.copy(
-                                        plainReusableBottleCount = 0,
-                                        mioReusableBottleCount = 0,
-                                        plainDisposableBottleCount = 0,
-                                        mioDisposableBottleCount = 0,
-                                        updatedAt = System.currentTimeMillis()
-                                    )
-                                )
-                                historyViewModel.refresh()
-                                statsViewModel.refresh()
-                                snackbarHostState.showUndoableDelete(
-                                    message = "Today’s water cleared.",
-                                    restoredMessage = "Today’s water restored."
-                                ) {
-                                    plainReusableBottleCount = removedPlainReusable
-                                    mioReusableBottleCount = removedMioReusable
-                                    plainDisposableBottleCount = removedPlainDisposable
-                                    mioDisposableBottleCount = removedMioDisposable
-                                    val latestRecord = dailyRecordDao
-                                        .getRecordByDate(todayDate)
-                                        ?: buildCurrentDailyRecord()
-                                    dailyRecordDao.saveRecord(
-                                        latestRecord.copy(
-                                            plainReusableBottleCount = removedPlainReusable,
-                                            mioReusableBottleCount = removedMioReusable,
-                                            plainDisposableBottleCount = removedPlainDisposable,
-                                            mioDisposableBottleCount = removedMioDisposable,
-                                            updatedAt = System.currentTimeMillis()
-                                        )
-                                    )
-                                    historyViewModel.refresh()
-                                    statsViewModel.refresh()
-                                }
-                            } catch (_: Exception) {
-                                plainReusableBottleCount = removedPlainReusable
-                                mioReusableBottleCount = removedMioReusable
-                                plainDisposableBottleCount = removedPlainDisposable
-                                mioDisposableBottleCount = removedMioDisposable
-                                snackbarHostState.showSnackbar(
-                                    message = "Could not clear today’s water."
-                                )
-                            }
-                        }
-                    }
-                ) {
-                    Text(
-                        text = "Clear water",
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        showClearWaterConfirmation = false
-                        showQuickWaterDialog = true
-                    }
-                ) {
-                    Text("Cancel")
-                }
-            }
+        DrinksAndHydrationDialog(
+            date = todayDate,
+            entries = drinkEntriesToday,
+            definitions = drinkDefinitions,
+            isWorking = isSavingDrink,
+            onLogDefinition = ::logDrinkDefinition,
+            onLogCustom = ::logCustomDrink,
+            onUpdateEntry = ::updateDrinkEntry,
+            onDeleteEntry = ::deleteDrinkEntry,
+            onSaveDefinition = ::saveDrinkDefinition,
+            onClearAll = ::clearTodayDrinks,
+            onDismiss = { showQuickWaterDialog = false }
         )
     }
 
@@ -6276,7 +6732,7 @@ fun DailyRebuildApp(
         SavedMealsDialog(
             meals = savedMeals,
 
-            products = savedProducts,
+            products = savedProducts.filterNot { it.isPreparedFood() },
 
             isAddingMeal = isAddingSavedMeal,
 
@@ -6295,7 +6751,7 @@ fun DailyRebuildApp(
 
                     try {
                         val productsById =
-                            savedProducts.associateBy {
+                            savedProducts.filterNot { it.isPreparedFood() }.associateBy {
                                 it.id
                             }
 
@@ -6678,7 +7134,7 @@ fun DailyRebuildApp(
 
     if (showMealBuilderDialog) {
         MealBuilderDialog(
-            products = savedProducts,
+            products = savedProducts.filterNot { it.isPreparedFood() },
 
             initialMeal =
                 mealBeingEdited,
@@ -6818,7 +7274,7 @@ fun DailyRebuildApp(
 
     if (showSavedFoodsDialog) {
         SavedFoodsDialog(
-            products = savedProducts,
+            products = savedProducts.filterNot { it.isPreparedFood() },
 
             onDismiss = {
                 showSavedFoodsDialog = false
@@ -7044,6 +7500,7 @@ fun DailyRebuildApp(
             isDeletingDay =
                 isDeletingDailyHistoryDay,
             isUpdatingDay = isUpdatingHistoryDay,
+            drinkDefinitions = drinkDefinitions,
 
             onAddSavedFood = { day ->
                 beginHistoricalFoodEdit(day.date)
@@ -7063,42 +7520,218 @@ fun DailyRebuildApp(
                 showManualFoodDialog = true
             },
 
-            onUpdateWater = { day, counts ->
-                historicalWaterSaveJob?.cancel()
-                historicalWaterSaveJob = coroutineScope.launch {
-                    delay(250L)
+            onAddPreparedFood = { day ->
+                beginHistoricalFoodEdit(day.date)
+                openPreparedFoodScreen(date = day.date)
+            },
+
+            onEditPreparedFoodEntry = { day, entry ->
+                beginHistoricalFoodEdit(day.date)
+                openPreparedFoodScreen(date = day.date, entry = entry)
+            },
+
+            onLogDrinkDefinition = { day, definition, amount ->
+                coroutineScope.launch {
                     isUpdatingHistoryDay = true
-
                     try {
-                        val existingRecord =
-                            dailyRecordDao.getRecordByDate(day.date)
-                                ?: if (day.date == todayDate) {
-                                    buildCurrentDailyRecord()
-                                } else {
-                                    buildEmptyHistoricalDailyRecord(day.date)
-                                }
-
-                        dailyRecordDao.saveRecord(
-                            existingRecord.copy(
-                                plainReusableBottleCount = counts.plainReusable,
-                                mioReusableBottleCount = counts.mioReusable,
-                                plainDisposableBottleCount = counts.plainDisposable,
-                                mioDisposableBottleCount = counts.mioDisposable,
-                                updatedAt = System.currentTimeMillis()
-                            )
+                        val selectedDate = LocalDate.parse(day.date)
+                        val consumedAt = ZonedDateTime.of(
+                            selectedDate,
+                            LocalTime.now(),
+                            ZoneId.systemDefault()
+                        ).toInstant().toEpochMilli()
+                        val entry = definition.toDrinkEntry(
+                            date = day.date,
+                            consumedAt = consumedAt,
+                            amountFlOz = amount
                         )
-
-                        if (day.date == todayDate) {
-                            dayReloadToken++
+                        drinkDao.insertEntry(entry)
+                        if (entry.countsAsFood) {
+                            synchronizeFoodRecordedForDate(day.date)
                         }
-
+                        if (day.date == todayDate) {
+                            drinkEntriesToday = drinkDao.getEntriesForDate(todayDate)
+                        }
                         historyViewModel.refresh()
-                        if (selectedMainTab == AppNavigationViewModel.STATS_TAB) {
+                        statsViewModel.refresh()
+                    } catch (_: Exception) {
+                        snackbarHostState.showSnackbar(
+                            "Could not log a drink for that day."
+                        )
+                    } finally {
+                        isUpdatingHistoryDay = false
+                    }
+                }
+            },
+
+            onLogCustomDrink = { day, original, saveShortcut ->
+                coroutineScope.launch {
+                    isUpdatingHistoryDay = true
+                    try {
+                        val originalTime = Instant.ofEpochMilli(original.consumedAt)
+                            .atZone(ZoneId.systemDefault())
+                            .toLocalTime()
+                        val timestamp = ZonedDateTime.of(
+                            LocalDate.parse(day.date),
+                            originalTime,
+                            ZoneId.systemDefault()
+                        ).toInstant().toEpochMilli()
+                        var entry = original.copy(
+                            date = day.date,
+                            consumedAt = timestamp
+                        )
+                        if (saveShortcut) {
+                            val definition = DrinkDefinition(
+                                name = entry.drinkNameSnapshot,
+                                category = entry.categorySnapshot,
+                                defaultAmountFlOz = entry.amountFlOz,
+                                caloriesPerDefaultAmount = entry.calories,
+                                carbohydrateGramsPerDefaultAmount = entry.carbohydrateGrams,
+                                sugarGramsPerDefaultAmount = entry.sugarGrams,
+                                proteinGramsPerDefaultAmount = entry.proteinGrams,
+                                caffeineMilligramsPerDefaultAmount = entry.caffeineMilligrams,
+                                countsAsWater = entry.countsAsWater,
+                                countsAsFood = entry.countsAsFood,
+                                notes = entry.notes,
+                                isFavorite = true
+                            )
+                            val definitionId = drinkDao.insertDefinition(definition)
+                            entry = entry.copy(definitionId = definitionId)
+                            drinkDefinitions = drinkDao.getAllDefinitions()
+                        }
+                        drinkDao.insertEntry(entry)
+                        if (entry.countsAsFood) {
+                            synchronizeFoodRecordedForDate(day.date)
+                        }
+                        if (day.date == todayDate) {
+                            drinkEntriesToday = drinkDao.getEntriesForDate(todayDate)
+                        }
+                        historyViewModel.refresh()
+                        statsViewModel.refresh()
+                    } catch (_: Exception) {
+                        snackbarHostState.showSnackbar(
+                            "Could not log that drink."
+                        )
+                    } finally {
+                        isUpdatingHistoryDay = false
+                    }
+                }
+            },
+
+            onUpdateDrinkEntry = { day, entry ->
+                coroutineScope.launch {
+                    isUpdatingHistoryDay = true
+                    try {
+                        drinkDao.updateEntry(entry)
+                        synchronizeFoodRecordedForDate(day.date)
+                        if (entry.date != day.date) {
+                            synchronizeFoodRecordedForDate(entry.date)
+                        }
+                        drinkEntriesToday = drinkDao.getEntriesForDate(todayDate)
+                        historyViewModel.refresh()
+                        statsViewModel.refresh()
+                        snackbarHostState.showSnackbar("Drink updated.")
+                    } catch (_: Exception) {
+                        snackbarHostState.showSnackbar(
+                            "Could not update that drink."
+                        )
+                    } finally {
+                        isUpdatingHistoryDay = false
+                    }
+                }
+            },
+
+            onDeleteDrinkEntry = { _, entry ->
+                coroutineScope.launch {
+                    isUpdatingHistoryDay = true
+                    try {
+                        drinkDao.deleteEntry(entry)
+                        synchronizeFoodRecordedForDate(entry.date)
+                        drinkEntriesToday = drinkDao.getEntriesForDate(todayDate)
+                        historyViewModel.refresh()
+                        statsViewModel.refresh()
+                        snackbarHostState.showUndoableDelete(
+                            message = "Drink deleted.",
+                            restoredMessage = "Drink restored."
+                        ) {
+                            drinkDao.insertEntry(entry.copy(id = 0L))
+                            synchronizeFoodRecordedForDate(entry.date)
+                            drinkEntriesToday = drinkDao.getEntriesForDate(todayDate)
+                            historyViewModel.refresh()
                             statsViewModel.refresh()
                         }
-                    } catch (exception: Exception) {
+                    } catch (_: Exception) {
                         snackbarHostState.showSnackbar(
-                            "Could not update water for that day."
+                            "Could not delete that drink."
+                        )
+                    } finally {
+                        isUpdatingHistoryDay = false
+                    }
+                }
+            },
+
+            onSaveDrinkDefinition = ::saveDrinkDefinition,
+
+            onClearDrinks = { day ->
+                coroutineScope.launch {
+                    isUpdatingHistoryDay = true
+                    val removed = day.drinkEntries
+                    val legacyRecord = day.record
+                    try {
+                        drinkDao.deleteEntriesForDate(day.date)
+                        day.record?.let { record ->
+                            dailyRecordDao.saveRecord(
+                                record.copy(
+                                    plainReusableBottleCount = 0,
+                                    mioReusableBottleCount = 0,
+                                    plainDisposableBottleCount = 0,
+                                    mioDisposableBottleCount = 0,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                            )
+                        }
+                        if (day.date == todayDate) {
+                            drinkEntriesToday = emptyList()
+                            plainReusableBottleCount = 0
+                            mioReusableBottleCount = 0
+                            plainDisposableBottleCount = 0
+                            mioDisposableBottleCount = 0
+                        }
+                        synchronizeFoodRecordedForDate(day.date)
+                        historyViewModel.refresh()
+                        statsViewModel.refresh()
+                        snackbarHostState.showUndoableDelete(
+                            message = "Drinks cleared.",
+                            restoredMessage = "Drinks restored."
+                        ) {
+                            removed.forEach { drinkDao.insertEntry(it.copy(id = 0L)) }
+                            legacyRecord?.let { original ->
+                                val latest = dailyRecordDao.getRecordByDate(day.date)
+                                    ?: original
+                                dailyRecordDao.saveRecord(
+                                    latest.copy(
+                                        plainReusableBottleCount = original.plainReusableBottleCount,
+                                        mioReusableBottleCount = original.mioReusableBottleCount,
+                                        plainDisposableBottleCount = original.plainDisposableBottleCount,
+                                        mioDisposableBottleCount = original.mioDisposableBottleCount,
+                                        updatedAt = System.currentTimeMillis()
+                                    )
+                                )
+                                if (day.date == todayDate) {
+                                    plainReusableBottleCount = original.plainReusableBottleCount
+                                    mioReusableBottleCount = original.mioReusableBottleCount
+                                    plainDisposableBottleCount = original.plainDisposableBottleCount
+                                    mioDisposableBottleCount = original.mioDisposableBottleCount
+                                }
+                            }
+                            synchronizeFoodRecordedForDate(day.date)
+                            drinkEntriesToday = drinkDao.getEntriesForDate(todayDate)
+                            historyViewModel.refresh()
+                            statsViewModel.refresh()
+                        }
+                    } catch (_: Exception) {
+                        snackbarHostState.showSnackbar(
+                            "Could not clear drinks for that day."
                         )
                     } finally {
                         isUpdatingHistoryDay = false
@@ -7238,6 +7871,7 @@ fun DailyRebuildApp(
                             careVisits = careVisitDao.getAllVisits()
                             careAppointments = careAppointmentDao.getAllAppointments()
                             lifeMaintenanceLogs = lifeMaintenanceDao.getAllLogs()
+                            refreshPreparedFoodState()
 
                             if (day.date == todayDate) {
                                 dayReloadToken++
@@ -7257,6 +7891,27 @@ fun DailyRebuildApp(
                 if (!isDeletingDailyHistoryDay) {
                     showDailyHistoryDialog = false
                     initialDailyHistoryDate = null
+                }
+            }
+        )
+    }
+
+    if (showPreparedFoodDialog) {
+        PreparedFoodDialog(
+            date = preparedFoodDialogDate ?: todayDate,
+            preparedFoods = (savedProducts + recentPreparedProducts)
+                .distinctBy(FoodProduct::id),
+            leftovers = preparedFoodLeftovers,
+            initialEntry = preparedFoodEntryBeingEdited,
+            initialProduct = preparedFoodProductBeingEdited,
+            isWorking = isSavingPreparedFood,
+            onSave = ::savePreparedFood,
+            onLogLeftover = ::logPreparedFoodLeftover,
+            onDeleteLeftover = ::deletePreparedFoodLeftover,
+            onDismiss = {
+                if (!isSavingPreparedFood) {
+                    closePreparedFoodDialog()
+                    if (historicalFoodLogDate != null) returnToHistoricalDay()
                 }
             }
         )

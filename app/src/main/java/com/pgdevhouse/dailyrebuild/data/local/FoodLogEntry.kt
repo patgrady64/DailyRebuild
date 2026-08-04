@@ -87,6 +87,19 @@ data class FoodLogEntry(
 
     val sodiumMilligrams: Double = 0.0,
 
+    /* Historical prepared-food context is snapshotted with nutrition. */
+    val sourceTypeSnapshot: String = FoodSourceType.PACKAGED,
+
+    val sourceNameSnapshot: String = "",
+
+    val nutritionConfidenceSnapshot: String = NutritionConfidence.EXACT,
+
+    val calorieEstimateLow: Double? = null,
+
+    val calorieEstimateHigh: Double? = null,
+
+    val nutritionNotes: String = "",
+
     val createdAt: Long =
         System.currentTimeMillis()
 )
