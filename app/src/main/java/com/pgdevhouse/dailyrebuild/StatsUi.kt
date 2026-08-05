@@ -65,6 +65,9 @@ fun StatsScreen(
     onOpenHistory: () -> Unit,
     onOpenHistoryDate: (String) -> Unit,
     onOpenSearch: (() -> Unit)? = null,
+    weeklyReportPeriod: WeeklyReportPeriod = WeeklyReportPeriod.previousCompletedWeek(),
+    isSavingWeeklyReport: Boolean = false,
+    onSaveWeeklyReport: () -> Unit = {},
     dataQualityWarnings: List<DataQualityWarning> = emptyList(),
     onReviewDataQualityWarning: (DataQualityWarning) -> Unit = {},
     onKeepDataQualityWarning: (DataQualityWarning) -> Unit = {},
@@ -98,6 +101,41 @@ fun StatsScreen(
             onOpenHistory = onOpenHistory,
             onOpenSearch = onOpenSearch
         )
+
+        RebuildSectionCard(
+            title = "Weekly review report",
+            subtitle = "Previous completed week: ${weeklyReportPeriod.start} through ${weeklyReportPeriod.end}",
+            accentColor = RebuildBlue
+        ) {
+            Text(
+                text = "Creates a private text report you can upload for help planning the next week and improving Daily Rebuild.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Button(
+                onClick = onSaveWeeklyReport,
+                enabled = !isSavingWeeklyReport,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                if (isSavingWeeklyReport) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .width(20.dp)
+                            .height(20.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text("Creating Report…")
+                } else {
+                    Text("Save Report")
+                }
+            }
+            Text(
+                text = "Includes weekly comparisons, daily details, food and drink logs, tracking gaps, recovery, pain, activity, self-care, relevant health measurements, and next-week planning context. Addresses and phone numbers are excluded.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
 
         DataQualitySummaryCard(
             warnings = dataQualityWarnings,

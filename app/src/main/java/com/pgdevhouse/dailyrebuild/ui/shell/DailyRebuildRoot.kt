@@ -317,6 +317,45 @@ fun DailyRebuildApp(
         mutableIntStateOf(0)
     }
 
+    val weeklyInsightsReportGenerator = remember(repositories) {
+        WeeklyInsightsReportGenerator(repositories)
+    }
+
+    var isSavingWeeklyReport by remember {
+        mutableStateOf(false)
+    }
+
+    val saveWeeklyReportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                isSavingWeeklyReport = true
+                runCatching {
+                    val report = weeklyInsightsReportGenerator.generate(
+                        preferences = appPreferences,
+                        visibleDataQualityWarnings = dataQualityWarnings
+                    )
+                    val output = context.contentResolver.openOutputStream(uri)
+                        ?: error("Android could not open the selected file.")
+                    output.bufferedWriter(Charsets.UTF_8).use { writer ->
+                        writer.write(report.content)
+                    }
+                    report
+                }.onSuccess { report ->
+                    snackbarHostState.showSnackbar(
+                        "Weekly report saved for ${report.period.start} through ${report.period.end}."
+                    )
+                }.onFailure {
+                    snackbarHostState.showSnackbar(
+                        "Could not save the weekly report. Please choose another location and try again."
+                    )
+                }
+                isSavingWeeklyReport = false
+            }
+        }
+    }
+
     var notificationPermissionGranted by remember {
         mutableStateOf(
             Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -5757,6 +5796,14 @@ fun DailyRebuildApp(
                     onOpenHistory = { openDailyHistory() },
                     onOpenHistoryDate = { date -> openDailyHistory(date) },
                     onOpenSearch = ::openGlobalSearch,
+                    weeklyReportPeriod = WeeklyReportPeriod.previousCompletedWeek(),
+                    isSavingWeeklyReport = isSavingWeeklyReport,
+                    onSaveWeeklyReport = {
+                        val reportPeriod = WeeklyReportPeriod.previousCompletedWeek()
+                        saveWeeklyReportLauncher.launch(
+                            "DailyRebuild_Weekly_Report_${reportPeriod.start}_to_${reportPeriod.end}.txt"
+                        )
+                    },
                     dataQualityWarnings = dataQualityWarnings,
                     onReviewDataQualityWarning = ::reviewDataQualityWarning,
                     onKeepDataQualityWarning = ::keepDataQualityWarning,

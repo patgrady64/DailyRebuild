@@ -1,0 +1,47 @@
+DAILY REBUILD — WEEKLY INSIGHTS REPORT UPDATE
+==============================================
+
+WHAT CHANGED
+------------
+- Adds a Weekly review report card near the top of Insights.
+- Save Report always exports the most recently completed Monday-through-Sunday week.
+- The visible Insights range does not change the exported week.
+- Saves a readable .txt file through Android's normal document picker.
+- Includes the prior week for comparison and the immediately following week for planning.
+- Includes profile goals and constraints, app configuration, tracking coverage, anchors,
+  nutrition, takeout confidence, drinks, steps, pain, mobility, recovery meetings, IOP,
+  health measurements, migraine/aura events, medication check-ins, showers, maintenance,
+  appointments, care visits, journal text, detailed daily logs, pantry Needs, leftovers,
+  data-quality warnings, and app-use signals.
+- Excludes street addresses and phone numbers.
+- Adds tests for Monday-through-Sunday date selection.
+
+DATABASE
+--------
+No Room schema change is required. Keep the database at version 21 and retain all
+existing migrations.
+
+FILES ADDED
+-----------
+app/src/main/java/com/pgdevhouse/dailyrebuild/WeeklyInsightsReport.kt
+app/src/test/java/com/pgdevhouse/dailyrebuild/WeeklyReportPeriodTest.kt
+WEEKLY_INSIGHTS_REPORT_TEST_CHECKLIST.txt
+WEEKLY_INSIGHTS_REPORT_UPDATE_NOTES.txt
+
+FILES UPDATED
+-------------
+app/src/main/java/com/pgdevhouse/dailyrebuild/StatsUi.kt
+app/src/main/java/com/pgdevhouse/dailyrebuild/ui/shell/DailyRebuildRoot.kt
+
+VALIDATION COMPLETED HERE
+-------------------------
+- Weekly report generator compiled against isolated Kotlin stubs.
+- Empty-data report generation completed without an exception.
+- August 5, 2026 correctly selected July 27 through August 2, 2026.
+- ZIP integrity checks passed after packaging.
+
+FULL BUILD LIMITATION
+---------------------
+A complete Android Gradle build could not run in this environment because Gradle 9.5
+was not cached and network access was unavailable. Use the included test checklist for
+the first Android Studio build and installation.

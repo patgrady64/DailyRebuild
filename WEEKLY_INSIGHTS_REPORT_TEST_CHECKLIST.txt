@@ -1,0 +1,54 @@
+DAILY REBUILD — WEEKLY INSIGHTS REPORT TEST CHECKLIST
+=====================================================
+
+BUILD AND DATA SAFETY
+---------------------
+[ ] Open the project in Android Studio.
+[ ] Let Gradle sync finish.
+[ ] Build > Make Project succeeds.
+[ ] Install over the existing app. Do not uninstall or clear app storage.
+[ ] Existing food, drink, activity, pain, mobility, meetings, IOP, health,
+    appointments, visits, journal, pantry, and leftover data still load.
+[ ] No Room database migration is requested. This update does not change the schema.
+
+INSIGHTS BUTTON
+---------------
+[ ] Open Insights.
+[ ] A Weekly review report card appears near the top.
+[ ] The displayed range is the previous fully completed Monday through Sunday.
+[ ] Changing the visible Insights range does not change the report week.
+[ ] Save Report opens Android's file picker with a useful .txt filename.
+[ ] Cancelling the picker changes nothing and does not show an error.
+
+SAVED REPORT
+------------
+[ ] Save the report to Downloads or another known folder.
+[ ] A success message appears after the file is written.
+[ ] The file opens as readable plain text.
+[ ] The report contains the expected completed-week and comparison-week dates.
+[ ] Every Monday-through-Sunday date appears in Day-by-day summary.
+[ ] Missing information says not logged/not recorded rather than inventing data.
+[ ] Food and drink entries match History for the report week.
+[ ] Estimated takeout nutrition is labeled Exact/Good estimate/Rough estimate/Unknown.
+[ ] Water and other drinks are separated.
+[ ] Steps, pain, mobility, meetings, IOP, showers, migraines, and maintenance match History.
+[ ] Daily journal text is included when present.
+[ ] Relevant health measurements and care visits are included.
+[ ] Next-week appointments, IOP schedule, pantry Needs, and available leftovers appear.
+[ ] Street addresses and phone numbers do not appear.
+[ ] Data-quality warnings are included when relevant.
+
+EDGE CASES
+----------
+[ ] A week with no records still creates a valid report.
+[ ] A food logged with unknown nutrition is shown without treating it as a true zero-calorie day.
+[ ] A day with a 0-step Health Connect snapshot is shown as 0 steps.
+[ ] On Monday, the report still uses the week that ended the day before.
+[ ] Saving over an existing filename follows Android's normal replace/rename behavior.
+[ ] A failed save leaves all Daily Rebuild data unchanged.
+
+UPLOAD REVIEW
+-------------
+[ ] Upload the saved .txt file to ChatGPT.
+[ ] Confirm the report provides enough context to choose one or two realistic changes
+    for the next week and identify any app workflow that needs improvement.
