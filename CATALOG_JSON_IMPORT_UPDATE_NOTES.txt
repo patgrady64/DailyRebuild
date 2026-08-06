@@ -1,0 +1,47 @@
+DAILY REBUILD CATALOG JSON IMPORT
+=================================
+
+What was added
+--------------
+- Data & Backup now includes a Food Catalog Import section.
+- The Android app accepts schema-version-1 JSON created by
+  DailyRebuildCatalogAssistant.
+- Selecting a JSON file opens a preview showing products, active products,
+  roles, pantry items, source workbook count, warnings, and blocking errors.
+- Import is atomic: validation and every database write must succeed or no
+  catalog changes are committed.
+
+Database version
+----------------
+Room database version increased from 21 to 22.
+
+New tables
+----------
+- catalog_products
+- catalog_product_roles
+- catalog_pantry_items
+- catalog_import_sources
+
+Separation of concerns
+----------------------
+- food_products remains the existing food-logging library.
+- catalog_products stores exact purchasable products for future meal planning.
+- catalog_product_roles stores reusable capabilities such as Sandwich Filling.
+- catalog_pantry_items stores exact on-hand quantities by Product ID.
+- catalog_import_sources stores source workbook hashes and import timestamps.
+
+Update behavior
+---------------
+- Products are upserted by stable Product ID. Existing Product IDs omitted from
+  the newest complete bundle are retained but deactivated.
+- Product roles, exact pantry items, and source fingerprints are synchronized
+  to the selected JSON bundle.
+- Daily records, food logs, saved meals, and other user history are untouched.
+- Product IDs omitted from a later JSON file are retained but deactivated so
+  future history references remain safe. Keep products in the spreadsheet and
+  set Active? to No when you intentionally retire them.
+
+Backup behavior
+---------------
+The four new catalog tables are included in Daily Rebuild backups. Backups from
+version 21 or earlier restore with empty catalog tables and remain supported.

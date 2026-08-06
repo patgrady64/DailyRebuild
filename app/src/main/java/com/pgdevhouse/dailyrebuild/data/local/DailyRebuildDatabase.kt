@@ -36,8 +36,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DrinkDefinition::class,
         DrinkEntry::class,
         PreparedFoodLeftover::class,
+        CatalogProduct::class,
+        CatalogProductRole::class,
+        CatalogPantryItem::class,
+        CatalogImportSource::class,
     ],
-    version = 21,
+    version = 22,
     exportSchema = false
 )
 abstract class DailyRebuildDatabase :
@@ -239,7 +243,8 @@ abstract class DailyRebuildDatabase :
                                 MIGRATION_17_18,
                                 MIGRATION_18_19,
                                 MIGRATION_19_20,
-                                MIGRATION_20_21
+                                MIGRATION_20_21,
+                                MIGRATION_21_22
                             )
                             .build()
 
@@ -376,4 +381,6 @@ abstract class DailyRebuildDatabase :
     abstract fun drinkDao(): DrinkDao
 
     abstract fun preparedFoodLeftoverDao(): PreparedFoodLeftoverDao
+
+    abstract fun catalogImportDao(): CatalogImportDao
 }

@@ -1,0 +1,19 @@
+Daily Rebuild — Data & Backup Scroll Fix
+Date: August 6, 2026
+
+Problem
+- The Data & Backup feature was hosted inside the fixed-height RebuildFeaturePage content area.
+- BackupRestoreFeature used a non-scrollable Column with fillMaxWidth().
+- Content below the visible height, including Food Catalog Import, was clipped and unreachable on smaller screens.
+
+Fix
+- BackupRestoreFeature now fills the available content area and applies verticalScroll(rememberScrollState()) to its root Column.
+- Backup, Food Catalog Import, backup coverage, and emergency restore sections now participate in one continuous scroll container.
+- Dialogs retain their own independent scrolling.
+
+Test
+1. Open More.
+2. Open Data & Backup.
+3. Swipe upward on the page.
+4. Confirm Food Catalog Import is reachable and Select Catalog JSON can be tapped.
+5. Continue scrolling and confirm backup coverage and Emergency Restore Point remain reachable when present.

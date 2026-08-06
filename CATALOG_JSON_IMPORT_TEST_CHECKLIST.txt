@@ -1,0 +1,40 @@
+CATALOG JSON IMPORT TEST CHECKLIST
+==================================
+
+Build and migration
+-------------------
+[ ] Open the project in Android Studio and allow Gradle sync to finish.
+[ ] Build the debug app.
+[ ] Install over a database-version-21 build and confirm migration succeeds.
+[ ] Open Data & Backup and confirm Food Catalog Import appears.
+
+Successful import
+-----------------
+[ ] Export a JSON file from DailyRebuildCatalogAssistant using all completed XLSX files.
+[ ] Tap Select Catalog JSON and choose that file.
+[ ] Confirm the preview counts match the desktop exporter.
+[ ] Import and confirm the success message.
+[ ] Leave and reopen Data & Backup; confirm the imported counts and time remain.
+[ ] Import the same JSON again; confirm no duplicate products or roles are created.
+
+Update behavior
+---------------
+[ ] Change a product price in XLSX, regenerate JSON, and import again.
+[ ] Confirm the Product ID remains the same and the database value is updated.
+[ ] Set Active? to No, regenerate, and confirm the active product count decreases.
+[ ] Change pantry quantity, regenerate, and confirm the pantry count/import succeeds.
+
+Validation and rollback
+-----------------------
+[ ] Choose a non-JSON file and confirm a readable error appears.
+[ ] Change schemaVersion to 99 and confirm import is blocked.
+[ ] Add a role for a missing Product ID and confirm import is blocked.
+[ ] Duplicate a Product ID using different capitalization and confirm import is blocked.
+[ ] Force a blocking error after a successful import and confirm previous catalog counts remain.
+[ ] Confirm warnings do not block import but appear in the preview.
+
+Backup and restore
+------------------
+[ ] Create a Daily Rebuild backup after importing the catalog.
+[ ] Clear/reinstall or use a test device, restore the backup, and confirm catalog counts return.
+[ ] Restore an older version-21 backup and confirm the app opens with an empty catalog.

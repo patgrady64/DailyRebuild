@@ -504,6 +504,8 @@ class DailyRebuildBackupManager(
                     sourceDatabaseVersion < DRINK_DATABASE_VERSION -> JSONArray()
                 table == "prepared_food_leftovers" &&
                     sourceDatabaseVersion < PREPARED_FOOD_DATABASE_VERSION -> JSONArray()
+                table in CATALOG_TABLES &&
+                    sourceDatabaseVersion < CATALOG_DATABASE_VERSION -> JSONArray()
                 else -> error("The backup is incomplete: $table is missing.")
             }
 
@@ -1161,7 +1163,7 @@ class DailyRebuildBackupManager(
     )
 
     companion object {
-        const val DATABASE_VERSION = 21
+        const val DATABASE_VERSION = 22
         private const val MIN_SUPPORTED_DATABASE_VERSION = 14
         private const val LIFE_MAINTENANCE_DATABASE_VERSION = 15
         private const val IOP_GROUP_DATABASE_VERSION = 17
@@ -1169,6 +1171,7 @@ class DailyRebuildBackupManager(
         private const val CONDIMENT_DATABASE_VERSION = 19
         private const val DRINK_DATABASE_VERSION = 20
         private const val PREPARED_FOOD_DATABASE_VERSION = 21
+        private const val CATALOG_DATABASE_VERSION = 22
         const val FORMAT_VERSION = 2
         private const val MIN_SUPPORTED_FORMAT_VERSION = 1
         private const val PORTABLE_PREFERENCES_FORMAT_VERSION = 2
@@ -1186,6 +1189,13 @@ class DailyRebuildBackupManager(
         private const val MAX_RECENT_SEARCH_LENGTH = 200
         private const val MAX_IGNORED_SIGNATURES = 500
         private const val MAX_IGNORED_SIGNATURE_LENGTH = 500
+
+        private val CATALOG_TABLES = setOf(
+            "catalog_products",
+            "catalog_import_sources",
+            "catalog_product_roles",
+            "catalog_pantry_items"
+        )
 
         private val VALID_STATS_RANGES = setOf(
             "LAST_7_DAYS",
@@ -1205,6 +1215,10 @@ class DailyRebuildBackupManager(
         val INSERT_ORDER = listOf(
             "daily_records",
             "food_products",
+            "catalog_products",
+            "catalog_import_sources",
+            "catalog_product_roles",
+            "catalog_pantry_items",
             "saved_meals",
             "saved_meal_ingredients",
             "food_log_entries",

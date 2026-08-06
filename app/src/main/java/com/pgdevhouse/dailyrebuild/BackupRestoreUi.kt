@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -220,7 +221,9 @@ fun BackupRestoreFeature(
     }
 
     Column(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         RebuildSectionCard(
@@ -288,6 +291,8 @@ fun BackupRestoreFeature(
                 )
             }
         }
+
+        CatalogImportSection(database = database)
 
         BackupCoverageCard(lastBackupTime)
 
@@ -442,7 +447,7 @@ private fun BackupCoverageCard(lastBackupTime: Long) {
     RebuildInsetPanel {
         Text("Included", fontWeight = FontWeight.SemiBold)
         Text(
-            "Daily records, foods, saved meals, beverage library, drink history, activity snapshots, mobility, pain, measurements, medications, showers, migraines, meetings, IOP schedules and missed-attendance reasons, appointments, care visits, pantry essentials, and Life Maintenance."
+            "Daily records, foods, saved meals, imported meal-planning catalog products and roles, exact catalog pantry quantities, beverage library, drink history, activity snapshots, mobility, pain, measurements, medications, showers, migraines, meetings, IOP schedules and missed-attendance reasons, appointments, care visits, pantry essentials, and Life Maintenance."
         )
         Text(
             "Today and Quick Log layout, hidden sections, Insights order and range, preferred units, notification master/type switches, reminder timing and snooze choices, recent searches, and exact-value warning exceptions."
